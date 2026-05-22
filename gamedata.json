@@ -1,0 +1,34 @@
+{
+  "CCSBot::EquipBestWeapon": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B F9 84 D2",
+      "linux": ""
+    },
+    "comment": "AI: bot picks and equips its best weapon."
+  },
+  "CCSBot::EquipPistol": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B D9 84 D2",
+      "linux": ""
+    },
+    "comment": "AI: bot switches to its pistol secondary."
+  },
+  "CCSPlayer_WeaponServices::SelectItem": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 41 8B E8 48 8B DA 48 8B F1",
+      "linux": ""
+    },
+    "comment": "Funnel for any weapon switch (AI, pickup, buy, ammo-out, slotN)."
+  },
+  "CCSPlayer_WeaponServices::GetSlot": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 54 41 56 41 57 48 83 EC ? 45 33 E4 45 8B F0",
+      "linux": ""
+    },
+    "comment": "Returns the weapon in engine slot N (0=primary, 1=pistol, 2=knife)."
+  }
+}

@@ -1,0 +1,5 @@
+"Metamod Plugin"
+{
+	"alias"	"BotWeaponLock"
+	"file"	"addons/BotWeaponLock/bin/win64/BotWeaponLock"
+}

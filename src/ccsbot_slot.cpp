@@ -1,0 +1,96 @@
+// CCSBot* -> player slot via pawn (+0x18) -> m_hController (+0xB80).
+
+#include "ccsbot_slot.h"
+
+#include <cstdint>
+#include <mutex>
+#include <unordered_set>
+
+#include <tier0/dbg.h>
+
+namespace BotWeaponLock
+{
+    // Compile-time switch to turn the once-per-bot diagnostic scan back on.
+    static constexpr bool kEnableHandleScan = false;
+
+    static constexpr int kOffsetPawnInBot               = 0x18;
+    static constexpr int kOffsetEntityIdentityInPawn    = 0x10;
+    static constexpr int kOffsetEHandleInEntityIdentity = 0x10;
+    static constexpr int kOffsetControllerHandleInPawn  = 0xB80;
+    static constexpr int kOffsetOriginalControllerInPawn = 0xB84;
+
+    static std::unordered_set<void *> g_scanned;
+    static std::mutex                 g_scannedMu;
+
+    static int EntIndexFromHandle(uint32_t h)
+    {
+        if (h == 0u || h == 0xFFFFFFFFu) return -1;
+        return static_cast<int>(h & 0x7FFFu);
+    }
+
+    static void ScanPawnForControllerHandle(void *pawn)
+    {
+        if (!pawn) return;
+        Msg("[BWL][scan] pawn=%p candidate handles idx 1..64, 0x008..0x1000:\n", pawn);
+        for (int off = 0x8; off < 0x1000; off += 4)
+        {
+            uint32_t v = *reinterpret_cast<uint32_t *>(
+                reinterpret_cast<char *>(pawn) + off);
+            if (v == 0u || v == 0xFFFFFFFFu) continue;
+            int      idx    = static_cast<int>(v & 0x7FFFu);
+            uint32_t serial = (v >> 15);
+            if (idx >= 1 && idx <= 64)
+                Msg("[BWL][scan]   +0x%03X = 0x%08X  idx=%d  serial=%u\n",
+                    off, v, idx, serial);
+        }
+    }
+
+    SlotResolution ResolveSlot(void *bot)
+    {
+        SlotResolution out{nullptr, -1, -1};
+        if (!bot) return out;
+
+        void *pawn = *reinterpret_cast<void **>(
+            reinterpret_cast<char *>(bot) + kOffsetPawnInBot);
+        if (!pawn) return out;
+        out.pawn = pawn;
+
+        void *identity = *reinterpret_cast<void **>(
+            reinterpret_cast<char *>(pawn) + kOffsetEntityIdentityInPawn);
+        if (identity)
+        {
+            uint32_t handle = *reinterpret_cast<uint32_t *>(
+                reinterpret_cast<char *>(identity) + kOffsetEHandleInEntityIdentity);
+            int idx = EntIndexFromHandle(handle);
+            if (idx > 0) out.pawnEntIndex = idx;
+        }
+
+        // Read m_hController; fall back to m_hOriginalController if the
+        // primary handle isn't populated for this pawn yet.
+        uint32_t ctrlHandle = *reinterpret_cast<uint32_t *>(
+            reinterpret_cast<char *>(pawn) + kOffsetControllerHandleInPawn);
+        int ctrlIdx = EntIndexFromHandle(ctrlHandle);
+        if (ctrlIdx < 1 || ctrlIdx > 64)
+        {
+            uint32_t origHandle = *reinterpret_cast<uint32_t *>(
+                reinterpret_cast<char *>(pawn) + kOffsetOriginalControllerInPawn);
+            ctrlIdx = EntIndexFromHandle(origHandle);
+        }
+        if (ctrlIdx >= 1 && ctrlIdx <= 64)
+            out.slot = ctrlIdx - 1;
+
+        if (kEnableHandleScan)
+        {
+            std::lock_guard<std::mutex> lk(g_scannedMu);
+            if (g_scanned.insert(bot).second)
+                ScanPawnForControllerHandle(pawn);
+        }
+
+        return out;
+    }
+
+    int CCSBotToSlot(void *bot)
+    {
+        return ResolveSlot(bot).slot;
+    }
+}
