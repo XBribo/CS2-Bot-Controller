@@ -31,8 +31,8 @@ public:
     const char *GetName() override { return "BotWeaponLock"; }
     const char *GetDescription() override { return "Lock a bot's weapon slot, blocking AI weapon switches."; }
     const char *GetURL() override { return ""; }
-    const char *GetLicense() override { return "MIT"; }
-    const char *GetVersion() override { return "0.1.2"; }
+    const char *GetLicense() override { return "GPL3"; }
+    const char *GetVersion() override { return "0.1.3"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BWL"; }
 };
