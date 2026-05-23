@@ -18,4 +18,8 @@ namespace BotWeaponLock
 
     // Full diagnostic version returning intermediate values.
     SlotResolution ResolveSlot(void *bot);
+
+    // pawn->m_hController only, no m_hOriginalController fallback (used to
+    // detect human takeover).
+    int ControllerSlotForPawn(void *pawn);
 }

@@ -93,4 +93,15 @@ namespace BotWeaponLock
     {
         return ResolveSlot(bot).slot;
     }
+
+    // pawn+0xB80 m_hController -> entindex -> slot.
+    int ControllerSlotForPawn(void *pawn)
+    {
+        if (!pawn) return -1;
+        uint32_t h = *reinterpret_cast<uint32_t *>(
+            reinterpret_cast<char *>(pawn) + kOffsetControllerHandleInPawn);
+        int idx = EntIndexFromHandle(h);
+        if (idx < 1 || idx > 64) return -1;
+        return idx - 1;
+    }
 }

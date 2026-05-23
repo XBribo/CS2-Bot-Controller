@@ -47,9 +47,11 @@ namespace BotWeaponLock
         static std::string       g_status              = "not_attempted";
         static bool              g_installed           = false;
 
-        // WeaponServices* -> player slot. Populated by the bot-level hooks
-        // (they own the slot info); consumed by HookedSelectItem.
-        static std::unordered_map<void *, int> g_wsToSlot;
+        // WeaponServices* -> (bot slot, pawn). slot is set by the bot-level
+        // hooks (they own the slot info); pawn lets HookedSelectItem re-check
+        // the current controller and skip the block when a human took over.
+        struct WsBinding { int slot; void *pawn; };
+        static std::unordered_map<void *, WsBinding> g_wsToBinding;
         // Inverse: slot -> WeaponServices*. Lets dispatch find the ws for a
         // given bot and invoke a forced switch.
         static void                            *g_slotToWs[64] = {nullptr};
@@ -81,16 +83,16 @@ namespace BotWeaponLock
                 reinterpret_cast<char *>(pawn) + kOffsetWeaponServicesInPawn);
             if (!ws) return;
             std::lock_guard<std::mutex> lk(g_wsToSlotMu);
-            g_wsToSlot[ws]    = slot;
+            g_wsToBinding[ws] = {slot, pawn};
             g_slotToWs[slot]  = ws;
         }
 
-        static int LookupSlotForWs(void *ws)
+        static WsBinding LookupBindingForWs(void *ws)
         {
-            if (!ws) return -1;
+            if (!ws) return {-1, nullptr};
             std::lock_guard<std::mutex> lk(g_wsToSlotMu);
-            auto it = g_wsToSlot.find(ws);
-            return it == g_wsToSlot.end() ? -1 : it->second;
+            auto it = g_wsToBinding.find(ws);
+            return it == g_wsToBinding.end() ? WsBinding{-1, nullptr} : it->second;
         }
 
         // LockTarget -> engine weapon-slot index (WeaponServices::GetSlot N).
@@ -150,11 +152,17 @@ namespace BotWeaponLock
 
         static char __fastcall HookedSelectItem(void *ws, void *weapon, int flag)
         {
-            int slot = LookupSlotForWs(ws);
-            if (slot < 0)
+            WsBinding bind = LookupBindingForWs(ws);
+            if (bind.slot < 0)
                 return g_origSelectItem(ws, weapon, flag);
 
-            LockTarget lt = LockState::Get(slot);
+            // Human took over this pawn -> current m_hController != bot slot
+            // we cached; don't block player's weapon switches.
+            int curSlot = ControllerSlotForPawn(bind.pawn);
+            if (curSlot != bind.slot)
+                return g_origSelectItem(ws, weapon, flag);
+
+            LockTarget lt = LockState::Get(bind.slot);
             if (lt == LockTarget::None)
                 return g_origSelectItem(ws, weapon, flag);
 
@@ -172,6 +180,7 @@ namespace BotWeaponLock
                 return g_origSelectItem(ws, weapon, flag);
 
             // Switch is to something else -> block.
+            int slot = bind.slot;
             if (slot >= 0 && slot < 64 && g_lastBlockedWeapon[slot] != weapon)
             {
                 g_lastBlockedWeapon[slot] = weapon;
@@ -319,7 +328,7 @@ namespace BotWeaponLock
             g_status = "not_attempted";
             {
                 std::lock_guard<std::mutex> lk(g_wsToSlotMu);
-                g_wsToSlot.clear();
+                g_wsToBinding.clear();
                 for (int i = 0; i < 64; ++i) g_slotToWs[i] = nullptr;
             }
             for (int i = 0; i < 64; ++i)
