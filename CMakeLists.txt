@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BotWeaponLock CXX)
+project(BotLocker CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "BotWeaponLock requires x64 build (use -A x64).")
+    message(FATAL_ERROR "BotLocker requires x64 build (use -A x64).")
 endif()
 
 set(HL2SDK $ENV{HL2SDKCS2})
@@ -73,11 +73,13 @@ set(SDK_SOURCES
     ${MMS}/core/sourcehook/sourcehook_impl_cproto.cpp
 )
 
-add_library(BotWeaponLock SHARED
+add_library(BotLocker SHARED
     src/plugin.cpp
-    src/hooks.cpp
+    src/WeaponLocker.cpp
+    src/BotLocker.cpp
     src/sig_scan.cpp
-    src/lock_state.cpp
+    src/WeaponLockerState.cpp
+    src/BotLockerState.cpp
     src/ccsbot_slot.cpp
     src/dispatch.cpp
     src/commands.cpp
@@ -86,7 +88,7 @@ add_library(BotWeaponLock SHARED
     ${SDK_SOURCES}
 )
 
-target_include_directories(BotWeaponLock PRIVATE
+target_include_directories(BotLocker PRIVATE
     src
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src
@@ -104,7 +106,7 @@ target_include_directories(BotWeaponLock PRIVATE
 )
 
 set(HL2SDK_LIBDIR ${HL2SDK}/lib/public/win64)
-target_link_libraries(BotWeaponLock PRIVATE
+target_link_libraries(BotLocker PRIVATE
     minhook psapi
     ${HL2SDK_LIBDIR}/tier0.lib
     ${HL2SDK_LIBDIR}/tier1.lib
@@ -112,9 +114,9 @@ target_link_libraries(BotWeaponLock PRIVATE
     ${HL2SDK_LIBDIR}/interfaces.lib
     ${HL2SDK_LIBDIR}/2015/libprotobuf.lib
 )
-target_link_options(BotWeaponLock PRIVATE /NODEFAULTLIB:LIBCMTD)
+target_link_options(BotLocker PRIVATE /NODEFAULTLIB:LIBCMTD)
 
-target_compile_definitions(BotWeaponLock PRIVATE
+target_compile_definitions(BotLocker PRIVATE
     META_IS_SOURCE2 _CRT_SECURE_NO_WARNINGS
     WIN32 _WIN32 _WINDOWS
     COMPILER_MSVC COMPILER_MSVC64
@@ -123,9 +125,9 @@ target_compile_definitions(BotWeaponLock PRIVATE
     GOOGLE_PROTOBUF_NO_RTTI
 )
 
-set_target_properties(BotWeaponLock PROPERTIES OUTPUT_NAME "BotWeaponLock" PREFIX "" SUFFIX ".dll")
+set_target_properties(BotLocker PROPERTIES OUTPUT_NAME "BotLocker" PREFIX "" SUFFIX ".dll")
 
 if(MSVC)
-    target_compile_options(BotWeaponLock PRIVATE
+    target_compile_options(BotLocker PRIVATE
         /W3 /permissive- /wd4819 /wd4267 /wd4244 /wd4146 /wd4996 /wd4661)
 endif()

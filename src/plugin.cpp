@@ -1,4 +1,4 @@
-// BotWeaponLock native Metamod:Source plugin entry point.
+// BotLocker native Metamod:Source plugin entry point.
 
 #include <ISmmPlugin.h>
 
@@ -12,12 +12,14 @@
 #include <convar.h>
 #include <interfaces/interfaces.h>
 
-#include "hooks.h"
+#include "WeaponLocker.h"
+#include "BotLocker.h"
 #include "dispatch.h"
-#include "lock_state.h"
+#include "WeaponLockerState.h"
+#include "BotLockerState.h"
 #include "commands.h"
 
-class BotWeaponLockPlugin : public ISmmPlugin
+class BotLockerPlugin : public ISmmPlugin
 {
 public:
     bool Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late) override;
@@ -28,17 +30,17 @@ public:
     void AllPluginsLoaded() override {}
 
     const char *GetAuthor() override { return "XBribo"; }
-    const char *GetName() override { return "BotWeaponLock"; }
-    const char *GetDescription() override { return "Lock a bot's weapon slot, blocking AI weapon switches."; }
+    const char *GetName() override { return "BotLocker"; }
+    const char *GetDescription() override { return "Lock CS2 bots: freeze AI tick and/or pin to a weapon slot."; }
     const char *GetURL() override { return ""; }
     const char *GetLicense() override { return "GPLv3"; }
-    const char *GetVersion() override { return "0.1.3"; }
+    const char *GetVersion() override { return "0.2.0"; }
     const char *GetDate() override { return __DATE__; }
-    const char *GetLogTag() override { return "BWL"; }
+    const char *GetLogTag() override { return "BL"; }
 };
 
-BotWeaponLockPlugin g_botWeaponLockPlugin;
-PLUGIN_EXPOSE(BotWeaponLockPlugin, g_botWeaponLockPlugin);
+BotLockerPlugin g_botLockerPlugin;
+PLUGIN_EXPOSE(BotLockerPlugin, g_botLockerPlugin);
 
 static HMODULE GetSelfModule()
 {
@@ -50,7 +52,7 @@ static HMODULE GetSelfModule()
     return mod;
 }
 
-// .../addons/BotWeaponLock/bin/win64/BotWeaponLock.dll -> .../addons/BotWeaponLock/gamedata.json
+// .../addons/BotLocker/bin/win64/BotLocker.dll -> .../addons/BotLocker/gamedata.json
 static std::string ComputeGamedataPath()
 {
     char path[MAX_PATH] = {0};
@@ -68,8 +70,8 @@ static std::string ComputeGamedataPath()
     return result;
 }
 
-bool BotWeaponLockPlugin::Load(PluginId id, ISmmAPI *ismm,
-                               char *error, size_t maxlen, bool /*late*/)
+bool BotLockerPlugin::Load(PluginId id, ISmmAPI *ismm,
+                           char *error, size_t maxlen, bool /*late*/)
 {
     PLUGIN_SAVEVARS();
 
@@ -86,9 +88,9 @@ bool BotWeaponLockPlugin::Load(PluginId id, ISmmAPI *ismm,
 
     // The dispatch path needs IVEngineServer2::ClientCommand to inject a
     // slotN command into the engine's concommand pipeline.
-    BotWeaponLock::Dispatch::g_pEngine = static_cast<IVEngineServer2 *>(
+    BotLocker::Dispatch::g_pEngine = static_cast<IVEngineServer2 *>(
         ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
-    if (!BotWeaponLock::Dispatch::g_pEngine)
+    if (!BotLocker::Dispatch::g_pEngine)
     {
         std::snprintf(error, maxlen,
                       "Failed to get IVEngineServer2 (%s)",
@@ -109,7 +111,7 @@ bool BotWeaponLockPlugin::Load(PluginId id, ISmmAPI *ismm,
     }
 
     // Engine interface used by console command output (ClientPrintf).
-    BotWeaponLock::Commands::g_pEngine = BotWeaponLock::Dispatch::g_pEngine;
+    BotLocker::Commands::g_pEngine = BotLocker::Dispatch::g_pEngine;
 
     // Same interface doubles as the "real server.dll" anchor for sig-scan.
     // (serverIface already grabbed above.)
@@ -121,22 +123,31 @@ bool BotWeaponLockPlugin::Load(PluginId id, ISmmAPI *ismm,
         return false;
     }
 
-    if (!BotWeaponLock::Hooks::Install(gamedataPath, serverIface,
-                                       error, maxlen))
+    if (!BotLocker::WeaponLockerHooks::Install(gamedataPath, serverIface,
+                                               error, maxlen))
         return false;
 
-    OutputDebugStringA("[BotWeaponLock] plugin loaded successfully\n");
+    if (!BotLocker::BotLockerHooks::Install(gamedataPath, serverIface,
+                                            error, maxlen))
+    {
+        BotLocker::WeaponLockerHooks::Remove();
+        return false;
+    }
+
+    OutputDebugStringA("[BotLocker] plugin loaded successfully\n");
     return true;
 }
 
-bool BotWeaponLockPlugin::Unload(char * /*error*/, size_t /*maxlen*/)
+bool BotLockerPlugin::Unload(char * /*error*/, size_t /*maxlen*/)
 {
-    BotWeaponLock::Hooks::Remove();
-    BotWeaponLock::LockState::ClearAll();
-    BotWeaponLock::Dispatch::g_pEngine = nullptr;
-    BotWeaponLock::Commands::g_pEngine = nullptr;
+    BotLocker::BotLockerHooks::Remove();
+    BotLocker::WeaponLockerHooks::Remove();
+    BotLocker::WeaponLockerState::ClearAll();
+    BotLocker::BotLockerState::ClearAll();
+    BotLocker::Dispatch::g_pEngine = nullptr;
+    BotLocker::Commands::g_pEngine = nullptr;
     ConVar_Unregister();
     g_pCVar = nullptr;
-    OutputDebugStringA("[BotWeaponLock] plugin unloaded\n");
+    OutputDebugStringA("[BotLocker] plugin unloaded\n");
     return true;
 }

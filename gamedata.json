@@ -30,5 +30,21 @@
       "linux": ""
     },
     "comment": "Returns the weapon in engine slot N (0=primary, 1=pistol, 2=knife)."
+  },
+  "CCSBot::Update": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 56 57 41 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8D 05",
+      "linux": ""
+    },
+    "comment": "AI: per-tick decision entry; PathFollower + look-around + reaction + weapon."
+  },
+  "CCSBot::Upkeep": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 57 41 54 48 81 EC",
+      "linux": ""
+    },
+    "comment": "AI: per-frame view maintenance; UpdateLookAround + jitter + UpdateLookAngles."
   }
 }

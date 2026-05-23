@@ -1,13 +1,13 @@
 // Per-slot lock target table.
 
-#include "lock_state.h"
+#include "WeaponLockerState.h"
 
 #include <array>
 #include <atomic>
 
-namespace BotWeaponLock
+namespace BotLocker
 {
-    namespace LockState
+    namespace WeaponLockerState
     {
         static std::array<std::atomic<int>, kMaxSlots> g_locks{};
 

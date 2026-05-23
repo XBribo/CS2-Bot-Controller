@@ -1,9 +1,9 @@
 // Detours for CCSBot::EquipBestWeapon, EquipPistol, and
 // CCSPlayer_WeaponServices::SelectItem (vtable[27] @ 0x180ABC950).
 
-#include "hooks.h"
+#include "WeaponLocker.h"
 #include "sig_scan.h"
-#include "lock_state.h"
+#include "WeaponLockerState.h"
 #include "ccsbot_slot.h"
 #include "dispatch.h"
 
@@ -30,9 +30,9 @@ static constexpr int kOffsetWeaponServicesInPawn = 0xA00;
 // CCSBot* -> pawn* lives at +0x18.
 static constexpr int kOffsetPawnInBot            = 0x18;
 
-namespace BotWeaponLock
+namespace BotLocker
 {
-    namespace Hooks
+    namespace WeaponLockerHooks
     {
         static EquipBestWeapon_t g_origEquipBestWeapon = nullptr;
         static EquipPistol_t     g_origEquipPistol     = nullptr;
@@ -130,7 +130,7 @@ namespace BotWeaponLock
         {
             auto sr = ResolveSlot(bot);
             if (sr.slot >= 0) RememberWsForBot(bot, sr.slot);
-            LockTarget lt = (sr.slot >= 0) ? LockState::Get(sr.slot) : LockTarget::None;
+            LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
             MaybeLogEdge("EquipBestWeapon", bot, sr, lt);
             if (lt != LockTarget::None) return;
             g_origEquipBestWeapon(bot, mustEquip);
@@ -140,7 +140,7 @@ namespace BotWeaponLock
         {
             auto sr = ResolveSlot(bot);
             if (sr.slot >= 0) RememberWsForBot(bot, sr.slot);
-            LockTarget lt = (sr.slot >= 0) ? LockState::Get(sr.slot) : LockTarget::None;
+            LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
             MaybeLogEdge("EquipPistol", bot, sr, lt);
             if (lt != LockTarget::None) return;
             g_origEquipPistol(bot, mustEquip);
@@ -162,7 +162,7 @@ namespace BotWeaponLock
             if (curSlot != bind.slot)
                 return g_origSelectItem(ws, weapon, flag);
 
-            LockTarget lt = LockState::Get(bind.slot);
+            LockTarget lt = WeaponLockerState::Get(bind.slot);
             if (lt == LockTarget::None)
                 return g_origSelectItem(ws, weapon, flag);
 
@@ -349,7 +349,7 @@ namespace BotWeaponLock
             if (!g_installed || !g_origSelectItem || !g_pGetSlot) return 3;
             if (slot < 0 || slot >= 64) return 3;
 
-            LockTarget lt = LockState::Get(slot);
+            LockTarget lt = WeaponLockerState::Get(slot);
             if (lt == LockTarget::None) return 3;
             int engineSlot = LockTargetToEngineSlot(lt);
             if (engineSlot < 0) return 3;

@@ -1,15 +1,15 @@
-// BotWeaponLock dispatch: Lock/Unlock + active weapon switch via direct
-// invocation of the original CCSPlayer_WeaponServices::SelectItem (bot
-// clients don't process slotN client commands).
+// BotLocker dispatch: weapon-lock (per-slot SelectItem gate + one-shot
+// switch) and bot-lock (per-slot CCSBot::Update freeze).
 
 #include "dispatch.h"
-#include "lock_state.h"
-#include "hooks.h"
+#include "WeaponLockerState.h"
+#include "WeaponLocker.h"
+#include "BotLockerState.h"
 
 #include <eiface.h>
 #include <playerslot.h>
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     namespace Dispatch
     {
@@ -17,7 +17,7 @@ namespace BotWeaponLock
 
         int Lock(int slot, LockTarget target)
         {
-            if (slot < 0 || slot >= LockState::kMaxSlots) return -2;
+            if (slot < 0 || slot >= WeaponLockerState::kMaxSlots) return -2;
             if (target == LockTarget::None)               return -2;
 
             // Order matters: set the lock first so the AI hooks start
@@ -25,26 +25,53 @@ namespace BotWeaponLock
             // switch via the cached WeaponServices pointer. The switch
             // itself goes through the original SelectItem (un-hooked) so
             // there's no recursion.
-            LockState::Set(slot, target);
-            (void)Hooks::SwitchToLockTarget(slot);
+            WeaponLockerState::Set(slot, target);
+            (void)WeaponLockerHooks::SwitchToLockTarget(slot);
             return 0;
         }
 
         int Unlock(int slot)
         {
-            if (slot < 0 || slot >= LockState::kMaxSlots) return -2;
-            LockState::Clear(slot);
+            if (slot < 0 || slot >= WeaponLockerState::kMaxSlots) return -2;
+            WeaponLockerState::Clear(slot);
             return 0;
         }
 
         void UnlockAll()
         {
-            LockState::ClearAll();
+            WeaponLockerState::ClearAll();
         }
 
         int GetLock(int slot)
         {
-            return static_cast<int>(LockState::Get(slot));
+            return static_cast<int>(WeaponLockerState::Get(slot));
+        }
+
+        // ---- bot lock ----
+
+        int LockBot(int slot)
+        {
+            if (slot < 0 || slot >= BotLockerState::kMaxSlots) return -2;
+            BotLockerState::Set(slot, true);
+            return 0;
+        }
+
+        int UnlockBot(int slot)
+        {
+            if (slot < 0 || slot >= BotLockerState::kMaxSlots) return -2;
+            BotLockerState::Set(slot, false);
+            return 0;
+        }
+
+        void UnlockAllBots()
+        {
+            BotLockerState::ClearAll();
+        }
+
+        int IsBotLocked(int slot)
+        {
+            if (slot < 0 || slot >= BotLockerState::kMaxSlots) return 0;
+            return BotLockerState::Get(slot) ? 1 : 0;
         }
     }
 }

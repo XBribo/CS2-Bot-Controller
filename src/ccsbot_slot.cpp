@@ -8,7 +8,7 @@
 
 #include <tier0/dbg.h>
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     // Compile-time switch to turn the once-per-bot diagnostic scan back on.
     static constexpr bool kEnableHandleScan = false;

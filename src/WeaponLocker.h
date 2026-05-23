@@ -6,9 +6,9 @@
 
 #include <string>
 
-namespace BotWeaponLock
+namespace BotLocker
 {
-    namespace Hooks
+    namespace WeaponLockerHooks
     {
         // Install both hooks. gamedataPath: absolute path to gamedata.json.
         // serverIface: any server-side interface pointer (used to locate the

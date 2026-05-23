@@ -3,7 +3,7 @@
 class CCommandContext;
 class IVEngineServer2;
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     namespace Commands
     {

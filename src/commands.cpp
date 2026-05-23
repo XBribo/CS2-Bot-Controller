@@ -1,9 +1,11 @@
-// BotWeaponLock console commands.
+// BotLocker console commands.
 
 #include "commands.h"
 #include "dispatch.h"
-#include "hooks.h"
-#include "lock_state.h"
+#include "WeaponLocker.h"
+#include "BotLocker.h"
+#include "WeaponLockerState.h"
+#include "BotLockerState.h"
 
 #include <tier0/dbg.h>
 #include <convar.h>
@@ -15,7 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     namespace Commands
     {
@@ -68,27 +70,27 @@ CON_COMMAND_F(blw_lock,
 {
     if (args.ArgC() < 3)
     {
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "usage: blw_lock <slot> <slot1|slot2|slot3|slot4|slot5>\n");
         return;
     }
     const int slot = std::atoi(args.Arg(1));
-    const auto tgt = BotWeaponLock::Commands::ParseTarget(args.Arg(2));
-    if (tgt == BotWeaponLock::LockTarget::None)
+    const auto tgt = BotLocker::Commands::ParseTarget(args.Arg(2));
+    if (tgt == BotLocker::LockTarget::None)
     {
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "[BWL] error: target must be slot1..slot5\n");
         return;
     }
-    int rc = BotWeaponLock::Dispatch::Lock(slot, tgt);
+    int rc = BotLocker::Dispatch::Lock(slot, tgt);
     if (rc == 0)
-        BotWeaponLock::Commands::PrintToCaller(context,
-            "[BWL] locked slot %d to %s\n", slot, BotWeaponLock::Commands::TargetName(tgt));
+        BotLocker::Commands::PrintToCaller(context,
+            "[BWL] locked slot %d to %s\n", slot, BotLocker::Commands::TargetName(tgt));
     else if (rc == -1)
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "[BWL] error: plugin not initialized (rc=%d)\n", rc);
     else
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "[BWL] error: invalid args (rc=%d)\n", rc);
 }
 
@@ -98,16 +100,16 @@ CON_COMMAND_F(blw_unlock,
 {
     if (args.ArgC() < 2)
     {
-        BotWeaponLock::Commands::PrintToCaller(context, "usage: blw_unlock <slot>\n");
+        BotLocker::Commands::PrintToCaller(context, "usage: blw_unlock <slot>\n");
         return;
     }
     const int slot = std::atoi(args.Arg(1));
-    int rc = BotWeaponLock::Dispatch::Unlock(slot);
+    int rc = BotLocker::Dispatch::Unlock(slot);
     if (rc == 0)
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "[BWL] unlocked slot %d\n", slot);
     else
-        BotWeaponLock::Commands::PrintToCaller(context,
+        BotLocker::Commands::PrintToCaller(context,
             "[BWL] error: invalid slot (rc=%d)\n", rc);
 }
 
@@ -115,37 +117,102 @@ CON_COMMAND_F(blw_unlock_all,
               "blw_unlock_all  Unlock every slot.",
               FCVAR_NONE)
 {
-    BotWeaponLock::Dispatch::UnlockAll();
-    BotWeaponLock::Commands::PrintToCaller(context, "[BWL] unlocked all slots\n");
+    BotLocker::Dispatch::UnlockAll();
+    BotLocker::Commands::PrintToCaller(context, "[BWL] unlocked all slots\n");
 }
 
 CON_COMMAND_F(blw_status,
               "blw_status  Print hook status and locked slots.",
               FCVAR_NONE)
 {
-    BotWeaponLock::Commands::PrintToCaller(context,
+    BotLocker::Commands::PrintToCaller(context,
         "[BWL] hooks: %s | EquipBestWeapon=%p EquipPistol=%p SelectItem=%p GetSlot=%p\n",
-        BotWeaponLock::Hooks::Status(),
-        BotWeaponLock::Hooks::EquipBestWeaponAddress(),
-        BotWeaponLock::Hooks::EquipPistolAddress(),
-        BotWeaponLock::Hooks::SelectItemAddress(),
-        BotWeaponLock::Hooks::GetSlotAddress());
+        BotLocker::WeaponLockerHooks::Status(),
+        BotLocker::WeaponLockerHooks::EquipBestWeaponAddress(),
+        BotLocker::WeaponLockerHooks::EquipPistolAddress(),
+        BotLocker::WeaponLockerHooks::SelectItemAddress(),
+        BotLocker::WeaponLockerHooks::GetSlotAddress());
 
-    int total = BotWeaponLock::LockState::CountLocked();
-    BotWeaponLock::Commands::PrintToCaller(context,
+    int total = BotLocker::WeaponLockerState::CountLocked();
+    BotLocker::Commands::PrintToCaller(context,
         "[BWL] locked count: %d\n", total);
 
     if (total > 0)
     {
-        for (int s = 0; s < BotWeaponLock::LockState::kMaxSlots; ++s)
+        for (int s = 0; s < BotLocker::WeaponLockerState::kMaxSlots; ++s)
         {
-            auto t = BotWeaponLock::LockState::Get(s);
-            if (t != BotWeaponLock::LockTarget::None)
+            auto t = BotLocker::WeaponLockerState::Get(s);
+            if (t != BotLocker::LockTarget::None)
             {
-                BotWeaponLock::Commands::PrintToCaller(context,
+                BotLocker::Commands::PrintToCaller(context,
                     "[BWL]   slot %2d -> %s\n", s,
-                    BotWeaponLock::Commands::TargetName(t));
+                    BotLocker::Commands::TargetName(t));
             }
         }
+    }
+}
+
+CON_COMMAND_F(bl_lock_bot,
+              "bl_lock_bot <slot>  Freeze the bot at <slot>'s AI tick.",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        BotLocker::Commands::PrintToCaller(context, "usage: bl_lock_bot <slot>\n");
+        return;
+    }
+    const int slot = std::atoi(args.Arg(1));
+    int rc = BotLocker::Dispatch::LockBot(slot);
+    if (rc == 0)
+        BotLocker::Commands::PrintToCaller(context, "[BL] locked bot slot %d\n", slot);
+    else
+        BotLocker::Commands::PrintToCaller(context,
+            "[BL] error: invalid slot (rc=%d)\n", rc);
+}
+
+CON_COMMAND_F(bl_unlock_bot,
+              "bl_unlock_bot <slot>  Unfreeze the bot at <slot>.",
+              FCVAR_NONE)
+{
+    if (args.ArgC() < 2)
+    {
+        BotLocker::Commands::PrintToCaller(context, "usage: bl_unlock_bot <slot>\n");
+        return;
+    }
+    const int slot = std::atoi(args.Arg(1));
+    int rc = BotLocker::Dispatch::UnlockBot(slot);
+    if (rc == 0)
+        BotLocker::Commands::PrintToCaller(context, "[BL] unlocked bot slot %d\n", slot);
+    else
+        BotLocker::Commands::PrintToCaller(context,
+            "[BL] error: invalid slot (rc=%d)\n", rc);
+}
+
+CON_COMMAND_F(bl_unlock_all_bots,
+              "bl_unlock_all_bots  Unfreeze every bot.",
+              FCVAR_NONE)
+{
+    BotLocker::Dispatch::UnlockAllBots();
+    BotLocker::Commands::PrintToCaller(context, "[BL] unlocked all bots\n");
+}
+
+CON_COMMAND_F(bl_status,
+              "bl_status  Print CCSBot hook status and frozen bots.",
+              FCVAR_NONE)
+{
+    BotLocker::Commands::PrintToCaller(context,
+        "[BL] hooks: %s | Update=%p | Upkeep=%p\n",
+        BotLocker::BotLockerHooks::Status(),
+        BotLocker::BotLockerHooks::UpdateAddress(),
+        BotLocker::BotLockerHooks::UpkeepAddress());
+
+    int total = BotLocker::BotLockerState::CountLocked();
+    BotLocker::Commands::PrintToCaller(context,
+        "[BL] frozen bot count: %d\n", total);
+    if (total > 0)
+    {
+        for (int s = 0; s < BotLocker::BotLockerState::kMaxSlots; ++s)
+            if (BotLocker::BotLockerState::Get(s))
+                BotLocker::Commands::PrintToCaller(context, "[BL]   slot %2d\n", s);
     }
 }

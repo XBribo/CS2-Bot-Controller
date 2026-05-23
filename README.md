@@ -1,9 +1,12 @@
-# CS2-Bot-WeaponLock
+# CS2-Bot-Locker
 
-Metamod:Source native plugin. Locks a CS2 bot to a weapon slot and blocks the AI from switching away.
+Metamod:Source native plugin. Two locks for CS2 bots:
 
-**Version**: 0.1.3
-**Native ABI**: 2
+- **Weapon lock** — pin a bot to one weapon slot; AI weapon switches are blocked.
+- **Bot lock** — freeze the bot's `CCSBot::Update` tick entirely, so the AI stops driving the bot (used by demo replay to take over movement and aim).
+
+**Version**: 0.2.0
+**Native ABI**: 3
 
 ## Slot
 
@@ -17,9 +20,9 @@ Metamod:Source native plugin. Locks a CS2 bot to a weapon slot and blocks the AI
 
 ## Install
 
-- `BotWeaponLock.dll` → `csgo/addons/BotWeaponLock/bin/win64/`
-- `gamedata.json` → `csgo/addons/BotWeaponLock/`
-- `BotWeaponLock.vdf` → `csgo/addons/metamod/`
+- `BotLocker.dll` -> `csgo/addons/BotLocker/bin/win64/`
+- `gamedata.json` -> `csgo/addons/BotLocker/`
+- `BotLocker.vdf` -> `csgo/addons/metamod/`
 
 ## Build
 
@@ -32,6 +35,7 @@ cmake --build build --config Release
 
 ## Console Commands
 
+Weapon lock:
 ```
 blw_lock <id> <slot1|slot2|slot3|slot4|slot5>
 blw_unlock <id>
@@ -39,18 +43,34 @@ blw_unlock_all
 blw_status
 ```
 
+Bot lock:
+```
+bl_lock_bot <id>
+bl_unlock_bot <id>
+bl_unlock_all_bots
+bl_status
+```
+
 ## CounterStrikeSharp API
 
-Drop `scripts/BotWeaponLock.NativeApi.cs` into your project.
+Drop `scripts/BotLocker.NativeApi.cs` into your project.
 
 ```csharp
-using BotWeaponLockApi;
+using BotLockerApi;
 
-BotWeaponLock.IsCompatible();              // bool, check on load
-BotWeaponLock.Lock(id, LockTarget.Slot3);// bool
-BotWeaponLock.Unlock(id);                // bool
-BotWeaponLock.UnlockAll();                 // void
-BotWeaponLock.GetLock(id);               // LockTarget
+BotLocker.IsCompatible();              // bool, check on load
+
+// weapon lock
+BotLocker.Lock(id, LockTarget.Slot3);  // bool
+BotLocker.Unlock(id);                  // bool
+BotLocker.UnlockAll();                 // void
+BotLocker.GetLock(id);                 // LockTarget
+
+// bot lock
+BotLocker.LockBot(id);                 // bool
+BotLocker.UnlockBot(id);               // bool
+BotLocker.UnlockAllBots();             // void
+BotLocker.IsBotLocked(id);             // bool
 ```
 
 Main thread only.

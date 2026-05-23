@@ -2,7 +2,7 @@
 
 #pragma once
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     // Diagnostic: pawn pointer + pawn entindex used in slot computation.
     struct SlotResolution

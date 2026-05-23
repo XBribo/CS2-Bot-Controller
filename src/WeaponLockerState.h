@@ -2,7 +2,7 @@
 
 #pragma once
 
-namespace BotWeaponLock
+namespace BotLocker
 {
     // Engine weapon slots (matches CCSPlayer_WeaponServices::GetSlot
     // 0-based index + 1, i.e. the classic slot1/slot2/slot3 convention).
@@ -19,7 +19,7 @@ namespace BotWeaponLock
         Slot5 = 5,
     };
 
-    namespace LockState
+    namespace WeaponLockerState
     {
         constexpr int kMaxSlots = 64;
 

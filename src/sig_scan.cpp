@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace BotWeaponLock::Sig
+namespace BotLocker::Sig
 {
     std::string ReadFile(const std::string &path)
     {
