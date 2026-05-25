@@ -1,4 +1,4 @@
-// Unified lock dispatch. Three orthogonal per-slot lock kinds.
+// Unified lock dispatch. Per-slot lock kinds.
 
 #pragma once
 
@@ -8,28 +8,27 @@ class IVEngineServer2;
 
 namespace BotLocker
 {
-    // Lock category. Mirror BotLockerApi.LockKind on the C# side.
+    // Mirror BotLockerApi.LockKind on the C# side.
     enum class LockKind : int
     {
         All    = 0,
         Aim    = 1,
         Weapon = 2,
+        Jump   = 3,
     };
 
     namespace Dispatch
     {
         extern IVEngineServer2 *g_pEngine;
 
-        // Lock a slot. arg = LockTarget int for Weapon kind, ignored otherwise.
-        int Lock(int slot, LockKind kind, int arg);
+        // arg = LockTarget int for Weapon kind. quiet skips DebugLine.
+        int Lock(int slot, LockKind kind, int arg, bool quiet = false);
 
-        // Unlock one slot for the given kind.
-        int Unlock(int slot, LockKind kind);
+        int Unlock(int slot, LockKind kind, bool quiet = false);
 
-        // Clear every slot for the given kind.
-        int UnlockAll(LockKind kind);
+        int UnlockAll(LockKind kind, bool quiet = false);
 
-        // 1 if All/Aim locked; for Weapon returns LockTarget int.
+        // 1 if All/Aim/Jump locked; Weapon returns LockTarget int.
         int IsLocked(int slot, LockKind kind);
     }
 }

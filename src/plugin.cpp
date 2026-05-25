@@ -145,6 +145,7 @@ bool BotLockerPlugin::Unload(char * /*error*/, size_t /*maxlen*/)
     BotLocker::WeaponLockerState::ClearAll();
     BotLocker::BotLockerState::ClearAllAll();
     BotLocker::BotLockerState::ClearAllAim();
+    BotLocker::BotLockerState::ClearAllJump();
     BotLocker::Dispatch::g_pEngine = nullptr;
     BotLocker::Commands::g_pEngine = nullptr;
     ConVar_Unregister();

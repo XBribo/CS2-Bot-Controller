@@ -46,5 +46,13 @@
       "linux": ""
     },
     "comment": "AI: per-frame view maintenance; UpdateLookAround + jitter + UpdateLookAngles."
+  },
+  "CCSBot::Jump": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 48 8B D9 0F B6 FA 48 8B 49 ? 48 8B 91",
+      "linux": ""
+    },
+    "comment": "AI: bot requests a jump."
   }
 }

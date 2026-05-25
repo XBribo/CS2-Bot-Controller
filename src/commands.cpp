@@ -46,6 +46,7 @@ namespace BotLocker
             if (std::strcmp(s, "all")    == 0) { out = LockKind::All;    return true; }
             if (std::strcmp(s, "aim")    == 0) { out = LockKind::Aim;    return true; }
             if (std::strcmp(s, "weapon") == 0) { out = LockKind::Weapon; return true; }
+            if (std::strcmp(s, "jump")   == 0) { out = LockKind::Jump;   return true; }
             return false;
         }
 
@@ -81,6 +82,7 @@ namespace BotLocker
             case LockKind::All:    return "all";
             case LockKind::Aim:    return "aim";
             case LockKind::Weapon: return "weapon";
+            case LockKind::Jump:   return "jump";
             }
             return "?";
         }
@@ -88,7 +90,7 @@ namespace BotLocker
 }
 
 CON_COMMAND_F(bl_lock,
-              "bl_lock <all|aim|weapon> <slot> [slot1..slot5]  "
+              "bl_lock <all|aim|jump|weapon> <slot> [slot1..slot5]  "
               "Lock a bot. weapon mode requires the weapon slot.",
               FCVAR_NONE)
 {
@@ -97,7 +99,7 @@ CON_COMMAND_F(bl_lock,
     if (args.ArgC() < 3)
     {
         Commands::PrintToCaller(context,
-            "usage: bl_lock <all|aim|weapon> <slot> [slot1..slot5]\n");
+            "usage: bl_lock <all|aim|jump|weapon> <slot> [slot1..slot5]\n");
         return;
     }
 
@@ -105,7 +107,7 @@ CON_COMMAND_F(bl_lock,
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
         Commands::PrintToCaller(context,
-            "[BL] error: kind must be all|aim|weapon\n");
+            "[BL] error: kind must be all|aim|jump|weapon\n");
         return;
     }
 
@@ -149,7 +151,7 @@ CON_COMMAND_F(bl_lock,
 }
 
 CON_COMMAND_F(bl_unlock,
-              "bl_unlock <all|aim|weapon> <slot>  Release one lock on a bot.",
+              "bl_unlock <all|aim|jump|weapon> <slot>  Release one lock on a bot.",
               FCVAR_NONE)
 {
     using namespace BotLocker;
@@ -157,7 +159,7 @@ CON_COMMAND_F(bl_unlock,
     if (args.ArgC() < 3)
     {
         Commands::PrintToCaller(context,
-            "usage: bl_unlock <all|aim|weapon> <slot>\n");
+            "usage: bl_unlock <all|aim|jump|weapon> <slot>\n");
         return;
     }
 
@@ -165,7 +167,7 @@ CON_COMMAND_F(bl_unlock,
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
         Commands::PrintToCaller(context,
-            "[BL] error: kind must be all|aim|weapon\n");
+            "[BL] error: kind must be all|aim|jump|weapon\n");
         return;
     }
 
@@ -180,7 +182,7 @@ CON_COMMAND_F(bl_unlock,
 }
 
 CON_COMMAND_F(bl_unlock_all,
-              "bl_unlock_all <all|aim|weapon>  Release every lock of that kind.",
+              "bl_unlock_all <all|aim|jump|weapon>  Release every lock of that kind.",
               FCVAR_NONE)
 {
     using namespace BotLocker;
@@ -188,7 +190,7 @@ CON_COMMAND_F(bl_unlock_all,
     if (args.ArgC() < 2)
     {
         Commands::PrintToCaller(context,
-            "usage: bl_unlock_all <all|aim|weapon>\n");
+            "usage: bl_unlock_all <all|aim|jump|weapon>\n");
         return;
     }
 
@@ -196,7 +198,7 @@ CON_COMMAND_F(bl_unlock_all,
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
         Commands::PrintToCaller(context,
-            "[BL] error: kind must be all|aim|weapon\n");
+            "[BL] error: kind must be all|aim|jump|weapon\n");
         return;
     }
 
@@ -225,10 +227,11 @@ CON_COMMAND_F(bl_status,
         WeaponLockerHooks::GetSlotAddress());
 
     Commands::PrintToCaller(context,
-        "[BL] bot hooks:    %s | Update=%p Upkeep=%p\n",
+        "[BL] bot hooks:    %s | Update=%p Upkeep=%p Jump=%p\n",
         BotLockerHooks::Status(),
         BotLockerHooks::UpdateAddress(),
-        BotLockerHooks::UpkeepAddress());
+        BotLockerHooks::UpkeepAddress(),
+        BotLockerHooks::JumpAddress());
 
     // All lock
     int nAll = BotLockerState::CountAll();
@@ -248,6 +251,16 @@ CON_COMMAND_F(bl_status,
         for (int s = 0; s < BotLockerState::kMaxSlots; ++s)
             if (BotLockerState::GetAim(s))
                 Commands::PrintToCaller(context, "[BL]   aim   slot %2d\n", s);
+    }
+
+    // Jump lock
+    int nJump = BotLockerState::CountJump();
+    Commands::PrintToCaller(context, "[BL] jump-locked count:   %d\n", nJump);
+    if (nJump > 0)
+    {
+        for (int s = 0; s < BotLockerState::kMaxSlots; ++s)
+            if (BotLockerState::GetJump(s))
+                Commands::PrintToCaller(context, "[BL]   jump  slot %2d\n", s);
     }
 
     // Weapon lock

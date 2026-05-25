@@ -1,5 +1,6 @@
 build/
 out/
+deassemble/
 cmake-build-*/
 *.dll
 *.exp

@@ -11,6 +11,7 @@ namespace BotLocker
     {
         static std::array<std::atomic<bool>, kMaxSlots> g_allLocks{};
         static std::array<std::atomic<bool>, kMaxSlots> g_aimLocks{};
+        static std::array<std::atomic<bool>, kMaxSlots> g_jumpLocks{};
 
         bool GetAll(int slot)
         {
@@ -58,6 +59,31 @@ namespace BotLocker
         {
             int n = 0;
             for (auto &x : g_aimLocks)
+                if (x.load(std::memory_order_relaxed)) ++n;
+            return n;
+        }
+
+        bool GetJump(int slot)
+        {
+            if (slot < 0 || slot >= kMaxSlots) return false;
+            return g_jumpLocks[slot].load(std::memory_order_relaxed);
+        }
+
+        void SetJump(int slot, bool locked)
+        {
+            if (slot < 0 || slot >= kMaxSlots) return;
+            g_jumpLocks[slot].store(locked, std::memory_order_relaxed);
+        }
+
+        void ClearAllJump()
+        {
+            for (auto &x : g_jumpLocks) x.store(false, std::memory_order_relaxed);
+        }
+
+        int CountJump()
+        {
+            int n = 0;
+            for (auto &x : g_jumpLocks)
                 if (x.load(std::memory_order_relaxed)) ++n;
             return n;
         }

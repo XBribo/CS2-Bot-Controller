@@ -1,5 +1,4 @@
-// CCSBot::Update + CCSBot::Upkeep detours. Skip the body when locked so
-// the bot stays passive; Update body keeps +21196 = 1 for the engine gate.
+// CCSBot Update/Upkeep/Jump detours; lock = skip body.
 
 #include "BotLocker.h"
 #include "BotLockerState.h"
@@ -15,6 +14,7 @@
 
 using Update_t = void (__fastcall *)(void *bot);
 using Upkeep_t = void (__fastcall *)(void *bot);
+using Jump_t   = char (__fastcall *)(void *bot, char mustJump);
 
 // CCSBot AI-ran-this-tick byte flag at +21196.
 static constexpr int kOffsetAiTickedFlag = 21196;
@@ -27,6 +27,8 @@ namespace BotLocker
         static void    *g_addrUpdate   = nullptr;
         static Upkeep_t g_origUpkeep   = nullptr;
         static void    *g_addrUpkeep   = nullptr;
+        static Jump_t   g_origJump     = nullptr;
+        static void    *g_addrJump     = nullptr;
         static bool     g_installed    = false;
         static std::string g_status    = "not_attempted";
 
@@ -52,6 +54,15 @@ namespace BotLocker
                 return;
             }
             g_origUpkeep(bot);
+        }
+
+        // Skip Jump under Jump lock; return 0 mimics its own gate-fail.
+        static char __fastcall HookedJump(void *bot, char mustJump)
+        {
+            int slot = CCSBotToSlot(bot);
+            if (slot >= 0 && BotLockerState::GetJump(slot))
+                return 0;
+            return g_origJump(bot, mustJump);
         }
 
         // Resolve a sig from gamedata against the loaded server.dll.
@@ -114,6 +125,19 @@ namespace BotLocker
                                       errorOut, errorOutLen);
             if (!g_addrUpkeep) { g_status = "failed: Upkeep sig"; return false; }
 
+            // Jump is optional; failure leaves all/aim working, only jump dies.
+            char jumpErr[256] = {0};
+            g_addrJump = ResolveSig(gd, serverModule, "CCSBot::Jump",
+                                    jumpErr, sizeof(jumpErr));
+            if (!g_addrJump)
+            {
+                char dbg[320];
+                std::snprintf(dbg, sizeof(dbg),
+                              "[BotLocker] WARN: CCSBot::Jump sig not resolved (%s); jump-lock disabled\n",
+                              jumpErr);
+                OutputDebugStringA(dbg);
+            }
+
             // MinHook already initialized by WeaponLockerHooks.
             if (MH_CreateHook(g_addrUpdate,
                               reinterpret_cast<void *>(&HookedUpdate),
@@ -159,14 +183,40 @@ namespace BotLocker
                 return false;
             }
 
+            if (g_addrJump)
+            {
+                if (MH_CreateHook(g_addrJump,
+                                  reinterpret_cast<void *>(&HookedJump),
+                                  reinterpret_cast<void **>(&g_origJump)) != MH_OK)
+                {
+                    char dbg[160];
+                    std::snprintf(dbg, sizeof(dbg),
+                                  "[BotLocker] WARN: MH_CreateHook CCSBot::Jump failed; jump-lock disabled\n");
+                    OutputDebugStringA(dbg);
+                    g_origJump = nullptr;
+                    g_addrJump = nullptr;
+                }
+                else if (MH_EnableHook(g_addrJump) != MH_OK)
+                {
+                    char dbg[160];
+                    std::snprintf(dbg, sizeof(dbg),
+                                  "[BotLocker] WARN: MH_EnableHook CCSBot::Jump failed; jump-lock disabled\n");
+                    OutputDebugStringA(dbg);
+                    MH_RemoveHook(g_addrJump);
+                    g_origJump = nullptr;
+                    g_addrJump = nullptr;
+                }
+            }
+
             g_installed = true;
             g_status = "ok";
 
-            char dbg[256];
+            char dbg[320];
             std::snprintf(dbg, sizeof(dbg),
                           "[BotLocker] CCSBot::Update hooked @ %p, "
-                          "CCSBot::Upkeep hooked @ %p\n",
-                          g_addrUpdate, g_addrUpkeep);
+                          "CCSBot::Upkeep hooked @ %p, "
+                          "CCSBot::Jump hooked @ %p\n",
+                          g_addrUpdate, g_addrUpkeep, g_addrJump);
             OutputDebugStringA(dbg);
             return true;
         }
@@ -174,6 +224,12 @@ namespace BotLocker
         void Remove()
         {
             if (!g_installed) return;
+            if (g_addrJump)
+            {
+                MH_DisableHook(g_addrJump);
+                MH_RemoveHook(g_addrJump);
+                g_origJump = nullptr;
+            }
             MH_DisableHook(g_addrUpkeep);
             MH_RemoveHook(g_addrUpkeep);
             g_origUpkeep = nullptr;
@@ -187,5 +243,6 @@ namespace BotLocker
         const char *Status()        { return g_status.c_str(); }
         void *UpdateAddress()       { return g_addrUpdate; }
         void *UpkeepAddress()       { return g_addrUpkeep; }
+        void *JumpAddress()         { return g_addrJump; }
     }
 }

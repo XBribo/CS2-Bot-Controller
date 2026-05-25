@@ -15,7 +15,7 @@ namespace BotLocker
         IVEngineServer2 *g_pEngine = nullptr;
 
         // Set lock; Weapon also triggers a one-shot switch.
-        int Lock(int slot, LockKind kind, int arg)
+        int Lock(int slot, LockKind kind, int arg, bool quiet)
         {
             switch (kind)
             {
@@ -35,15 +35,20 @@ namespace BotLocker
                 const auto tgt = static_cast<LockTarget>(arg);
                 if (tgt == LockTarget::None) return -2;
                 WeaponLockerState::Set(slot, tgt);
-                (void)WeaponLockerHooks::SwitchToLockTarget(slot);
+                (void)WeaponLockerHooks::SwitchToLockTarget(slot, quiet);
                 return 0;
             }
+
+            case LockKind::Jump:
+                if (slot < 0 || slot >= BotLockerState::kMaxSlots) return -2;
+                BotLockerState::SetJump(slot, true);
+                return 0;
             }
             return -2;
         }
 
         // Clear the per-kind lock for this slot.
-        int Unlock(int slot, LockKind kind)
+        int Unlock(int slot, LockKind kind, bool /*quiet*/)
         {
             switch (kind)
             {
@@ -61,18 +66,24 @@ namespace BotLocker
                 if (slot < 0 || slot >= WeaponLockerState::kMaxSlots) return -2;
                 WeaponLockerState::Clear(slot);
                 return 0;
+
+            case LockKind::Jump:
+                if (slot < 0 || slot >= BotLockerState::kMaxSlots) return -2;
+                BotLockerState::SetJump(slot, false);
+                return 0;
             }
             return -2;
         }
 
         // Clear every slot under kind.
-        int UnlockAll(LockKind kind)
+        int UnlockAll(LockKind kind, bool /*quiet*/)
         {
             switch (kind)
             {
             case LockKind::All:    BotLockerState::ClearAllAll(); return 0;
             case LockKind::Aim:    BotLockerState::ClearAllAim(); return 0;
             case LockKind::Weapon: WeaponLockerState::ClearAll(); return 0;
+            case LockKind::Jump:   BotLockerState::ClearAllJump(); return 0;
             }
             return -2;
         }
@@ -88,6 +99,8 @@ namespace BotLocker
                 return BotLockerState::GetAim(slot) ? 1 : 0;
             case LockKind::Weapon:
                 return static_cast<int>(WeaponLockerState::Get(slot));
+            case LockKind::Jump:
+                return BotLockerState::GetJump(slot) ? 1 : 0;
             }
             return 0;
         }
