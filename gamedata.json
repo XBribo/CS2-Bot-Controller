@@ -61,6 +61,6 @@
       "windows": "40 57 41 57 48 81 EC ? ? ? ? 48 83 79",
       "linux": ""
     },
-    "comment": "Per-cmd entry. We hook here to inject buttons (this+88) and cmd fields (move/view) for bot replay; original then runs the full pmove pipeline so AnimGraph2 sees a real moving player."
+    "comment": "Per-cmd entry. We hook here to inject buttons (this+88) and cmd fields (move/view) for bot replay."
   }
 }
