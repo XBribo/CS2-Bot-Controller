@@ -11,7 +11,7 @@ It can be installed on win64 clients.
 
 ## Your stars⭐ are my motivation to keep updating
 
-**Version**: 0.3.1 · **ABI**: 5
+**Version**: 0.3.2 · **ABI**: 5
 
 ## Slots
 
