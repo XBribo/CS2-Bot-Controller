@@ -18,8 +18,8 @@ It can be installed on win64 clients.
 | Target  | Engine | Weapon                  |
 | ------- | ------ | ----------------------- |
 | `Slot1` | 0      | Primary                 |
-| `Slot2` | 1      | Pistol / Zeus           |
-| `Slot3` | 2      | Knife                   |
+| `Slot2` | 1      | Pistol                  |
+| `Slot3` | 2      | Knife / Zeus            |
 | `Slot4` | 3      | Grenades      	    		 |
 | `Slot5` | 4      | C4                      |
 
