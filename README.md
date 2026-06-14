@@ -7,8 +7,6 @@ It can be installed on win64 clients.
 - **Aim** — freeze `CCSBot::Upkeep`; view holds still, AI keeps deciding/moving.
 - **Jump** — block `CCSBot::Jump`; bot stops jumping, move/fire/aim unaffected.
 - **All** — freeze both `CCSBot::Update` and `CCSBot::Upkeep`.
-- **Inject** — hook `CCSPlayer_MovementServices::ProcessUsercmd` to drive a bot's
-  move/view/buttons from external code . Move values are normalized `-1..+1`, scaled by the engine's maxspeed.
 
 ## Your stars⭐ are my motivation to keep updating
 
@@ -53,8 +51,6 @@ cmake --build build --config Release
 bl_lock <all|aim|jump|weapon> <slot> [slot1..slot5]
 bl_unlock <all|aim|jump|weapon> <slot>
 bl_unlock_all <all|aim|jump|weapon>
-bl_inject <slot> <forward> <side> <yaw> [buttons]
-bl_inject_clear <slot>
 bl_status
 ```
 
@@ -67,29 +63,6 @@ bl_lock all 1                # full freeze
 bl_lock weapon 1 slot3       # force bot 1 to knife
 bl_unlock_all weapon         # clear every weapon lock
 ```
-
-`bl_inject` drives a bot's UserCmd directly. `forward`/`side` are normalized
-`-1..+1`; `buttons` is an optional bitmask (e.g. `1`=attack, `2`=jump, `4`=duck).
-
-```
-bl_inject 1 1 0 0            # bot 1 walks straight forward
-bl_inject 1 0 1 90           # bot 1 strafes right, facing yaw 90
-bl_inject 1 1 0 0 2          # walk forward while jumping
-bl_inject_clear 1            # stop injecting
-```
-
-Button bitmask (OR values together, decimal or `0x` hex):
-
-| Button       | Value | Button         | Value |
-| ------------ | ----- | -------------- | ----- |
-| `IN_ATTACK`  | 1     | `IN_BACK`      | 16    |
-| `IN_JUMP`    | 2     | `IN_USE`       | 32    |
-| `IN_DUCK`    | 4     | `IN_MOVELEFT`  | 512   |
-| `IN_FORWARD` | 8     | `IN_MOVERIGHT` | 1024  |
-
-Movement uses `forward`/`side`, not `IN_FORWARD`; buttons are for actions like
-attack/jump/duck. E.g. `bl_inject 1 1 0 0 6` walks forward while jumping and
-ducking (`2|4`).
 
 ------------------------------------------------------------------------
 
