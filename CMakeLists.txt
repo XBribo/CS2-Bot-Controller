@@ -38,8 +38,10 @@ set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
 set(PROTO_PATHS
     "${PROTO_DIR}"
+    "${HL2SDK}/common"
     "${HL2SDK}/game/shared"
     "${HL2SDK}/game/shared/cs"
+    "${HL2SDK}/thirdparty/protobuf-3.21.8/src"
 )
 set(PROTOC_PATH_ARGS "")
 foreach(proto_path ${PROTO_PATHS})

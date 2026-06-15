@@ -172,7 +172,7 @@ namespace BotController
             bool replaying = slot >= 0 && slot < kMaxSlots &&
                              MotionRecorder::IsReplaying(slot);
 
-            // Before original: write post snapshot into MoveData + force resync.
+            // Before original: write post snapshot into MoveData.
             if (replaying)
                 MotionRecorder::OnReplayFinishMove(slot, services, moveData);
 

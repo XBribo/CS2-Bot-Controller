@@ -52,8 +52,6 @@ namespace BotController
         out.originalControllerIndex = EntIndexFromHandle(out.originalControllerHandle);
         out.controllerSlot = SlotFromEntityIndex(out.controllerIndex);
         out.ownerSlot = out.controllerSlot;
-        if (out.ownerSlot < 0)
-            out.ownerSlot = SlotFromEntityIndex(out.originalControllerIndex);
         return out;
     }
 

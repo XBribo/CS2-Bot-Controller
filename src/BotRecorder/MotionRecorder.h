@@ -114,10 +114,9 @@ namespace BotController
         int CurrentReplayWeaponSelect(int slot);
 
         // ---- replay write hooks ----
-        // ProcessMovement (pre): write pre snapshot into CMoveData + pawn angles + entity moveType
+        // ProcessMovement (pre): write pre snapshot into CMoveData + pawn velocity + entity moveType
         void OnReplayPre(int slot, void *services, void *moveData);
-        // FinishMove (pre): write post snapshot into CMoveData + force
-        // scene-node origin resync (+1000 on Z).
+        // FinishMove (pre): write post snapshot into CMoveData + scene-node origin.
         void OnReplayFinishMove(int slot, void *services, void *moveData);
         // FinishMove (post): commit post moveType/flags, advance cursor.
         void OnReplayCommit(int slot, void *services);

@@ -555,8 +555,8 @@ namespace BotController
             return WeaponLockerHooks::WeaponEntIndex(weapon);
         }
 
-        // Write velocity + view angles onto the pawn
-        static void WriteAnglesVelToPawn(void *services, const MovementSnapshot &s)
+        // Write replay velocity onto the pawn. View replay is driven by SetEyeAngles.
+        static void WriteVelocityToPawn(void *services, const MovementSnapshot &s)
         {
             auto *sv = reinterpret_cast<char *>(services);
             void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
@@ -567,13 +567,6 @@ namespace BotController
             *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 0) = s.velX;
             *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 4) = s.velY;
             *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 8) = s.velZ;
-
-            *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 0) = s.pitch;
-            *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 4) = s.yaw;
-            *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 8) = 0.0f;
-            *reinterpret_cast<float *>(p + tg::kPawn_EyeAngles + 0) = s.pitch;
-            *reinterpret_cast<float *>(p + tg::kPawn_EyeAngles + 4) = s.yaw;
-            *reinterpret_cast<float *>(p + tg::kPawn_EyeAngles + 8) = 0.0f;
         }
 
         static void WriteSceneNodeOrigin(void *services, const MovementSnapshot &s,
@@ -599,9 +592,6 @@ namespace BotController
         static void WriteMoveData(void *moveData, const MovementSnapshot &s)
         {
             auto *m = reinterpret_cast<char *>(moveData);
-            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 0) = s.pitch;
-            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 4) = s.yaw;
-            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 8) = s.roll;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0) = s.originX;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4) = s.originY;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 8) = s.originZ;
@@ -628,7 +618,7 @@ namespace BotController
                 t = p.ticks[cur];
             }
             WriteMoveData(moveData, t.pre);
-            WriteAnglesVelToPawn(services, t.pre);
+            WriteVelocityToPawn(services, t.pre);
             auto *sv = reinterpret_cast<char *>(services);
             // Feed recorded buttons so the engine's Duck()/ladder logic runs
             *reinterpret_cast<uint64_t *>(sv + tg::kServices_Buttons) = t.pre.buttons;
@@ -643,8 +633,7 @@ namespace BotController
             }
         }
 
-        // FinishMove (pre): write post snapshot into CMoveData and force a
-        // scene-node origin resync (+1000 on Z).
+        // FinishMove (pre): write post snapshot into CMoveData + scene-node origin.
         void OnReplayFinishMove(int slot, void *services, void *moveData)
         {
             if (!ValidSlot(slot) || !services || !moveData)
@@ -662,9 +651,11 @@ namespace BotController
                 t = p.ticks[cur];
             }
             WriteMoveData(moveData, t.post);
-
-            // Force engine to resync the entity origin from MoveData
+#if defined(_WIN32)
             WriteSceneNodeOrigin(services, t.post, 1000.0f);
+#else
+            WriteSceneNodeOrigin(services, t.post);
+#endif
         }
 
         void OnReplayCommit(int slot, void *services)
@@ -709,7 +700,7 @@ namespace BotController
                 *reinterpret_cast<uint32_t *>(pp + tg::kEnt_Flags) = live;
             }
 
-            WriteAnglesVelToPawn(services, t.post);
+            WriteVelocityToPawn(services, t.post);
             WriteSceneNodeOrigin(services, t.post);
 
             // Overwrite duck/ladder state
