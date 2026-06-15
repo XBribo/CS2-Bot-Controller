@@ -4,11 +4,11 @@
 #include "InputInjector.h"
 #include "WeaponLocker.h"
 #include "version_targets.h"
-
-#include <Windows.h>
+#include "platform.h"
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <mutex>
@@ -51,7 +51,6 @@ namespace BotController
         static std::array<ReplayState, kMaxSlots> g_rep;
 
         /* ! Replay-rate probe */
-        static LARGE_INTEGER g_qpcFreq{};
         static int64_t g_lastCommitQpc[kMaxSlots] = {0};
         /* ? Velocity-vs-displacement probe */
         static float g_lastPostX[kMaxSlots] = {0};
@@ -64,6 +63,14 @@ namespace BotController
         static bool g_recHaveLast[kMaxSlots] = {false};
 
         static bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
+
+        static int64_t NowMicros()
+        {
+            using clock = std::chrono::steady_clock;
+            return std::chrono::duration_cast<std::chrono::microseconds>(
+                       clock::now().time_since_epoch())
+                .count();
+        }
 
         // Read a MovementSnapshot from live engine state (services -> pawn).
         static bool ReadSnapshot(void *services, MovementSnapshot &out)
@@ -224,7 +231,7 @@ namespace BotController
                     std::snprintf(dbg, sizeof(dbg),
                                   "[BL][recSt] slot=%d i=%d btn=%u pressed=%.2f when=%.3f\n",
                                   slot, i, moves[i].button, moves[i].pressed, moves[i].when);
-                    OutputDebugStringA(dbg);
+                    DebugOut(dbg);
                 }
             }
         }
@@ -275,12 +282,9 @@ namespace BotController
             }
 
             /* ? Record-side diagnostics */
-            if (g_qpcFreq.QuadPart == 0)
-                QueryPerformanceFrequency(&g_qpcFreq);
-            LARGE_INTEGER now;
-            QueryPerformanceCounter(&now);
+            int64_t now = NowMicros();
             long long dtUs = g_recHaveLast[slot]
-                                 ? (now.QuadPart - g_recLastQpc[slot]) * 1000000LL / g_qpcFreq.QuadPart
+                                 ? (now - g_recLastQpc[slot])
                                  : -1;
             float velR = std::sqrt(post.velX * post.velX + post.velY * post.velY);
             float nodeD = -1.0f;
@@ -298,7 +302,7 @@ namespace BotController
                 mvX = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0);
                 mvY = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4);
             }
-            g_recLastQpc[slot] = now.QuadPart;
+            g_recLastQpc[slot] = now;
             g_recLastNodeX[slot] = post.originX;
             g_recLastNodeY[slot] = post.originY;
             g_recHaveLast[slot] = true;
@@ -309,7 +313,7 @@ namespace BotController
                           "node=(%.1f,%.1f) mv=(%.1f,%.1f)\n",
                           tickIdx, dtUs, (unsigned)post.moveType, nSub, def, velR, nodeD,
                           post.originX, post.originY, mvX, mvY);
-            OutputDebugStringA(dbg);
+            DebugOut(dbg);
         }
 
         int CopyTicks(int slot, ReplayTick *out, int maxTicks)
@@ -572,10 +576,32 @@ namespace BotController
             *reinterpret_cast<float *>(p + tg::kPawn_EyeAngles + 8) = 0.0f;
         }
 
+        static void WriteSceneNodeOrigin(void *services, const MovementSnapshot &s,
+                                         float zBias = 0.0f)
+        {
+            auto *sv = reinterpret_cast<char *>(services);
+            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
+            if (!pawn)
+                return;
+
+            void *node = *reinterpret_cast<void **>(
+                reinterpret_cast<char *>(pawn) + tg::kEnt_GameSceneNode);
+            if (!node)
+                return;
+
+            auto *n = reinterpret_cast<char *>(node);
+            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 0) = s.originX;
+            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 4) = s.originY;
+            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 8) = s.originZ + zBias;
+        }
+
         // Write origin + velocity into CMoveData.
         static void WriteMoveData(void *moveData, const MovementSnapshot &s)
         {
             auto *m = reinterpret_cast<char *>(moveData);
+            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 0) = s.pitch;
+            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 4) = s.yaw;
+            *reinterpret_cast<float *>(m + tg::kMove_ViewAngles + 8) = s.roll;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0) = s.originX;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4) = s.originY;
             *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 8) = s.originZ;
@@ -613,14 +639,7 @@ namespace BotController
             {
                 auto *pp = reinterpret_cast<char *>(pawn);
                 *reinterpret_cast<uint8_t *>(pp + tg::kEnt_MoveType) = t.pre.moveType;
-                void *node = *reinterpret_cast<void **>(pp + tg::kEnt_GameSceneNode);
-                if (node)
-                {
-                    auto *n = reinterpret_cast<char *>(node);
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 0) = t.pre.originX;
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 4) = t.pre.originY;
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 8) = t.pre.originZ;
-                }
+                WriteSceneNodeOrigin(services, t.pre);
             }
         }
 
@@ -642,32 +661,12 @@ namespace BotController
                     return;
                 t = p.ticks[cur];
             }
-            auto *m = reinterpret_cast<char *>(moveData);
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0) = t.post.originX;
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4) = t.post.originY;
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 8) = t.post.originZ;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 0) = t.post.velX;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 4) = t.post.velY;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 8) = t.post.velZ;
+            WriteMoveData(moveData, t.post);
 
             // Force engine to resync the entity origin from MoveData
-            auto *sv = reinterpret_cast<char *>(services);
-            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
-            if (pawn)
-            {
-                void *node = *reinterpret_cast<void **>(
-                    reinterpret_cast<char *>(pawn) + tg::kEnt_GameSceneNode);
-                if (node)
-                {
-                    auto *n = reinterpret_cast<char *>(node);
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 0) = t.post.originX;
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 4) = t.post.originY;
-                    *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 8) = t.post.originZ + 1000.0f;
-                }
-            }
+            WriteSceneNodeOrigin(services, t.post, 1000.0f);
         }
 
-        // FinishMove (post): commit post moveType/flags + advance cursor.
         void OnReplayCommit(int slot, void *services)
         {
             if (!ValidSlot(slot) || !services)
@@ -710,6 +709,9 @@ namespace BotController
                 *reinterpret_cast<uint32_t *>(pp + tg::kEnt_Flags) = live;
             }
 
+            WriteAnglesVelToPawn(services, t.post);
+            WriteSceneNodeOrigin(services, t.post);
+
             // Overwrite duck/ladder state
             *reinterpret_cast<float *>(sv + tg::kServices_DuckAmount) = t.post.duckAmount;
             *reinterpret_cast<float *>(sv + tg::kServices_DuckSpeed) = t.post.duckSpeed;
@@ -723,13 +725,10 @@ namespace BotController
             p.cursor.store(cur + 1, std::memory_order_relaxed);
 
             /* ! Rate probe */
-            if (g_qpcFreq.QuadPart == 0)
-                QueryPerformanceFrequency(&g_qpcFreq);
-            LARGE_INTEGER now;
-            QueryPerformanceCounter(&now);
+            int64_t now = NowMicros();
             int64_t prev = g_lastCommitQpc[slot];
-            g_lastCommitQpc[slot] = now.QuadPart;
-            long long dtUs = prev ? (now.QuadPart - prev) * 1000000LL / g_qpcFreq.QuadPart : -1;
+            g_lastCommitQpc[slot] = now;
+            long long dtUs = prev ? (now - prev) : -1;
 
             /* ? Speed probe */
             float velR = std::sqrt(t.post.velX * t.post.velX + t.post.velY * t.post.velY);
@@ -750,7 +749,7 @@ namespace BotController
                           "post=(%.1f,%.1f,%.1f)\n",
                           cur, total, dtUs, (unsigned)t.post.moveType, (int)(t.post.entityFlags & 1),
                           velR, velD, t.post.originX, t.post.originY, t.post.originZ);
-            OutputDebugStringA(dbg);
+            DebugOut(dbg);
         }
 
         void ClearAll()

@@ -80,6 +80,7 @@ namespace BotController::targets
 
     // m_vecVelocity — the velocity TryPlayerMove integrates into origin
     inline int kMove_Velocity = 56;
+    inline int kMove_ViewAngles = 20;
     // m_vecAbsOrigin — post-move origin written here before FinishMove commits
     inline int kMove_AbsOrigin = 200;
 

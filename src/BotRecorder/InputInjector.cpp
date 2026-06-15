@@ -56,17 +56,55 @@ namespace BotController
 
         static std::atomic<uint64_t> g_hookCalls{0};
         static std::atomic<int> g_lastSlot{-1};
+        static std::atomic<uint64_t> g_finishMoveCalls{0};
+        static std::atomic<uint64_t> g_playerRunCommandCalls{0};
+        static std::atomic<uint64_t> g_physicsSimulateCalls{0};
+        static std::atomic<int> g_lastPhysicsSlot{-1};
+        static std::atomic<uint64_t> g_replayCommitCalls{0};
+        static std::atomic<uint64_t> g_slotResolveCalls{0};
+        static std::atomic<uint64_t> g_slotResolveFailures{0};
+        static std::atomic<uintptr_t> g_lastServices{0};
+        static std::atomic<uintptr_t> g_lastPawn{0};
+        static std::atomic<uint32_t> g_lastControllerHandle{0};
+        static std::atomic<uint32_t> g_lastOriginalControllerHandle{0};
+        static std::atomic<int> g_lastControllerIndex{-1};
+        static std::atomic<int> g_lastOriginalControllerIndex{-1};
+        static std::atomic<int> g_lastOwnerSlot{-1};
 
-        // services -> player slot via pawn ptr at services+56, then m_hController.
         static int ServicesToSlot(void *services)
         {
+            g_slotResolveCalls.fetch_add(1, std::memory_order_relaxed);
+            g_lastServices.store(reinterpret_cast<uintptr_t>(services), std::memory_order_relaxed);
+            g_lastPawn.store(0, std::memory_order_relaxed);
+            g_lastControllerHandle.store(0, std::memory_order_relaxed);
+            g_lastOriginalControllerHandle.store(0, std::memory_order_relaxed);
+            g_lastControllerIndex.store(-1, std::memory_order_relaxed);
+            g_lastOriginalControllerIndex.store(-1, std::memory_order_relaxed);
+            g_lastOwnerSlot.store(-1, std::memory_order_relaxed);
+
             if (!services)
+            {
+                g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
                 return -1;
+            }
             void *pawn = *reinterpret_cast<void **>(
                 reinterpret_cast<char *>(services) + tg::kServices_Pawn);
             if (!pawn)
+            {
+                g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
                 return -1;
-            return ControllerSlotForPawn(pawn);
+            }
+
+            PawnControllerHandles handles = ReadPawnControllerHandles(pawn);
+            g_lastPawn.store(reinterpret_cast<uintptr_t>(pawn), std::memory_order_relaxed);
+            g_lastControllerHandle.store(handles.controllerHandle, std::memory_order_relaxed);
+            g_lastOriginalControllerHandle.store(handles.originalControllerHandle, std::memory_order_relaxed);
+            g_lastControllerIndex.store(handles.controllerIndex, std::memory_order_relaxed);
+            g_lastOriginalControllerIndex.store(handles.originalControllerIndex, std::memory_order_relaxed);
+            g_lastOwnerSlot.store(handles.ownerSlot, std::memory_order_relaxed);
+            if (handles.ownerSlot < 0)
+                g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
+            return handles.ownerSlot;
         }
 
         // services -> pawn -> WeaponServices*, for the recording weapon tap.
@@ -129,6 +167,7 @@ namespace BotController
         static void BC_FASTCALL HookedFinishMove(void *services, void *cmd,
                                                 void *moveData)
         {
+            g_finishMoveCalls.fetch_add(1, std::memory_order_relaxed);
             int slot = ServicesToSlot(services);
             bool replaying = slot >= 0 && slot < kMaxSlots &&
                              MotionRecorder::IsReplaying(slot);
@@ -141,13 +180,17 @@ namespace BotController
 
             // After original: commit moveType/flags + advance the replay cursor
             if (replaying && !g_physicsActive)
+            {
                 MotionRecorder::OnReplayCommit(slot, services);
+                g_replayCommitCalls.fetch_add(1, std::memory_order_relaxed);
+            }
         }
 
         // ---- PlayerRunCommand: subtick record + re-inject ----
 
         static void BC_FASTCALL HookedPlayerRunCommand(void *services, void *cmd)
         {
+            g_playerRunCommandCalls.fetch_add(1, std::memory_order_relaxed);
             int slot = ServicesToSlot(services);
             bool recording = slot >= 0 && slot < kMaxSlots &&
                              MotionRecorder::IsRecording(slot);
@@ -258,7 +301,9 @@ namespace BotController
 
         static void BC_FASTCALL HookedPhysicsSimulate(void *controller)
         {
+            g_physicsSimulateCalls.fetch_add(1, std::memory_order_relaxed);
             int slot = ControllerToSlot(controller);
+            g_lastPhysicsSlot.store(slot, std::memory_order_relaxed);
             void *services = (slot >= 0 && slot < kMaxSlots)
                                  ? g_slotServices[slot].load(std::memory_order_acquire)
                                  : nullptr;
@@ -278,7 +323,10 @@ namespace BotController
             if (recording)
                 MotionRecorder::OnCapturePost(slot, services, nullptr);
             if (replaying)
+            {
                 MotionRecorder::OnReplayCommit(slot, services);
+                g_replayCommitCalls.fetch_add(1, std::memory_order_relaxed);
+            }
         }
 
         static std::atomic<bool> g_vtHooksTried{false};
@@ -352,7 +400,7 @@ namespace BotController
             // PhysicsSimulate: the per-tick boundary
             char psErr[256] = {0};
             g_addrPhysicsSimulate = Sig::ResolveSig(
-                gd, serverModule, "CCSPlayer_MovementServices::PhysicsSimulate",
+                gd, serverModule, "CBasePlayerController::OnSimulateUserCommands",
                 psErr, sizeof(psErr));
             if (g_addrPhysicsSimulate &&
                 g_hookPhysicsSimulate.Create(g_addrPhysicsSimulate,
@@ -419,5 +467,19 @@ namespace BotController
 
         uint64_t HookCallCount() { return g_hookCalls.load(std::memory_order_relaxed); }
         int LastResolvedSlot() { return g_lastSlot.load(std::memory_order_relaxed); }
+        uint64_t FinishMoveCallCount() { return g_finishMoveCalls.load(std::memory_order_relaxed); }
+        uint64_t PlayerRunCommandCallCount() { return g_playerRunCommandCalls.load(std::memory_order_relaxed); }
+        uint64_t PhysicsSimulateCallCount() { return g_physicsSimulateCalls.load(std::memory_order_relaxed); }
+        int LastPhysicsSlot() { return g_lastPhysicsSlot.load(std::memory_order_relaxed); }
+        uint64_t ReplayCommitCount() { return g_replayCommitCalls.load(std::memory_order_relaxed); }
+        uint64_t SlotResolveCallCount() { return g_slotResolveCalls.load(std::memory_order_relaxed); }
+        uint64_t SlotResolveFailureCount() { return g_slotResolveFailures.load(std::memory_order_relaxed); }
+        uintptr_t LastServices() { return g_lastServices.load(std::memory_order_relaxed); }
+        uintptr_t LastPawn() { return g_lastPawn.load(std::memory_order_relaxed); }
+        uint32_t LastControllerHandle() { return g_lastControllerHandle.load(std::memory_order_relaxed); }
+        uint32_t LastOriginalControllerHandle() { return g_lastOriginalControllerHandle.load(std::memory_order_relaxed); }
+        int LastControllerIndex() { return g_lastControllerIndex.load(std::memory_order_relaxed); }
+        int LastOriginalControllerIndex() { return g_lastOriginalControllerIndex.load(std::memory_order_relaxed); }
+        int LastOwnerSlot() { return g_lastOwnerSlot.load(std::memory_order_relaxed); }
     }
 }

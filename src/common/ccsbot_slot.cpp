@@ -26,6 +26,37 @@ namespace BotController
         return static_cast<int>(h & 0x7FFFu);
     }
 
+    static int SlotFromEntityIndex(int idx)
+    {
+        if (idx < 1 || idx > 64)
+            return -1;
+        return idx - 1;
+    }
+
+    PawnControllerHandles ReadPawnControllerHandles(void *pawn)
+    {
+        PawnControllerHandles out{};
+        out.controllerIndex = -1;
+        out.originalControllerIndex = -1;
+        out.controllerSlot = -1;
+        out.ownerSlot = -1;
+
+        if (!pawn)
+            return out;
+
+        out.controllerHandle = *reinterpret_cast<uint32_t *>(
+            reinterpret_cast<char *>(pawn) + tg::kPawn_Controller);
+        out.originalControllerHandle = *reinterpret_cast<uint32_t *>(
+            reinterpret_cast<char *>(pawn) + tg::kPawn_OriginalController);
+        out.controllerIndex = EntIndexFromHandle(out.controllerHandle);
+        out.originalControllerIndex = EntIndexFromHandle(out.originalControllerHandle);
+        out.controllerSlot = SlotFromEntityIndex(out.controllerIndex);
+        out.ownerSlot = out.controllerSlot;
+        if (out.ownerSlot < 0)
+            out.ownerSlot = SlotFromEntityIndex(out.originalControllerIndex);
+        return out;
+    }
+
     static void ScanPawnForControllerHandle(void *pawn)
     {
         if (!pawn)
@@ -68,19 +99,7 @@ namespace BotController
                 out.pawnEntIndex = idx;
         }
 
-        // Read m_hController; fall back to m_hOriginalController if the
-        // primary handle isn't populated for this pawn yet.
-        uint32_t ctrlHandle = *reinterpret_cast<uint32_t *>(
-            reinterpret_cast<char *>(pawn) + tg::kPawn_Controller);
-        int ctrlIdx = EntIndexFromHandle(ctrlHandle);
-        if (ctrlIdx < 1 || ctrlIdx > 64)
-        {
-            uint32_t origHandle = *reinterpret_cast<uint32_t *>(
-                reinterpret_cast<char *>(pawn) + tg::kPawn_OriginalController);
-            ctrlIdx = EntIndexFromHandle(origHandle);
-        }
-        if (ctrlIdx >= 1 && ctrlIdx <= 64)
-            out.slot = ctrlIdx - 1;
+        out.slot = ReadPawnControllerHandles(pawn).ownerSlot;
 
         if (kEnableHandleScan)
         {
@@ -102,12 +121,12 @@ namespace BotController
     {
         if (!pawn)
             return -1;
-        uint32_t h = *reinterpret_cast<uint32_t *>(
-            reinterpret_cast<char *>(pawn) + tg::kPawn_Controller);
-        int idx = EntIndexFromHandle(h);
-        if (idx < 1 || idx > 64)
-            return -1;
-        return idx - 1;
+        return ReadPawnControllerHandles(pawn).controllerSlot;
+    }
+
+    int ControllerOwnerSlotForPawn(void *pawn)
+    {
+        return ReadPawnControllerHandles(pawn).ownerSlot;
     }
 
     // CCSPlayerController*'s own identity ehandle -> entindex -> slot.

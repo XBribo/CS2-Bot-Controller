@@ -7,6 +7,7 @@
 #include "InputInjector.h"
 #include "WeaponLockerState.h"
 #include "BotControllerState.h"
+#include "MotionRecorder.h"
 
 #include <tier0/dbg.h>
 #include <convar.h>
@@ -273,9 +274,46 @@ CON_COMMAND_F(bc_status,
                             InputInjector::ProcessUsercmdAddress());
 
     Commands::PrintToCaller(context,
-                            "[BC] usercmd hook fired: %llu times | last slot=%d\n",
+                            "[BC] process movement hook fired: %llu times | last slot=%d\n",
                             (unsigned long long)InputInjector::HookCallCount(),
                             InputInjector::LastResolvedSlot());
+
+    Commands::PrintToCaller(context,
+                            "[BC] movement detail: finish=%llu runCmd=%llu physics=%llu lastPhysicsSlot=%d commits=%llu\n",
+                            (unsigned long long)InputInjector::FinishMoveCallCount(),
+                            (unsigned long long)InputInjector::PlayerRunCommandCallCount(),
+                            (unsigned long long)InputInjector::PhysicsSimulateCallCount(),
+                            InputInjector::LastPhysicsSlot(),
+                            (unsigned long long)InputInjector::ReplayCommitCount());
+
+    Commands::PrintToCaller(context,
+                            "[BC] slot resolve: calls=%llu failures=%llu last services=%p pawn=%p ownerSlot=%d ctrl=0x%08X idx=%d orig=0x%08X idx=%d\n",
+                            (unsigned long long)InputInjector::SlotResolveCallCount(),
+                            (unsigned long long)InputInjector::SlotResolveFailureCount(),
+                            reinterpret_cast<void *>(InputInjector::LastServices()),
+                            reinterpret_cast<void *>(InputInjector::LastPawn()),
+                            InputInjector::LastOwnerSlot(),
+                            InputInjector::LastControllerHandle(),
+                            InputInjector::LastControllerIndex(),
+                            InputInjector::LastOriginalControllerHandle(),
+                            InputInjector::LastOriginalControllerIndex());
+
+    bool printedReplayHeader = false;
+    for (int s = 0; s < MotionRecorder::kMaxSlots; ++s)
+    {
+        int cursor = MotionRecorder::ReplayCursor(s);
+        int total = MotionRecorder::ReplayTotal(s);
+        if (cursor >= 0 || total > 0)
+        {
+            if (!printedReplayHeader)
+            {
+                Commands::PrintToCaller(context, "[BC] replay slots:\n");
+                printedReplayHeader = true;
+            }
+            Commands::PrintToCaller(context, "[BC]   replay slot %2d cursor=%d total=%d\n",
+                                    s, cursor, total);
+        }
+    }
 
     // All lock
     int nAll = BotControllerState::CountAll();

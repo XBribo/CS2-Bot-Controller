@@ -4,6 +4,7 @@ project(BotController CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -35,21 +36,49 @@ message(STATUS "protoc: ${PROTOC_EXE} (${PROTOC_VER})")
 set(PROTO_FILES network_connection.proto networkbasetypes.proto usercmd.proto cs_usercmd.proto)
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
+set(PROTO_PATHS
+    "${PROTO_DIR}"
+    "${HL2SDK}/game/shared"
+    "${HL2SDK}/game/shared/cs"
+)
+set(PROTOC_PATH_ARGS "")
+foreach(proto_path ${PROTO_PATHS})
+    list(APPEND PROTOC_PATH_ARGS "--proto_path=${proto_path}")
+endforeach()
 set(PROTO_SRCS "")
 set(PROTO_INPUTS "")
 foreach(p ${PROTO_FILES})
     string(REGEX REPLACE "\\.proto$" ".pb.cc" cc ${p})
     string(REGEX REPLACE "\\.proto$" ".pb.h"  hh ${p})
     list(APPEND PROTO_SRCS   "${GENERATED_DIR}/${cc}" "${GENERATED_DIR}/${hh}")
-    list(APPEND PROTO_INPUTS "${PROTO_DIR}/${p}")
+    set(proto_input "")
+    foreach(proto_path ${PROTO_PATHS})
+        if(EXISTS "${proto_path}/${p}")
+            set(proto_input "${proto_path}/${p}")
+            break()
+        endif()
+    endforeach()
+    if(NOT proto_input)
+        message(FATAL_ERROR "Missing proto input '${p}' in PROTO_PATHS")
+    endif()
+    list(APPEND PROTO_INPUTS "${proto_input}")
 endforeach()
+if(WIN32)
+    set(STRIP_PROTO_FINAL_COMMAND
+        powershell -NoProfile -Command
+        "Get-ChildItem '${GENERATED_DIR}/*.pb.h' | ForEach-Object { (Get-Content -Raw $_) -replace ' final :',' :' | Set-Content -NoNewline $_ }")
+else()
+    set(STRIP_PROTO_FINAL_COMMAND
+        /bin/sh -c
+        "perl -0pi -e 's/ final :/ :/g' '${GENERATED_DIR}'/*.pb.h")
+endif()
 add_custom_command(
     OUTPUT ${PROTO_SRCS}
-    COMMAND "${PROTOC_EXE}" --cpp_out=${GENERATED_DIR} --proto_path=${PROTO_DIR} ${PROTO_FILES}
+    COMMAND "${PROTOC_EXE}" --cpp_out=${GENERATED_DIR} ${PROTOC_PATH_ARGS} ${PROTO_FILES}
     # protoc 3.21 emits `class X final : public Message`; strip the class-def
     # `final` so PlayerCommand (playercommand.h) can inherit CSGOUserCmdPB.
     # final is only a devirtualization hint -- no layout/ABI impact.
-    COMMAND powershell -NoProfile -Command "Get-ChildItem '${GENERATED_DIR}/*.pb.h' | ForEach-Object { (Get-Content -Raw $_) -replace ' final :',' :' | Set-Content -NoNewline $_ }"
+    COMMAND ${STRIP_PROTO_FINAL_COMMAND}
     DEPENDS ${PROTO_INPUTS}
     WORKING_DIRECTORY "${PROTO_DIR}"
     COMMENT "protoc ${PROTO_FILES} (+ strip class final)"
@@ -64,7 +93,7 @@ if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt
 endif()
 FetchContent_Declare(funchook
     GIT_REPOSITORY https://github.com/kubo/funchook.git
-    GIT_TAG v2.0.0 GIT_SHALLOW TRUE
+    GIT_TAG v1.1.3 GIT_SHALLOW TRUE
     UPDATE_DISCONNECTED TRUE)
 FetchContent_MakeAvailable(funchook)
 
@@ -162,6 +191,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(BotController PRIVATE
         POSIX _LINUX LINUX
         COMPILER_GCC
+        _GLIBCXX_USE_CXX11_ABI=0
         stricmp=strcasecmp
         _stricmp=strcasecmp
         _strnicmp=strncasecmp

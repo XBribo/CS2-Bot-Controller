@@ -30,5 +30,19 @@ namespace BotController
         // Diagnostics
         uint64_t HookCallCount();
         int LastResolvedSlot();
+        uint64_t FinishMoveCallCount();
+        uint64_t PlayerRunCommandCallCount();
+        uint64_t PhysicsSimulateCallCount();
+        int LastPhysicsSlot();
+        uint64_t ReplayCommitCount();
+        uint64_t SlotResolveCallCount();
+        uint64_t SlotResolveFailureCount();
+        uintptr_t LastServices();
+        uintptr_t LastPawn();
+        uint32_t LastControllerHandle();
+        uint32_t LastOriginalControllerHandle();
+        int LastControllerIndex();
+        int LastOriginalControllerIndex();
+        int LastOwnerSlot();
     }
 }
