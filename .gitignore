@@ -1,15 +1,13 @@
 build/
 out/
-deassemble/
 cmake-build-*/
-.claude/
 *.dll
 *.exp
 *.lib
 *.pdb
 *.obj
 
-# .NET (csharp/BotRecorder)
+# .NET
 bin/
 obj/
 *.nupkg
@@ -23,6 +21,3 @@ CMakeSettings.json
 CMakeUserPresets.json
 
 *.log
-CLAUDE.md
-.gitignore
-docs/
