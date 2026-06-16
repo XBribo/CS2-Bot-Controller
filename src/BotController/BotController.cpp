@@ -90,7 +90,7 @@ namespace BotController
         // Engine eye-angle
         static void BC_FASTCALL HookedSetEyeAngles(void *pawn, float *angle)
         {
-            int slot = pawn ? ControllerOwnerSlotForPawn(pawn) : -1;
+            int slot = pawn ? ControllerSlotForPawn(pawn) : -1;
             ReplayTick t{};
             if (slot >= 0 && MotionRecorder::CurrentReplayTick(slot, t))
             {

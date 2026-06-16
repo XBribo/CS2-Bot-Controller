@@ -122,11 +122,6 @@ namespace BotController
         return ReadPawnControllerHandles(pawn).controllerSlot;
     }
 
-    int ControllerOwnerSlotForPawn(void *pawn)
-    {
-        return ReadPawnControllerHandles(pawn).ownerSlot;
-    }
-
     // CCSPlayerController*'s own identity ehandle -> entindex -> slot.
     int ControllerToSlot(void *controller)
     {
