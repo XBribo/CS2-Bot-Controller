@@ -35,8 +35,6 @@ namespace BotController
     // used to detect human takeover
     int ControllerSlotForPawn(void *pawn);
 
-    int ControllerOwnerSlotForPawn(void *pawn);
-
     PawnControllerHandles ReadPawnControllerHandles(void *pawn);
 
     // CCSPlayerController* (PhysicsSimulate arg0) -> slot via its own ehandle.

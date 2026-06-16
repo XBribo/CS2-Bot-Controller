@@ -283,13 +283,6 @@
     },
     "comment": "m_vecVelocity (56)."
   },
-  "CMoveData::ViewAngles": {
-    "offsets": {
-      "windows": 20,
-      "linux": 20
-    },
-    "comment": "m_vecViewAngles (20), matching cs2kz FinishMove replay writes."
-  },
   "CMoveData::AbsOrigin": {
     "offsets": {
       "windows": 200,
