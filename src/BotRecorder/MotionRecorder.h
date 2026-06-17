@@ -94,6 +94,8 @@ namespace BotController
 
         // Current tick being applied this server tick
         bool CurrentReplayTick(int slot, ReplayTick &out);
+        // Command view angles for the tick currently being simulated.
+        bool ReplayCommandViewSnapshot(int slot, MovementSnapshot &out);
         // Copy the current tick's subtick moves into out
         // Returns count, or -1 if not replaying.
         int CurrentReplaySubticks(int slot, SubtickMove *out, int maxOut);
@@ -112,6 +114,7 @@ namespace BotController
 
         // Entity index to write into cmd.weaponselect this replay tick
         int CurrentReplayWeaponSelect(int slot);
+        int CurrentReplayWeaponDef(int slot);
 
         // ---- replay write hooks ----
         // ProcessMovement (pre): write pre snapshot into CMoveData + pawn velocity + entity moveType

@@ -447,6 +447,22 @@ namespace BotController
             return true;
         }
 
+        bool ReplayCommandViewSnapshot(int slot, MovementSnapshot &out)
+        {
+            if (!ValidSlot(slot))
+                return false;
+            ReplayState &p = g_rep[slot];
+            if (!p.playing.load(std::memory_order_acquire))
+                return false;
+            std::lock_guard<std::mutex> lk(p.mu);
+            int total = static_cast<int>(p.ticks.size());
+            int cur = p.cursor.load(std::memory_order_relaxed);
+            if (cur < 0 || cur >= total)
+                return false;
+            out = p.ticks[cur].pre;
+            return true;
+        }
+
         int CurrentReplaySubticks(int slot, SubtickMove *out, int maxOut)
         {
             if (!ValidSlot(slot) || !out || maxOut <= 0)
@@ -456,10 +472,8 @@ namespace BotController
                 return -1;
             std::lock_guard<std::mutex> lk(p.mu);
             int total = static_cast<int>(p.ticks.size());
-            int idx = p.cursor.load(std::memory_order_relaxed) - 1;
-            if (idx < 0)
-                idx = 0;
-            if (idx >= total)
+            int idx = p.cursor.load(std::memory_order_relaxed);
+            if (idx < 0 || idx >= total)
                 return -1;
             uint32_t begin = p.subOffset[idx];
             uint32_t end = p.subOffset[idx + 1];
@@ -484,12 +498,16 @@ namespace BotController
             int cur = p.cursor.load(std::memory_order_relaxed);
             if (cur < 0 || cur >= total)
                 return false;
-            uint64_t heldNow = p.ticks[cur].pre.buttons;
-            // Previous tick's held mask; 0 before the first tick so the opening press registers as a fresh edge.
-            uint64_t heldPrev = (cur > 0) ? p.ticks[cur - 1].pre.buttons : 0;
-            b0 = heldNow;
-            b1 = heldNow & ~heldPrev; // pressed this tick
-            b2 = heldPrev & ~heldNow; // released this tick
+            const MovementSnapshot &pre = p.ticks[cur].pre;
+            b0 = pre.buttons;
+            b1 = pre.buttons1;
+            b2 = pre.buttons2;
+            if (b1 == 0 && b2 == 0)
+            {
+                uint64_t heldPrev = (cur > 0) ? p.ticks[cur - 1].pre.buttons : 0;
+                b1 = b0 & ~heldPrev;
+                b2 = heldPrev & ~b0;
+            }
             return true;
         }
 
@@ -520,24 +538,28 @@ namespace BotController
         }
 
         // Entity index for cmd.weaponselect this replay tick
+        int CurrentReplayWeaponDef(int slot)
+        {
+            if (!ValidSlot(slot))
+                return -1;
+            ReplayState &p = g_rep[slot];
+            if (!p.playing.load(std::memory_order_acquire))
+                return -1;
+            std::lock_guard<std::mutex> lk(p.mu);
+            int total = static_cast<int>(p.ticks.size());
+            int cur = p.cursor.load(std::memory_order_relaxed);
+            if (cur < 0 || cur >= total)
+                return -1;
+            return p.ticks[cur].weaponDefIndex;
+        }
+
         int CurrentReplayWeaponSelect(int slot)
         {
             if (!ValidSlot(slot) || !WeaponLockerHooks::WeaponHooksReady())
                 return -1;
 
             // Recorded def for the tick about to be simulated
-            int recordedDef;
-            {
-                ReplayState &p = g_rep[slot];
-                if (!p.playing.load(std::memory_order_acquire))
-                    return -1;
-                std::lock_guard<std::mutex> lk(p.mu);
-                int total = static_cast<int>(p.ticks.size());
-                int cur = p.cursor.load(std::memory_order_relaxed);
-                if (cur < 0 || cur >= total)
-                    return -1;
-                recordedDef = p.ticks[cur].weaponDefIndex;
-            }
+            int recordedDef = CurrentReplayWeaponDef(slot);
             if (recordedDef < 0)
                 return -1;
 
@@ -547,11 +569,16 @@ namespace BotController
 
             // Already holding the recorded weapon -> no switch
             if (WeaponLockerHooks::ActiveWeaponDef(ws) == recordedDef)
+            {
+                g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
                 return -1;
+            }
 
             void *weapon = WeaponLockerHooks::FindWeaponByDef(ws, recordedDef);
             if (!weapon)
                 return -1;
+            WeaponLockerHooks::SelectWeaponRaw(ws, weapon);
+            g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
             return WeaponLockerHooks::WeaponEntIndex(weapon);
         }
 
@@ -600,6 +627,19 @@ namespace BotController
             *reinterpret_cast<float *>(m + tg::kMove_Velocity + 8) = s.velZ;
         }
 
+        static void WriteMovementServiceState(void *services, const MovementSnapshot &s)
+        {
+            auto *sv = reinterpret_cast<char *>(services);
+            *reinterpret_cast<float *>(sv + tg::kServices_DuckAmount) = s.duckAmount;
+            *reinterpret_cast<float *>(sv + tg::kServices_DuckSpeed) = s.duckSpeed;
+            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 0) = s.ladderNormalX;
+            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 4) = s.ladderNormalY;
+            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 8) = s.ladderNormalZ;
+            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducked) = s.ducked;
+            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducking) = s.ducking;
+            *reinterpret_cast<uint8_t *>(sv + tg::kServices_DesiresDuck) = s.desiresDuck;
+        }
+
         // ProcessMovement (pre): seed CMoveData + pawn + moveType with pre state.
         void OnReplayPre(int slot, void *services, void *moveData)
         {
@@ -619,6 +659,7 @@ namespace BotController
             }
             WriteMoveData(moveData, t.pre);
             WriteVelocityToPawn(services, t.pre);
+            WriteMovementServiceState(services, t.pre);
             auto *sv = reinterpret_cast<char *>(services);
             // Feed recorded buttons so the engine's Duck()/ladder logic runs
             *reinterpret_cast<uint64_t *>(sv + tg::kServices_Buttons) = t.pre.buttons;
@@ -702,16 +743,7 @@ namespace BotController
 
             WriteVelocityToPawn(services, t.post);
             WriteSceneNodeOrigin(services, t.post);
-
-            // Overwrite duck/ladder state
-            *reinterpret_cast<float *>(sv + tg::kServices_DuckAmount) = t.post.duckAmount;
-            *reinterpret_cast<float *>(sv + tg::kServices_DuckSpeed) = t.post.duckSpeed;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 0) = t.post.ladderNormalX;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 4) = t.post.ladderNormalY;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 8) = t.post.ladderNormalZ;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducked) = t.post.ducked;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducking) = t.post.ducking;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_DesiresDuck) = t.post.desiresDuck;
+            WriteMovementServiceState(services, t.post);
 
             p.cursor.store(cur + 1, std::memory_order_relaxed);
 
