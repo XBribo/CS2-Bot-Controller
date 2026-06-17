@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -71,6 +72,11 @@ namespace BotController
         static std::atomic<int> g_lastOriginalControllerIndex{-1};
         static std::atomic<int> g_lastOwnerSlot{-1};
 
+        static bool IsThrowableUtilityDef(int def)
+        {
+            return def >= 43 && def <= 48;
+        }
+
         static int ServicesToSlot(void *services)
         {
             g_slotResolveCalls.fetch_add(1, std::memory_order_relaxed);
@@ -118,6 +124,14 @@ namespace BotController
                 return nullptr;
             return *reinterpret_cast<void **>(
                 reinterpret_cast<char *>(pawn) + tg::kPawn_WeaponServices);
+        }
+
+        static float NormalizeDeg(float a)
+        {
+            a = std::fmod(a + 180.0f, 360.0f);
+            if (a < 0.0f)
+                a += 360.0f;
+            return a - 180.0f;
         }
 
         // ---- ProcessMovement: record pre/post + replay pre ----
@@ -227,9 +241,38 @@ namespace BotController
 
                 if (replaying)
                 {
+                    const uint64_t kInAttack = 1ull; // IN_ATTACK bit0
                     uint64_t b0 = 0, b1 = 0, b2 = 0;
-                    if (MotionRecorder::CurrentReplayInputButtons(slot, b0, b1, b2))
+                    bool haveButtons = MotionRecorder::CurrentReplayInputButtons(slot, b0, b1, b2);
+
+                    MovementSnapshot cmdView{};
+                    if (MotionRecorder::ReplayCommandViewSnapshot(slot, cmdView))
                     {
+                        CMsgQAngle *view = base->mutable_viewangles();
+                        view->set_x(cmdView.pitch);
+                        view->set_y(NormalizeDeg(cmdView.yaw));
+                        view->set_z(0.0f);
+                    }
+
+                    int recordedDef = MotionRecorder::CurrentReplayWeaponDef(slot);
+                    int wsel = MotionRecorder::CurrentReplayWeaponSelect(slot);
+                    if (wsel >= 0)
+                        base->set_weaponselect(wsel);
+
+                    bool suppressUnsafeUtilityAttack =
+                        IsThrowableUtilityDef(recordedDef) &&
+                        wsel < 0 &&
+                        MotionRecorder::BotActiveWeaponDef(slot) != recordedDef;
+
+                    if (haveButtons)
+                    {
+                        if (suppressUnsafeUtilityAttack)
+                        {
+                            b0 &= ~kInAttack;
+                            b1 &= ~kInAttack;
+                            b2 &= ~kInAttack;
+                        }
+
                         CInButtonStatePB *bp = base->mutable_buttons_pb();
                         bp->set_buttonstate1(b0);
                         bp->set_buttonstate2(b1);
@@ -238,10 +281,6 @@ namespace BotController
                         pc->buttonstates.m_pButtonStates[1] = b1;
                         pc->buttonstates.m_pButtonStates[2] = b2;
                     }
-
-                    int wsel = MotionRecorder::CurrentReplayWeaponSelect(slot);
-                    if (wsel >= 0)
-                        base->set_weaponselect(wsel);
 
                     // Replace the command's subtick_moves with the recorded set for this tick
                     SubtickMove out[MotionRecorder::kMaxSubtickPerTick];
@@ -253,11 +292,20 @@ namespace BotController
                     float dbgStPressed = -1.0f, dbgStWhen = -1.0f;
                     for (int i = 0; i < n; ++i)
                     {
+                        uint32_t button = out[i].button;
+                        float pressed = out[i].pressed;
+                        if (suppressUnsafeUtilityAttack && (button & kInAttack))
+                        {
+                            button &= ~static_cast<uint32_t>(kInAttack);
+                            if (button == 0)
+                                pressed = 0.0f;
+                        }
+
                         CSubtickMoveStep *m = base->add_subtick_moves();
                         m->set_when(out[i].when);
-                        m->set_button(out[i].button);
-                        if (out[i].button != 0) // digital press/release
-                            m->set_pressed(out[i].pressed != 0.0f);
+                        m->set_button(button);
+                        if (button != 0) // digital press/release
+                            m->set_pressed(pressed != 0.0f);
                         if (out[i].pitchDelta != 0.0f)
                             m->set_pitch_delta(out[i].pitchDelta);
                         if (out[i].yawDelta != 0.0f)
@@ -266,16 +314,15 @@ namespace BotController
                             m->set_analog_forward_delta(out[i].analogForward);
                         if (out[i].analogLeft != 0.0f)
                             m->set_analog_left_delta(out[i].analogLeft);
-                        if (out[i].button & 1ull) // IN_ATTACK subtick
+                        if (button & kInAttack) // IN_ATTACK subtick
                         {
-                            dbgStBtn = static_cast<int>(out[i].button);
-                            dbgStPressed = out[i].pressed;
+                            dbgStBtn = static_cast<int>(button);
+                            dbgStPressed = pressed;
                             dbgStWhen = out[i].when;
                         }
                     }
 
                     /* ? Throw-window diagnostic */
-                    const uint64_t kInAttack = 1ull; // IN_ATTACK bit0
                     if (((b0 | b1 | b2) & kInAttack) || wsel >= 0 || dbgStBtn >= 0)
                     {
                         char dbg[256];
