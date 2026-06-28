@@ -215,14 +215,12 @@ buffers can be serialized and reloaded across rounds. Main thread only.
 
 ## License
 
-BotController is now mixed-license:
+AGPLv3
 
-BotController: AGPL-3.0-only beginning with v0.4.8.
-csharp/BotControllerApi and csharp/BotControllerImpl: GPL-3.0-only for now.
-third_party/: vendored components keep their upstream license files.
-BotController is source-available under strong copyleft terms for community and research use. Commercial use is allowed under AGPL/GPL, but closed-source redistribution, hosted conversion services, and proprietary integrations require either full license compliance or a separate commercial license.
+Starting with v0.4.8, BotController is licensed under AGPL-3.0-only, except for `csharp/BotControllerApi` and `csharp/BotControllerImpl`, which remain GPL-3.0-only for now.
+Components in `third_party/` retain their original upstream licenses.
 
-See LICENSE for the path-level license matrix. The root LICENSE-AGPL-3.0 and LICENSE-GPL-3.0 files are standard license texts for GitHub and license scanners.
+BotController is source-available under strong copyleft terms for community and research use. Commercial use is permitted under the AGPL/GPL, but closed-source redistribution, hosted conversion services, and proprietary integrations require either full compliance with the respective license or a separate commercial license.
 
 ------------------------------------------------------------------------
 
