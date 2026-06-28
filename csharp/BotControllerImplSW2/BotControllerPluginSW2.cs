@@ -117,6 +117,9 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
     private string FileFor(ulong steamId) =>
         Path.Combine(RecordingsDir, $"{steamId}.json");
 
+    private static string Tag(string msg) =>
+        $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
+
     // ---- Chat Commands ----
 
     [Command("record")]
@@ -127,10 +130,10 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
 
         if (!BotController.StartRecord(player.Slot))
         {
-            context.Reply(" \u0004[BotController]\u0001 Failed to start recording.");
+            context.Reply(Tag("Failed to start recording."));
             return;
         }
-        context.Reply(" \u0004[BotController]\u0001 Recording. Use !stoprecord to finish.");
+            context.Reply(Tag("Recording. Use !stoprecord to finish."));
     }
 
     [Command("stoprecord")]
@@ -143,8 +146,8 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
 
         int saved = MotionStore.SaveToFile(player.Slot, FileFor(player.SteamID), Tickrate);
         context.Reply(saved > 0
-            ? $" \u0004[BotController]\u0001 Saved {saved} ticks."
-            : " \u0004[BotController]\u0001 Nothing recorded.");
+            ? Tag($"Saved {saved} ticks.")
+            : Tag("Nothing recorded."));
     }
 
     [Command("replay")]
@@ -155,25 +158,25 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
 
         if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int botSlot))
         {
-            context.Reply(" \u0004[BotController]\u0001 Usage: !replay <botSlot> [loop]");
+            context.Reply(Tag("Usage: !replay <botSlot> [loop]"));
             return;
         }
         bool loop = context.Args.Length >= 2 && context.Args[1] == "loop";
         string file = FileFor(player.SteamID);
         if (!File.Exists(file))
         {
-            context.Reply(" \u0004[BotController]\u0001 No recording found. Use !record first.");
+            context.Reply(Tag("No recording found. Use !record first."));
             return;
         }
 
         MotionRecording rec = MotionStore.LoadFromFile(file);
         if (rec.Ticks.Length == 0)
         {
-            context.Reply(" \u0004[BotController]\u0001 Recording is empty.");
+            context.Reply(Tag("Recording is empty."));
             return;
         }
         if (rec.Tickrate != Tickrate)
-            context.Reply($" \u0004[BotController]\u0001 WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+            context.Reply(Tag($"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}."));
 
         // Freeze the bot's AI so it doesn't fight the replayed motion.
         BotController.Lock(botSlot, LockKind.All);
@@ -182,12 +185,12 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
             BotController.StartReplay(botSlot, loop))
         {
             _driver.Track(botSlot);
-            context.Reply($" \u0004[BotController]\u0001 Replaying on bot slot {botSlot}{(loop ? " (loop)" : "")}.");
+            context.Reply(Tag($"Replaying on bot slot {botSlot}{(loop ? " (loop)" : "")}."));
         }
         else
         {
             BotController.Unlock(botSlot, LockKind.All);
-            context.Reply(" \u0004[BotController]\u0001 Failed to start replay.");
+            context.Reply(Tag("Failed to start replay."));
         }
     }
 
@@ -201,6 +204,6 @@ public partial class BotControllerPluginSW2(ISwiftlyCore core) : BasePlugin(core
 
         BotController.StopReplay(botSlot);
         _driver.Release(botSlot);
-        context.Reply($" \u0004[BotController]\u0001 Stopped replay on bot slot {botSlot}.");
+        context.Reply(Tag($"Stopped replay on bot slot {botSlot}."));
     }
 }
