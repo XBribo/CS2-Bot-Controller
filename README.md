@@ -303,6 +303,18 @@ Deploy the `build/` contents to:
 The `build.ps1` script handles this automatically: pass no extra flags to
 build all targets (native + CounterStrikeSharp + SwiftlyS2).
 
+### Verification
+
+A minimal consumer demo (`BotControllerDemoSW2`) is included for smoke-testing
+the cross-plugin API. Deploy it alongside `BotControllerImplSW2`, then run:
+
+```
+!bc_test <botSlot>     lock a bot (All), auto-unlock after 3 seconds
+```
+
+If the bot freezes and un-freezes, the `IInterfaceManager` → `IBotControllerApi`
+chain is working correctly.
+
 ------------------------------------------------------------------------
 
 ## Special thanks
