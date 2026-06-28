@@ -13,8 +13,9 @@ and it can **record** a human player's per-tick movement and **replay** it back
 through any bot.
 
 It exposes both in-game console commands and a C-ABI surface for
-CounterStrikeSharp, so a plugin can record, transfer, and replay motion with a
-few P/Invoke calls. Win64 and Linux (linuxsteamrt64) are both supported.
+**CounterStrikeSharp** and **SwiftlyS2**, so a plugin can record, transfer, and
+replay motion with a few P/Invoke calls. Win64 and Linux (linuxsteamrt64) are both
+supported.
 
 ------------------------------------------------------------------------
 
@@ -37,7 +38,7 @@ movement path, so it reproduces the original motion subtick-accurate.
 
 Typical flow: lock the source slot if needed → `StartRecord` → move → `StopRecord`
 → `TransferRecordingToReplay` into a bot slot → `Lock(All)` the bot →
-`StartReplay`. See the CounterStrikeSharp API section below.
+`StartReplay`. See the CounterStrikeSharp and SwiftlyS2 API sections below.
 
 ------------------------------------------------------------------------
 
@@ -61,6 +62,8 @@ The build stages a ready-to-copy `addons/` tree under `build/package/`.
   (`.so` → `linuxsteamrt64/` on Linux)
 - `gamedata.json` → `csgo/addons/BotController/`
 - `BotController.vdf`  → `csgo/addons/metamod/`
+- **CounterStrikeSharp**: `BotControllerImpl.dll` → `csgo/addons/counterstrikesharp/plugins/BotControllerImpl/`
+- **SwiftlyS2**: `BotControllerImplSW2.dll` → `csgo/addons/swiftlys2/plugins/BotControllerImplSW2/`
 
 ------------------------------------------------------------------------
 
@@ -203,6 +206,76 @@ BotController.StopReplay(botSlot);
 
 `ReplayTick` / `SubtickMove` mirror the C++ struct layout byte-for-byte, so the
 buffers can be serialized and reloaded across rounds. Main thread only.
+
+------------------------------------------------------------------------
+
+## SwiftlyS2 API
+
+The SwiftlyS2 plugin (`BotControllerImplSW2`) targets **net10.0** and references
+`SwiftlyS2.CS2`. It uses the same `BotControllerApi` type library as the
+CounterStrikeSharp plugin, so `IBotControllerApi`, `LockKind`, `ReplayTick`,
+and all other types are identical across both frameworks.
+
+### Chat Commands
+
+All commands are auto-prefixed with `sw_` and can be triggered from chat with `!`.
+
+```
+!record                          start recording your movement
+!stoprecord                      stop recording and save to JSON
+!replay <botSlot> [loop]         replay your recording on a bot
+!stopreplay <botSlot>            stop a bot's replay
+```
+
+### Cross-Plugin API
+
+The plugin registers the API via `IInterfaceManager` with the key
+`"botcontroller:api"`. Other plugins consume it:
+
+```csharp
+using BotControllerApi;
+using SwiftlyS2.Shared;
+
+public override void UseSharedInterface(IInterfaceManager interfaceManager)
+{
+    if (interfaceManager.TryGetSharedInterface<IBotControllerApi>(
+            "botcontroller:api", out var api))
+    {
+        _bots = api;
+    }
+}
+
+// ... later ...
+_bots?.Lock(slot, LockKind.All);
+_bots?.StartRecord(player.Slot);
+```
+
+The API surface (`IBotControllerApi`) is identical to the CounterStrikeSharp
+version — same method names, same signatures. Locks, recording, replay, buy
+plans, and profile queries all work the same way.
+
+### Standalone P/Invoke
+
+For plugins that prefer direct P/Invoke without the shared interface, drop
+`csharp/BotControllerImplSW2/BotController.cs` into your project. Check ABI
+compatibility before use:
+
+```csharp
+if (!BotController.IsCompatible()) return;
+BotController.Lock(slot, LockKind.All);
+```
+
+### Build & Deploy
+
+```bash
+dotnet build csharp/BotControllerImplSW2 -c Release
+```
+
+Deploy the contents of `build/` to:
+`csgo/addons/swiftlys2/plugins/BotControllerImplSW2/`
+
+The `build.ps1` script handles this automatically: pass no extra flags to
+build all targets (native + CounterStrikeSharp + SwiftlyS2).
 
 ------------------------------------------------------------------------
 
