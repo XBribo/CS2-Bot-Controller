@@ -215,7 +215,8 @@ buffers can be serialized and reloaded across rounds. Main thread only.
 
 ## License
 
-CS2-Bot-Controller is licensed under the GNU Affero General Public License version 3 (AGPL-3.0), with certain components under GPL-3.0-only and third-party code under their own licenses. Commercial use involving closed-source distribution or hosted services may require a separate license. See the LICENSE file for details.
+CS2-Bot-Controller is licensed under the GNU Affero General Public License version 3 (AGPL-3.0).
+Commercial use involving closed-source distribution or hosted services may require a separate license.
 
 ------------------------------------------------------------------------
 
