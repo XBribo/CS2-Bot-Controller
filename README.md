@@ -84,6 +84,8 @@ them into the package tree automatically.
 bc_lock <all|aim|jump|weapon> <slot> [slot1..slot5]
 bc_unlock <all|aim|jump|weapon> <slot>
 bc_unlock_all <all|aim|jump|weapon>
+bc_replay_pov [off|spectated|always]
+bc_perf [0|1|reset]
 bc_status
 ```
 
@@ -95,6 +97,8 @@ bc_lock jump 1               # bot 1 can no longer jump
 bc_lock all 1                # full freeze (use this before replay)
 bc_lock weapon 1 slot3       # force bot 1 to knife
 bc_unlock_all weapon         # clear every weapon lock
+bc_replay_pov spectated      # publish replay POV only for watched bots
+bc_perf 1                    # enable and print replay perf counters
 bc_status                    # print hook status + every per-slot lock
 ```
 
@@ -157,6 +161,9 @@ ABI-coupled: a native ABI bump means re-copying the file.
 using BotControllerApi;
 
 if (!BotController.IsCompatible()) return;   // requires the matching ABI
+BotController.TryGetAbiInfo(out var abiInfo);
+var capabilities = BotController.Capabilities();
+var buildId = BotController.BuildId();
 ```
 
 The static `BotController.*` calls below mirror the `IBotControllerApi` methods
@@ -191,6 +198,13 @@ BotController.StartReplay(botSlot, loop: false);
 // Or pull the buffers out, persist them, and load later
 var (ticks, subs) = BotController.GetRecordedMotion(srcSlot);
 BotController.LoadReplay(botSlot, ticks, subs);
+BotController.SetReplayPovMask(1UL << botSlot); // publish first-person POV for this replay slot
+
+// Advanced callers can load optional usercmd frames and movement extras, then
+// replay from a bounded range instead of always starting from tick 0.
+BotController.LoadReplayExtended(botSlot, ticks, subs, commands, movementExtras);
+BotController.StartReplayAt(botSlot, loop: false, startIndex: 10);
+BotController.StartReplayUntil(botSlot, loop: false, startIndex: 10, holdBeforeIndex: 200);
 
 // Drive weapon/fire from the tick being replayed
 if (BotController.TryGetReplayTick(botSlot, out var tick))

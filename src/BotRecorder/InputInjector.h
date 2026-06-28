@@ -22,7 +22,27 @@ namespace BotController
         // Disable + remove the hooks.
         void Remove();
 
+        // Optional schema offset for CCSPlayerController::m_bControllingBot.
+        // When available, replay stops immediately if a real player takes over a bot.
+        bool SetControllerControllingBotOffset(int offset);
+
         const char *Status();
+
+        // Whether replay should inject subtick pitch_delta/yaw_delta into
+        // usercmd. Disabled by default because offline demo pawn snapshots do
+        // not prove they are aligned to CBaseUserCmdPB base viewangles.
+        void SetReplaySubtickViewDeltas(bool enabled);
+        bool ReplaySubtickViewDeltas();
+
+        // Last CCSPlayer_MovementServices* seen for this player slot.
+        void *LiveMovementServices(int slot);
+
+        // Preserve the replay's last explicit hand-side command after replay
+        // control is released, so handoff does not force a visible viewmodel
+        // side switch before the bot can fire.
+        void SetReplayHandednessOverride(int slot, bool leftHandDesired);
+        void ClearReplayHandednessOverride(int slot);
+        void ClearReplayHandednessOverrides();
 
         // Resolved address of the hooked function.
         void *ProcessUsercmdAddress();
@@ -30,19 +50,5 @@ namespace BotController
         // Diagnostics
         uint64_t HookCallCount();
         int LastResolvedSlot();
-        uint64_t FinishMoveCallCount();
-        uint64_t PlayerRunCommandCallCount();
-        uint64_t PhysicsSimulateCallCount();
-        int LastPhysicsSlot();
-        uint64_t ReplayCommitCount();
-        uint64_t SlotResolveCallCount();
-        uint64_t SlotResolveFailureCount();
-        uintptr_t LastServices();
-        uintptr_t LastPawn();
-        uint32_t LastControllerHandle();
-        uint32_t LastOriginalControllerHandle();
-        int LastControllerIndex();
-        int LastOriginalControllerIndex();
-        int LastOwnerSlot();
     }
 }

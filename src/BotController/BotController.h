@@ -20,10 +20,16 @@ namespace BotController
 
         const char *Status();
 
+        // Apply replay-owned eye angles through the native engine path so
+        // derived third-person/body orientation state stays synchronized.
+        bool ApplyReplayEyeAngles(void *pawn, float pitch, float yaw);
+
         void *UpdateAddress();
         void *UpkeepAddress();
         void *JumpAddress();
         void *UpdateLookAnglesAddress();
+        void *SetEyeAnglesAddress();
+        void *GetEyeAnglesAddress();
 
         // Last CCSBot* seen in Update for this slot, or nullptr. Used to read
         // the bot's BotProfile by slot.

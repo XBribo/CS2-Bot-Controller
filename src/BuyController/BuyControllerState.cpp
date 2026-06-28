@@ -1,4 +1,4 @@
-// Per-slot bot buy plan table
+// Per-slot bot buy plan table.
 
 #include "BuyControllerState.h"
 

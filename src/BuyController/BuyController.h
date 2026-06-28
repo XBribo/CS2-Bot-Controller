@@ -2,21 +2,19 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include "sig_scan.h"
+
+#include <nlohmann/json.hpp>
 
 namespace BotController
 {
     namespace BuyControllerHooks
     {
-        // Resolve sig + offsets and install the detour.
         bool Install(const nlohmann::json &gd, const Sig::ModuleInfo &serverModule,
                      char *errorOut, size_t errorOutLen);
-
         void Remove();
 
         const char *Status();
-
         void *OnUpdateAddress();
     }
 }

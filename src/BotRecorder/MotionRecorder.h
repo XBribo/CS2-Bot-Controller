@@ -51,12 +51,171 @@ namespace BotController
         float pitchDelta;    // pitch_delta
         float yawDelta;      // yaw_delta
     };
+
+    struct ReplayCommandFrameData
+    {
+        float forwardMove;
+        float leftMove;
+        float upMove;
+        float pitch;
+        float yaw;
+        float roll;
+        uint64_t buttons;
+        uint64_t buttons1;
+        uint64_t buttons2;
+        int32_t mouseDx;
+        int32_t mouseDy;
+        int32_t weaponSelect;
+        uint32_t fields;
+        uint8_t leftHandDesired;
+        uint8_t _pad[3];
+    };
+
+    struct ReplayMovementExtra
+    {
+        uint32_t fields;
+        float jumpPressedTime;
+        float lastDuckTime;
+        int32_t lastActualJumpPressTick;
+        float lastActualJumpPressFrac;
+        int32_t lastUsableJumpPressTick;
+        float lastUsableJumpPressFrac;
+        int32_t lastLandedTick;
+        float lastLandedFrac;
+        float lastLandedVelocityX;
+        float lastLandedVelocityY;
+        float lastLandedVelocityZ;
+    };
 #pragma pack(pop)
+
+    static_assert(sizeof(ReplayCommandFrameData) == 68);
+    static_assert(sizeof(ReplayMovementExtra) == 48);
 
     namespace MotionRecorder
     {
         constexpr int kMaxSlots = 64;
         constexpr int kMaxSubtickPerTick = 36;
+        constexpr uint32_t kCommandFieldForwardMove = 1u << 0;
+        constexpr uint32_t kCommandFieldLeftMove = 1u << 1;
+        constexpr uint32_t kCommandFieldUpMove = 1u << 2;
+        constexpr uint32_t kCommandFieldViewAngles = 1u << 3;
+        constexpr uint32_t kCommandFieldButtons = 1u << 4;
+        constexpr uint32_t kCommandFieldMouse = 1u << 5;
+        constexpr uint32_t kCommandFieldWeaponSelect = 1u << 6;
+        constexpr uint32_t kCommandFieldLeftHand = 1u << 7;
+
+        enum class ReplaySnapMode : int
+        {
+            Hard = 0, // current behavior: write pre/post movement snapshots every tick
+            Soft = 1, // seed/correct movement only when starting or badly drifting
+            Off = 2,  // replay usercmd/subtick/view only; no movement snapshot correction
+        };
+
+        enum class ReplayViewMode : int
+        {
+            PrePost = 0, // direct-write pre and post view, matching the current stable behavior
+            PostOnly = 1, // direct-write only final post view for this server tick
+            Cmd = 2,      // let injected usercmd/subtick view update pawn eye angles
+        };
+
+        enum class ReplayCommandViewMode : int
+        {
+            Pre = 0,     // base usercmd view = current replay tick pre
+            Post = 1,    // base usercmd view = current replay tick post
+            NextPre = 2, // base usercmd view = next tick pre, falling back to current post
+        };
+
+        enum class ReplayPovMode : int
+        {
+            Off = 0,       // never publish replay-owned first-person server-view changes
+            Spectated = 1, // publish only slots marked by the CSS observer mask
+            Always = 2,    // legacy behavior: publish every replay slot every tick
+        };
+
+        enum class ReplayPerfCounter : int
+        {
+            ProcessMovementHook = 0,
+            FinishMoveHook = 1,
+            PlayerRunCommandHook = 2,
+            PhysicsSimulateHook = 3,
+            SyncReplayView = 4,
+            ServerViewWrite = 5,
+            VirtualQuery = 6,
+            ReplayTickRead = 7,
+            SubtickRebuild = 8,
+            SubticksAdded = 9,
+            ReplayCommandFrameRead = 10,
+            SubtickClear = 11,
+            SubtickNoopSkip = 12,
+        };
+
+        struct ReplayPerfCounters
+        {
+            uint64_t processMovementHooks;
+            uint64_t finishMoveHooks;
+            uint64_t playerRunCommandHooks;
+            uint64_t physicsSimulateHooks;
+            uint64_t syncReplayViewCalls;
+            uint64_t serverViewWrites;
+            uint64_t virtualQueryCalls;
+            uint64_t replayTickReads;
+            uint64_t subtickRebuilds;
+            uint64_t subticksAdded;
+            uint64_t replayCommandFrameReads;
+            uint64_t subtickClears;
+            uint64_t subtickNoopSkips;
+        };
+
+        struct ReplaySlotState
+        {
+            int32_t playing;
+            int32_t cursor;
+            int32_t total;
+            int32_t currentTickIndex;
+            int32_t weaponDefIndex;
+            int32_t numSubtick;
+        };
+
+        struct ReplayCommandFrame
+        {
+            const ReplayTick *tick;
+            const SubtickMove *subticks;
+            const ReplayCommandFrameData *command;
+            int32_t subtickCount;
+            int32_t weaponSelect;
+            MovementSnapshot commandView;
+            uint64_t buttons0;
+            uint64_t buttons1;
+            uint64_t buttons2;
+            uint32_t commandFields;
+            float forwardMove;
+            float leftMove;
+            float upMove;
+            int32_t mouseDx;
+            int32_t mouseDy;
+            int32_t rawWeaponSelect;
+            uint8_t leftHandDesired;
+        };
+
+        void SetReplaySnapMode(ReplaySnapMode mode);
+        ReplaySnapMode GetReplaySnapMode();
+        const char *ReplaySnapModeName(ReplaySnapMode mode);
+        void SetReplayViewMode(ReplayViewMode mode);
+        ReplayViewMode GetReplayViewMode();
+        const char *ReplayViewModeName(ReplayViewMode mode);
+        void SetReplayCommandViewMode(ReplayCommandViewMode mode);
+        ReplayCommandViewMode GetReplayCommandViewMode();
+        const char *ReplayCommandViewModeName(ReplayCommandViewMode mode);
+        void SetReplayPovMode(ReplayPovMode mode);
+        ReplayPovMode GetReplayPovMode();
+        const char *ReplayPovModeName(ReplayPovMode mode);
+        void SetReplayPovMask(uint64_t mask);
+        bool ReplayViewAllowsEngineSetEyeAngles();
+        void SetReplayPerfEnabled(bool enabled);
+        bool ReplayPerfEnabled();
+        void ResetReplayPerfCounters();
+        ReplayPerfCounters GetReplayPerfCounters();
+        void AddReplayPerf(ReplayPerfCounter counter, uint64_t amount = 1);
 
         // ---- recording ----
         bool StartRecord(int slot); // clears old buffer, begins capture
@@ -86,16 +245,32 @@ namespace BotController
         // Load parallel arrays into a slot's replay buffer
         bool LoadReplay(int slot, const ReplayTick *ticks, int tickCount,
                         const SubtickMove *subs, int subCount);
+        bool LoadReplayExtended(int slot, const ReplayTick *ticks, int tickCount,
+                                const SubtickMove *subs, int subCount,
+                                const ReplayCommandFrameData *commands,
+                                int commandCount,
+                                const ReplayMovementExtra *movementExtras,
+                                int movementExtraCount);
         bool StartReplay(int slot, bool loop); // play from tick 0
+        bool StartReplayAt(int slot, bool loop, int startIndex);
+        bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
         bool StopReplay(int slot);             // stop + clear injection
         bool IsReplaying(int slot);
         int ReplayCursor(int slot); // current tick index, <0 if idle
         int ReplayTotal(int slot);  // loaded tick count
+        bool GetReplaySlotState(int slot, ReplaySlotState &out);
 
         // Current tick being applied this server tick
-        bool CurrentReplayTick(int slot, ReplayTick &out);
-        // Command view angles for the tick currently being simulated.
+        bool ReplayTickForSimulation(int slot, ReplayTick &out);
+        bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame &out);
+        // Snapshot to use as injected CBaseUserCmdPB.viewangles for this tick.
         bool ReplayCommandViewSnapshot(int slot, MovementSnapshot &out);
+        // Snapshot to return from replay-owned eye-angle getters. This uses
+        // the last post view published by FinishMove when available, so camera
+        // readers do not jump one tick ahead after cursor advance.
+        bool ReplaySpectatorView(int slot, MovementSnapshot &out);
+        // Last tick already applied; used by external status readers.
+        bool CurrentReplayTick(int slot, ReplayTick &out);
         // Copy the current tick's subtick moves into out
         // Returns count, or -1 if not replaying.
         int CurrentReplaySubticks(int slot, SubtickMove *out, int maxOut);
@@ -103,6 +278,12 @@ namespace BotController
         // Buttons of the tick about to be simulated
         bool CurrentReplayInputButtons(int slot, uint64_t &b0, uint64_t &b1,
                                        uint64_t &b2);
+
+        // PlayerRunCommand (pre): seed pawn/service state before weapon input
+        // consumes view/origin/velocity for shots and grenade throws.
+        void OnReplayCommandPre(int slot, void *services);
+        void OnReplayCommandPre(int slot, void *services, const ReplayTick &tick,
+                                const MovementSnapshot &commandView);
 
         // Switch a bot to the weapon with this def index.
         bool SwitchBotWeaponByDef(int slot, int defIndex);
@@ -114,13 +295,15 @@ namespace BotController
 
         // Entity index to write into cmd.weaponselect this replay tick
         int CurrentReplayWeaponSelect(int slot);
-        int CurrentReplayWeaponDef(int slot);
 
         // ---- replay write hooks ----
-        // ProcessMovement (pre): write pre snapshot into CMoveData + pawn velocity + entity moveType
+        // ProcessMovement (pre): write pre snapshot into CMoveData + pawn angles + entity moveType
         void OnReplayPre(int slot, void *services, void *moveData);
-        // FinishMove (pre): write post snapshot into CMoveData + scene-node origin.
+        // FinishMove (pre): write post snapshot into CMoveData + force a
+        // small scene-node mismatch so FinishMove resyncs from MoveData.
         void OnReplayFinishMove(int slot, void *services, void *moveData);
+        // FinishMove (post): publish final post view before replay cursor advance.
+        void OnReplayFinalView(int slot, void *services);
         // FinishMove (post): commit post moveType/flags, advance cursor.
         void OnReplayCommit(int slot, void *services);
 

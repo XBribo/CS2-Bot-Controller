@@ -14,11 +14,32 @@ endif()
 set(HL2SDK $ENV{HL2SDKCS2})
 set(MMS    $ENV{MMSOURCE_DEV})
 set(PROTO_DIR $ENV{CSGO_PROTO})
-foreach(v HL2SDK MMS PROTO_DIR)
+foreach(v HL2SDK MMS)
     if(NOT ${v} OR NOT EXISTS "${${v}}")
         message(FATAL_ERROR "${v} env var not set or path missing: '${${v}}'")
     endif()
 endforeach()
+
+if(NOT PROTO_DIR OR NOT EXISTS "${PROTO_DIR}/network_connection.proto" OR
+   NOT EXISTS "${PROTO_DIR}/networkbasetypes.proto" OR
+   NOT EXISTS "${PROTO_DIR}/usercmd.proto" OR
+   NOT EXISTS "${PROTO_DIR}/cs_usercmd.proto")
+    set(PROTO_STAGE "${CMAKE_BINARY_DIR}/proto_stage")
+    file(MAKE_DIRECTORY "${PROTO_STAGE}")
+    set(PROTO_SOURCE_FILES
+        "${HL2SDK}/common/network_connection.proto"
+        "${HL2SDK}/common/networkbasetypes.proto"
+        "${HL2SDK}/game/shared/usercmd.proto"
+        "${HL2SDK}/game/shared/cs/cs_usercmd.proto")
+    foreach(src ${PROTO_SOURCE_FILES})
+        if(NOT EXISTS "${src}")
+            message(FATAL_ERROR "required CS2 proto missing: ${src}")
+        endif()
+        get_filename_component(proto_name "${src}" NAME)
+        configure_file("${src}" "${PROTO_STAGE}/${proto_name}" COPYONLY)
+    endforeach()
+    set(PROTO_DIR "${PROTO_STAGE}")
+endif()
 
 # eiface.h needs network_connection.pb.h; the usercmd protos give us
 # CSGOUserCmdPB / CSubtickMoveStep for subtick record + replay.
@@ -87,17 +108,48 @@ add_custom_command(
     VERBATIM
 )
 
-include(FetchContent)
-set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt")
-    set(FETCHCONTENT_SOURCE_DIR_FUNCHOOK "$ENV{FUNCHOOK_SOURCE}" CACHE PATH "")
+if(DEFINED ENV{FUNCHOOK_ROOT} AND EXISTS "$ENV{FUNCHOOK_ROOT}/include/funchook.h")
+    add_library(funchook-static STATIC IMPORTED GLOBAL)
+    add_library(distorm-static STATIC IMPORTED GLOBAL)
+    set_target_properties(funchook-static PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{FUNCHOOK_ROOT}/include"
+        INTERFACE_LINK_LIBRARIES distorm-static)
+    if(WIN32)
+        set_target_properties(funchook-static PROPERTIES
+            IMPORTED_LOCATION_RELEASE "$ENV{FUNCHOOK_ROOT}/lib/Release/funchook.lib"
+            IMPORTED_LOCATION_RELWITHDEBINFO "$ENV{FUNCHOOK_ROOT}/lib/Release/funchook.lib"
+            IMPORTED_LOCATION_MINSIZEREL "$ENV{FUNCHOOK_ROOT}/lib/Release/funchook.lib"
+            IMPORTED_LOCATION_DEBUG "$ENV{FUNCHOOK_ROOT}/lib/Debug/funchook.lib")
+        set_target_properties(distorm-static PROPERTIES
+            IMPORTED_LOCATION_RELEASE "$ENV{FUNCHOOK_ROOT}/lib/Release/distorm.lib"
+            IMPORTED_LOCATION_RELWITHDEBINFO "$ENV{FUNCHOOK_ROOT}/lib/Release/distorm.lib"
+            IMPORTED_LOCATION_MINSIZEREL "$ENV{FUNCHOOK_ROOT}/lib/Release/distorm.lib"
+            IMPORTED_LOCATION_DEBUG "$ENV{FUNCHOOK_ROOT}/lib/Debug/distorm.lib")
+    else()
+        set_target_properties(funchook-static PROPERTIES
+            IMPORTED_LOCATION_RELEASE "$ENV{FUNCHOOK_ROOT}/lib/Release/libfunchook.a"
+            IMPORTED_LOCATION_RELWITHDEBINFO "$ENV{FUNCHOOK_ROOT}/lib/Release/libfunchook.a"
+            IMPORTED_LOCATION_MINSIZEREL "$ENV{FUNCHOOK_ROOT}/lib/Release/libfunchook.a"
+            IMPORTED_LOCATION_DEBUG "$ENV{FUNCHOOK_ROOT}/lib/Debug/libfunchook.a")
+        set_target_properties(distorm-static PROPERTIES
+            IMPORTED_LOCATION_RELEASE "$ENV{FUNCHOOK_ROOT}/lib/Release/libdistorm.a"
+            IMPORTED_LOCATION_RELWITHDEBINFO "$ENV{FUNCHOOK_ROOT}/lib/Release/libdistorm.a"
+            IMPORTED_LOCATION_MINSIZEREL "$ENV{FUNCHOOK_ROOT}/lib/Release/libdistorm.a"
+            IMPORTED_LOCATION_DEBUG "$ENV{FUNCHOOK_ROOT}/lib/Debug/libdistorm.a")
+    endif()
+else()
+    include(FetchContent)
+    set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt")
+        set(FETCHCONTENT_SOURCE_DIR_FUNCHOOK "$ENV{FUNCHOOK_SOURCE}" CACHE PATH "")
+    endif()
+    FetchContent_Declare(funchook
+        GIT_REPOSITORY https://github.com/kubo/funchook.git
+        GIT_TAG v1.1.3 GIT_SHALLOW TRUE
+        UPDATE_DISCONNECTED TRUE)
+    FetchContent_MakeAvailable(funchook)
 endif()
-FetchContent_Declare(funchook
-    GIT_REPOSITORY https://github.com/kubo/funchook.git
-    GIT_TAG v1.1.3 GIT_SHALLOW TRUE
-    UPDATE_DISCONNECTED TRUE)
-FetchContent_MakeAvailable(funchook)
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp

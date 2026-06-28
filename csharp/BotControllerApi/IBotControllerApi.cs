@@ -5,6 +5,10 @@ namespace BotControllerApi
     public interface IBotControllerApi
     {
         int AbiVersion { get; }
+        ulong Capabilities { get; }
+        string BuildId { get; }
+
+        bool TryGetAbiInfo(out AbiInfo info);
 
         // ---- locks ----
 
@@ -40,10 +44,22 @@ namespace BotControllerApi
         // Load ticks + subticks into a slot's replay buffer.
         bool LoadReplay(int slot, ReplayTick[] ticks, SubtickMove[] subs);
 
+        // Load optional usercmd frames and movement extras alongside replay ticks.
+        bool LoadReplayExtended(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras);
+
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
 
         bool StartReplay(int slot, bool loop = false);
+
+        bool StartReplayAt(int slot, bool loop, int startIndex);
+
+        bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
 
         bool StopReplay(int slot);
 
@@ -55,6 +71,11 @@ namespace BotControllerApi
 
         // The tick currently being replayed on this slot, for driving weapon/fire.
         bool TryGetReplayTick(int slot, out ReplayTick tick);
+
+        bool TryGetReplaySlotState(int slot, out ReplaySlotState state);
+
+        // Bit n means replay slot n is currently watched in first-person.
+        bool SetReplayPovMask(ulong mask);
 
         // ---- weapons ----
 

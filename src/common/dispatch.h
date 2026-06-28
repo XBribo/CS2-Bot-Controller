@@ -21,7 +21,7 @@ namespace BotController
     namespace Dispatch
     {
         extern IVEngineServer2 *g_pEngine;
-        // Server-side console command executor; runs "buy" for a bot slot.
+        // Server-side command executor used for issuing bot "buy" commands.
         extern ISource2GameClients *g_pGameClients;
 
         // arg = LockTarget int for Weapon kind. quiet skips DebugLine.

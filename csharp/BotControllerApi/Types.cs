@@ -75,6 +75,77 @@ namespace BotControllerApi
         public float YawDelta;
     }
 
+    /** Optional replay usercmd frame. Must match C++ ReplayCommandFrameData */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplayCommandFrame
+    {
+        public float ForwardMove;
+        public float LeftMove;
+        public float UpMove;
+        public float Pitch;
+        public float Yaw;
+        public float Roll;
+        public ulong Buttons;
+        public ulong Buttons1;
+        public ulong Buttons2;
+        public int MouseDx;
+        public int MouseDy;
+        public int WeaponSelect;
+        public uint Fields;
+        public byte LeftHandDesired;
+        public byte Pad0;
+        public byte Pad1;
+        public byte Pad2;
+    }
+
+    /** Optional offset-backed replay movement state. Must match C++ ReplayMovementExtra */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplayMovementExtra
+    {
+        public uint Fields;
+        public float JumpPressedTime;
+        public float LastDuckTime;
+        public int LastActualJumpPressTick;
+        public float LastActualJumpPressFrac;
+        public int LastUsableJumpPressTick;
+        public float LastUsableJumpPressFrac;
+        public int LastLandedTick;
+        public float LastLandedFrac;
+        public float LastLandedVelocityX;
+        public float LastLandedVelocityY;
+        public float LastLandedVelocityZ;
+    }
+
+    /** Compact replay state for hot-path status checks. Must match C++ ReplaySlotState */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplaySlotState
+    {
+        public int Playing;
+        public int Cursor;
+        public int Total;
+        public int CurrentTickIndex;
+        public int WeaponDefIndex;
+        public int NumSubtick;
+    }
+
+    /** Native ABI metadata. Must match C++ BotControllerAbiInfo */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct AbiInfo
+    {
+        public const int ByteSize = 44;
+
+        public int AbiMajor;
+        public int AbiMinor;
+        public int MovementSnapshotSize;
+        public int ReplayTickSize;
+        public int SubtickMoveSize;
+        public int ReplaySlotStateSize;
+        public int MaxSlots;
+        public ulong Capabilities;
+        public int Reserved0;
+        public int Reserved1;
+    }
+
     /** Bot personality / aim / weapon preference. Mirrors C++ BotProfileData */
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     public struct BotProfileData

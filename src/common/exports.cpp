@@ -7,6 +7,7 @@
 #include "BotProfile.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,53 @@
 #else
 #define BC_EXPORT __attribute__((visibility("default")))
 #endif
+
+#ifndef BOTCONTROLLER_BUILD_ID
+#define BOTCONTROLLER_BUILD_ID "local"
+#endif
+
+namespace
+{
+    constexpr int kBotControllerAbiMajor = 16;
+    constexpr int kBotControllerAbiMinor = 1;
+    constexpr uint64_t kCapabilityReplaySlotState = 1ULL << 0;
+    constexpr uint64_t kCapabilityStartReplayAt = 1ULL << 1;
+    constexpr uint64_t kCapabilityStartReplayUntil = 1ULL << 2;
+    constexpr uint64_t kCapabilityReplayTick = 1ULL << 3;
+    constexpr uint64_t kCapabilityWeaponSwitchRead = 1ULL << 4;
+    constexpr uint64_t kCapabilityPovMask = 1ULL << 5;
+    constexpr uint64_t kCapabilityBuyPlan = 1ULL << 6;
+    constexpr uint64_t kCapabilityControllerBotOffset = 1ULL << 7;
+    constexpr uint64_t kCapabilityExtendedReplay = 1ULL << 8;
+    constexpr uint64_t kBotControllerCapabilities =
+        kCapabilityReplaySlotState |
+        kCapabilityStartReplayAt |
+        kCapabilityStartReplayUntil |
+        kCapabilityReplayTick |
+        kCapabilityWeaponSwitchRead |
+        kCapabilityPovMask |
+        kCapabilityBuyPlan |
+        kCapabilityControllerBotOffset |
+        kCapabilityExtendedReplay;
+
+#pragma pack(push, 4)
+    struct BotControllerAbiInfo
+    {
+        int32_t abiMajor;
+        int32_t abiMinor;
+        int32_t movementSnapshotSize;
+        int32_t replayTickSize;
+        int32_t subtickMoveSize;
+        int32_t replaySlotStateSize;
+        int32_t maxSlots;
+        uint64_t capabilities;
+        int32_t reserved0;
+        int32_t reserved1;
+    };
+#pragma pack(pop)
+
+    static_assert(sizeof(BotControllerAbiInfo) == 44);
+} // namespace
 
 extern "C" BC_EXPORT int BotController_Lock(int slot, int kind, int arg)
 {
@@ -42,7 +90,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 
 extern "C" BC_EXPORT int BotController_GetVersion()
 {
-    return 12;
+    return kBotControllerAbiMajor;
 }
 
 // Read a bot's BotProfile by slot. 0 ok / -1 no live bot or null profile.
@@ -53,31 +101,75 @@ extern "C" BC_EXPORT int BotController_GetProfile(int slot, BotController::BotPr
     return BotController::BotProfile::ReadProfile(slot, *out) ? 0 : -1;
 }
 
+extern "C" BC_EXPORT int BotController_GetAbiInfo(BotControllerAbiInfo *out, int size)
+{
+    if (!out || size < static_cast<int>(sizeof(BotControllerAbiInfo)))
+        return -1;
+
+    BotControllerAbiInfo info{};
+    info.abiMajor = kBotControllerAbiMajor;
+    info.abiMinor = kBotControllerAbiMinor;
+    info.movementSnapshotSize = static_cast<int32_t>(sizeof(BotController::MovementSnapshot));
+    info.replayTickSize = static_cast<int32_t>(sizeof(BotController::ReplayTick));
+    info.subtickMoveSize = static_cast<int32_t>(sizeof(BotController::SubtickMove));
+    info.replaySlotStateSize = static_cast<int32_t>(sizeof(BotController::MotionRecorder::ReplaySlotState));
+    info.maxSlots = BotController::MotionRecorder::kMaxSlots;
+    info.capabilities = kBotControllerCapabilities;
+    std::memcpy(out, &info, sizeof(info));
+    return 0;
+}
+
+extern "C" BC_EXPORT uint64_t BotController_GetCapabilities()
+{
+    return kBotControllerCapabilities;
+}
+
+extern "C" BC_EXPORT const char *BotController_GetBuildId()
+{
+    return BOTCONTROLLER_BUILD_ID;
+}
+
+extern "C" BC_EXPORT int BotController_SetControllerControllingBotOffset(int offset)
+{
+    return BotController::InputInjector::SetControllerControllingBotOffset(offset) ? 0 : -1;
+}
+
+extern "C" BC_EXPORT int BotController_SetReplayPovMask(uint64_t mask)
+{
+    BotController::MotionRecorder::SetReplayPovMask(mask);
+    return 0;
+}
+
 // ---- Bot buy plans ----
 
-// Split a space/comma separated alias string into tokens.
-static std::vector<std::string> SplitAliases(const char *csv)
+static std::vector<std::string> SplitAliases(const char *aliases)
 {
     std::vector<std::string> out;
-    if (!csv)
+    if (!aliases)
         return out;
+
     std::string cur;
-    for (const char *p = csv; *p; ++p)
+    for (const char *p = aliases; *p; ++p)
     {
         char c = *p;
         if (c == ' ' || c == ',' || c == '\t')
         {
-            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+            if (!cur.empty())
+            {
+                out.push_back(cur);
+                cur.clear();
+            }
         }
         else
+        {
             cur.push_back(c);
+        }
     }
     if (!cur.empty())
         out.push_back(cur);
     return out;
 }
 
-// Set a slot's buy plan from a space/comma separated alias list. 0 ok.
 extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char *aliases)
 {
     if (slot < 0 || slot >= BotController::BuyControllerState::kMaxSlots)
@@ -86,7 +178,6 @@ extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char *aliases)
     return 0;
 }
 
-// Mark a slot to buy nothing this round. 0 ok.
 extern "C" BC_EXPORT int BotController_SetBuySkip(int slot)
 {
     if (slot < 0 || slot >= BotController::BuyControllerState::kMaxSlots)
@@ -109,7 +200,6 @@ extern "C" BC_EXPORT int BotController_ClearAllBuyPlans()
     return 0;
 }
 
-// Item count for a slot's plan: -1 none, 0 skip/empty, >0 alias count.
 extern "C" BC_EXPORT int BotController_GetBuyPlanItemCount(int slot)
 {
     return BotController::BuyControllerState::ItemCount(slot);
@@ -161,6 +251,20 @@ extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                : -1;
 }
 
+extern "C" BC_EXPORT int BotController_LoadReplayExtended(
+    int slot,
+    const BotController::ReplayTick *ticks, int tickCount,
+    const BotController::SubtickMove *subs, int subCount,
+    const BotController::ReplayCommandFrameData *commands, int commandCount,
+    const BotController::ReplayMovementExtra *movementExtras, int movementExtraCount)
+{
+    return BotController::MotionRecorder::LoadReplayExtended(
+               slot, ticks, tickCount, subs, subCount,
+               commands, commandCount, movementExtras, movementExtraCount)
+               ? 0
+               : -1;
+}
+
 // Move a slot's just-recorded buffers into another slot's replay buffer
 extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot)
 {
@@ -189,6 +293,20 @@ extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
     return BotController::MotionRecorder::StartReplay(slot, loop != 0) ? 0 : -1;
 }
 
+extern "C" BC_EXPORT int BotController_StartReplayAt(int slot, int loop, int startIndex)
+{
+    return BotController::MotionRecorder::StartReplayAt(slot, loop != 0, startIndex) ? 0 : -1;
+}
+
+extern "C" BC_EXPORT int BotController_StartReplayUntil(
+    int slot, int loop, int startIndex, int holdBeforeIndex)
+{
+    return BotController::MotionRecorder::StartReplayUntil(
+               slot, loop != 0, startIndex, holdBeforeIndex)
+               ? 0
+               : -1;
+}
+
 extern "C" BC_EXPORT int BotController_StopReplay(int slot)
 {
     return BotController::MotionRecorder::StopReplay(slot) ? 0 : -1;
@@ -204,6 +322,16 @@ extern "C" BC_EXPORT int BotController_GetReplayCursor(int slot)
 extern "C" BC_EXPORT int BotController_GetReplayTotal(int slot)
 {
     return BotController::MotionRecorder::ReplayTotal(slot);
+}
+
+// Combined replay state for CSS hot paths. Returns 0 on success.
+extern "C" BC_EXPORT int BotController_GetReplaySlotState(
+    int slot,
+    BotController::MotionRecorder::ReplaySlotState *out)
+{
+    if (!out)
+        return -1;
+    return BotController::MotionRecorder::GetReplaySlotState(slot, *out) ? 0 : -1;
 }
 
 // Copy the tick currently being replayed (for C# to drive weapon/fire).
@@ -227,84 +355,4 @@ extern "C" BC_EXPORT int BotController_SwitchBotWeapon(int slot, int defIndex)
 extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot)
 {
     return BotController::MotionRecorder::BotActiveWeaponDef(slot);
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetHookCallCount()
-{
-    return BotController::InputInjector::HookCallCount();
-}
-
-extern "C" BC_EXPORT int BotController_GetLastResolvedSlot()
-{
-    return BotController::InputInjector::LastResolvedSlot();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetFinishMoveCallCount()
-{
-    return BotController::InputInjector::FinishMoveCallCount();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetPlayerRunCommandCallCount()
-{
-    return BotController::InputInjector::PlayerRunCommandCallCount();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetPhysicsSimulateCallCount()
-{
-    return BotController::InputInjector::PhysicsSimulateCallCount();
-}
-
-extern "C" BC_EXPORT int BotController_GetLastPhysicsSlot()
-{
-    return BotController::InputInjector::LastPhysicsSlot();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetReplayCommitCount()
-{
-    return BotController::InputInjector::ReplayCommitCount();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetSlotResolveCallCount()
-{
-    return BotController::InputInjector::SlotResolveCallCount();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetSlotResolveFailureCount()
-{
-    return BotController::InputInjector::SlotResolveFailureCount();
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetLastServices()
-{
-    return static_cast<uint64_t>(BotController::InputInjector::LastServices());
-}
-
-extern "C" BC_EXPORT uint64_t BotController_GetLastPawn()
-{
-    return static_cast<uint64_t>(BotController::InputInjector::LastPawn());
-}
-
-extern "C" BC_EXPORT uint32_t BotController_GetLastControllerHandle()
-{
-    return BotController::InputInjector::LastControllerHandle();
-}
-
-extern "C" BC_EXPORT uint32_t BotController_GetLastOriginalControllerHandle()
-{
-    return BotController::InputInjector::LastOriginalControllerHandle();
-}
-
-extern "C" BC_EXPORT int BotController_GetLastControllerIndex()
-{
-    return BotController::InputInjector::LastControllerIndex();
-}
-
-extern "C" BC_EXPORT int BotController_GetLastOriginalControllerIndex()
-{
-    return BotController::InputInjector::LastOriginalControllerIndex();
-}
-
-extern "C" BC_EXPORT int BotController_GetLastOwnerSlot()
-{
-    return BotController::InputInjector::LastOwnerSlot();
 }

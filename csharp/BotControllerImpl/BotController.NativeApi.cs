@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 12). Check IsCompatible() before use.
+// P/Invoke wrapper for BotController.dll (ABI 16). Check IsCompatible() before use.
 // Main-thread only.
 //
 // Provider-internal: data types (LockKind/ReplayTick/BotProfileData/...) come
@@ -12,7 +12,16 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 12;
+        private const int ExpectedAbiVersion = 16;
+        public const ulong CapabilityReplaySlotState = 1UL << 0;
+        public const ulong CapabilityStartReplayAt = 1UL << 1;
+        public const ulong CapabilityStartReplayUntil = 1UL << 2;
+        public const ulong CapabilityReplayTick = 1UL << 3;
+        public const ulong CapabilityWeaponSwitchRead = 1UL << 4;
+        public const ulong CapabilityPovMask = 1UL << 5;
+        public const ulong CapabilityBuyPlan = 1UL << 6;
+        public const ulong CapabilityControllerBotOffset = 1UL << 7;
+        public const ulong CapabilityExtendedReplay = 1UL << 8;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -31,6 +40,18 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetVersion();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetAbiInfo(out AbiInfo info, int size);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern ulong BotController_GetCapabilities();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr BotController_GetBuildId();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SetReplayPovMask(ulong mask);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartRecord(int slot);
@@ -58,10 +79,24 @@ namespace BotControllerApi
             [In] SubtickMove[] subs, int subCount);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_LoadReplayExtended(
+            int slot, [In] ReplayTick[] ticks, int tickCount,
+            [In] SubtickMove[] subs, int subCount,
+            [In] ReplayCommandFrame[] commands, int commandCount,
+            [In] ReplayMovementExtra[] movementExtras, int movementExtraCount);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartReplay(int slot, int loop);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayAt(int slot, int loop, int startIndex);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayUntil(
+            int slot, int loop, int startIndex, int holdBeforeIndex);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StopReplay(int slot);
@@ -74,6 +109,9 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayTick(int slot, out ReplayTick tick);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetReplaySlotState(int slot, out ReplaySlotState state);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SwitchBotWeapon(int slot, int defIndex);
@@ -105,6 +143,44 @@ namespace BotControllerApi
 
         // Native C-ABI version the loaded DLL reports.
         public static int AbiVersion => BotController_GetVersion();
+
+        public static bool TryGetAbiInfo(out AbiInfo info)
+        {
+            try
+            {
+                return BotController_GetAbiInfo(out info, AbiInfo.ByteSize) == 0;
+            }
+            catch
+            {
+                info = default;
+                return false;
+            }
+        }
+
+        public static ulong Capabilities()
+        {
+            try
+            {
+                return BotController_GetCapabilities();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public static string BuildId()
+        {
+            try
+            {
+                var buildId = Marshal.PtrToStringAnsi(BotController_GetBuildId());
+                return string.IsNullOrWhiteSpace(buildId) ? "unknown" : buildId;
+            }
+            catch
+            {
+                return "unavailable";
+            }
+        }
 
         // ---- locks ----
 
@@ -172,6 +248,24 @@ namespace BotControllerApi
                                        subs ?? Array.Empty<SubtickMove>(),
                                        subs?.Length ?? 0) == 0;
 
+        public static bool LoadReplayExtended(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras)
+            => ticks is { Length: > 0 }
+               && BotController_LoadReplayExtended(
+                   slot,
+                   ticks,
+                   ticks.Length,
+                   subs ?? Array.Empty<SubtickMove>(),
+                   subs?.Length ?? 0,
+                   commands ?? Array.Empty<ReplayCommandFrame>(),
+                   commands?.Length ?? 0,
+                   movementExtras ?? Array.Empty<ReplayMovementExtra>(),
+                   movementExtras?.Length ?? 0) == 0;
+
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.
         public static bool TransferRecordingToReplay(int srcSlot, int dstSlot)
@@ -179,6 +273,12 @@ namespace BotControllerApi
 
         public static bool StartReplay(int slot, bool loop = false)
             => BotController_StartReplay(slot, loop ? 1 : 0) == 0;
+
+        public static bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController_StartReplayAt(slot, loop ? 1 : 0, startIndex) == 0;
+
+        public static bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController_StartReplayUntil(slot, loop ? 1 : 0, startIndex, holdBeforeIndex) == 0;
 
         public static bool StopReplay(int slot) => BotController_StopReplay(slot) == 0;
 
@@ -188,10 +288,17 @@ namespace BotControllerApi
 
         public static bool IsReplaying(int slot) => BotController_GetReplayCursor(slot) >= 0;
 
+        // Bit n means replay slot n is currently watched in first-person.
+        public static bool SetReplayPovMask(ulong mask)
+            => BotController_SetReplayPovMask(mask) == 0;
+
         // The tick currently being replayed on this slot, for driving weapon/fire
         // C#-side. Returns false if the slot isn't replaying.
         public static bool TryGetReplayTick(int slot, out ReplayTick tick)
             => BotController_GetReplayTick(slot, out tick) == 0;
+
+        public static bool TryGetReplaySlotState(int slot, out ReplaySlotState state)
+            => BotController_GetReplaySlotState(slot, out state) == 0;
 
         // Switch a bot to the weapon with this def index.
         public static bool SwitchBotWeapon(int slot, int defIndex)
