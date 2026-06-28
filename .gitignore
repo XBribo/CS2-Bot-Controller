@@ -1,0 +1,17 @@
+# C# build artifacts
+**/bin/
+**/obj/
+**/build/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Internal
+.omo/

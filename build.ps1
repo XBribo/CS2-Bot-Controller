@@ -135,6 +135,30 @@ function Deploy-CSharp([hashtable]$csOut, [string]$destRoot) {
     Write-Ok "deployed C# into $((Resolve-Path $css).Path)"
 }
 
+# --- SwiftlyS2 plugin ----------------------------------------------------
+# Build the BotControllerImplSW2 plugin for SwiftlyS2.
+function Build-CSharpSW2 {
+    Write-Step "C# SwiftlyS2 (BotControllerImplSW2)"
+    $sw2 = Join-Path $Root "csharp/BotControllerImplSW2"
+    dotnet build $sw2 -c $Config | Out-Host
+    if ($LASTEXITCODE) { throw "dotnet build (swiftlys2) failed" }
+    $buildDir = Join-Path $sw2 "build"
+    $pluginDll = Join-Path $buildDir "BotControllerImplSW2.dll"
+    if (-not (Test-Path $pluginDll)) { throw "swiftlys2 build produced no BotControllerImplSW2.dll" }
+    $dlls = Get-ChildItem -Path $buildDir -Filter "*.dll" | Select-Object -ExpandProperty FullName
+    Write-Ok "BotControllerImplSW2.dll built ($($dlls.Count) assemblies in output)"
+    return @{ BuildDir = $buildDir; Dlls = $dlls }
+}
+
+# Deploy SwiftlyS2 managed DLLs into a dist tree's swiftlys2 layout.
+function Deploy-CSharpSW2([hashtable]$sw2Out, [string]$destRoot) {
+    if (-not $sw2Out) { return }
+    $sw2Dir = Join-Path $destRoot "addons/swiftlys2/plugins/BotControllerImplSW2"
+    New-Item -ItemType Directory -Force $sw2Dir | Out-Null
+    Copy-Item -Force -Path "$($sw2Out.BuildDir)/*" -Destination $sw2Dir
+    Write-Ok "deployed SwiftlyS2 into $((Resolve-Path $sw2Dir).Path)"
+}
+
 # --- Main ----------------------------------------------------------------
 $winPkg = $null; $linPkg = $null
 if ($Windows) { $winPkg = Build-Windows }
@@ -145,12 +169,20 @@ if ($Windows) { Build-Dist $winPkg $DistWin }
 if ($Linux) { Build-Dist $linPkg $DistLin }
 
 # C# managed plugins: build once, deploy into each assembled dist tree
-$csOut = $null
-if (-not $SkipCsharp) { $csOut = Build-CSharp }
+$csOut = $null; $sw2Out = $null
+if (-not $SkipCsharp) {
+    $csOut = Build-CSharp
+    $sw2Out = Build-CSharpSW2
+}
 if ($csOut) {
-    Write-Step "Deploy C#"
+    Write-Step "Deploy C# (CounterStrikeSharp)"
     if ($Windows) { Deploy-CSharp $csOut $DistWin }
     if ($Linux) { Deploy-CSharp $csOut $DistLin }
+}
+if ($sw2Out) {
+    Write-Step "Deploy C# (SwiftlyS2)"
+    if ($Windows) { Deploy-CSharpSW2 $sw2Out $DistWin }
+    if ($Linux) { Deploy-CSharpSW2 $sw2Out $DistLin }
 }
 
 Write-Step "Done"
