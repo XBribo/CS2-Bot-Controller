@@ -30,4 +30,17 @@
     <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName).zip" Overwrite="true" />
   </Target>
 
+  <Target Name="CopyContractsToExports" AfterTargets="Build;Publish">
+    <MakeDir Directories="$(OutputPath)resources\exports" />
+    <Copy SourceFiles="$(OutputPath)BotControllerApi.dll"
+          DestinationFolder="$(OutputPath)resources\exports"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(OutputPath)BotControllerApi.dll')" />
+    <MakeDir Directories="$(PublishDir)resources\exports" Condition="Exists('$(PublishDir)')" />
+    <Copy SourceFiles="$(PublishDir)BotControllerApi.dll"
+          DestinationFolder="$(PublishDir)resources\exports"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(PublishDir)BotControllerApi.dll')" />
+  </Target>
+
 </Project>
