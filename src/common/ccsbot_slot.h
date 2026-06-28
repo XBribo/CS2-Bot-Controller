@@ -2,20 +2,8 @@
 
 #pragma once
 
-#include <cstdint>
-
 namespace BotController
 {
-    struct PawnControllerHandles
-    {
-        uint32_t controllerHandle;
-        uint32_t originalControllerHandle;
-        int controllerIndex;
-        int originalControllerIndex;
-        int controllerSlot;
-        int ownerSlot;
-    };
-
     // Diagnostic: pawn pointer + pawn entindex used in slot computation.
     struct SlotResolution
     {
@@ -34,8 +22,6 @@ namespace BotController
     // pawn->m_hController only, no m_hOriginalController fallback
     // used to detect human takeover
     int ControllerSlotForPawn(void *pawn);
-
-    PawnControllerHandles ReadPawnControllerHandles(void *pawn);
 
     // CCSPlayerController* (PhysicsSimulate arg0) -> slot via its own ehandle.
     int ControllerToSlot(void *controller);

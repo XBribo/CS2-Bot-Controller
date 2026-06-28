@@ -1,17 +1,17 @@
-// Detour for BuyState::OnUpdate
+// Detour for BuyState::OnUpdate.
 
 #include "BuyController.h"
 #include "BuyControllerState.h"
 #include "ccsbot_slot.h"
-#include "version_targets.h"
 #include "dispatch.h"
 #include "hook.h"
 #include "platform.h"
+#include "version_targets.h"
 
-#include <tier0/dbg.h>
+#include <convar.h>
 #include <eiface.h>
 #include <playerslot.h>
-#include <convar.h>
+#include <tier0/dbg.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -31,23 +31,22 @@ namespace BotController
         static bool g_installed = false;
         static std::string g_status = "not_attempted";
 
-        // Per-slot last seen m_isInitialDelay, for rising-edge detection
         static uint8_t g_lastInitDelay[64] = {0};
 
-        // Run "buy <alias>" server-side for a bot slot
         static void IssueBuy(int slot, const char *alias)
         {
             if (!Dispatch::g_pGameClients || slot < 0 || slot >= 64)
                 return;
+
             char line[128];
             std::snprintf(line, sizeof(line), "buy %s", alias);
             CCommand cmd;
             if (!cmd.Tokenize(line))
                 return;
+
             Dispatch::g_pGameClients->ClientCommand(CPlayerSlot(slot), cmd);
         }
 
-        // Execute a slot's whole plan in one tick, then mark vanilla done
         static void ApplyPlan(void *self, int slot)
         {
             BuyPlan plan;
@@ -55,10 +54,11 @@ namespace BotController
                 return;
 
             if (!plan.skip)
+            {
                 for (const auto &alias : plan.items)
                     IssueBuy(slot, alias.c_str());
+            }
 
-            // Tell vanilla buying is finished so it stops here and exits state
             *(reinterpret_cast<uint8_t *>(self) + tg::kBuy_DoneBuying) = 1;
 
             char dbg[128];
@@ -74,7 +74,6 @@ namespace BotController
                 return g_origOnUpdate(self, me);
 
             uint8_t init = *(reinterpret_cast<uint8_t *>(self) + tg::kBuy_InitialDelay);
-            // Rising edge of m_isInitialDelay = freshly entered BuyState this round
             if (init && !g_lastInitDelay[slot])
                 ApplyPlan(self, slot);
             g_lastInitDelay[slot] = init;

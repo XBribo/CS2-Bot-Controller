@@ -23,8 +23,6 @@ namespace BotController::targets
         kProf_LookAccelAtk       = Sig::FindPlatformOffset(gd, "BotProfile::LookAngleMaxAccelAttacking", kProf_LookAccelAtk);
         kProf_LookStiffAtk       = Sig::FindPlatformOffset(gd, "BotProfile::LookAngleStiffnessAttacking", kProf_LookStiffAtk);
         kProf_LookDampAtk        = Sig::FindPlatformOffset(gd, "BotProfile::LookAngleDampingAttacking", kProf_LookDampAtk);
-        kBuy_InitialDelay        = Sig::FindPlatformOffset(gd, "BuyState::InitialDelay", kBuy_InitialDelay);
-        kBuy_DoneBuying          = Sig::FindPlatformOffset(gd, "BuyState::DoneBuying", kBuy_DoneBuying);
         kEnt_Identity            = Sig::FindPlatformOffset(gd, "CBaseEntity::Identity", kEnt_Identity);
         kEntIdentity_EHandle     = Sig::FindPlatformOffset(gd, "CEntityIdentity::EHandle", kEntIdentity_EHandle);
         kEnt_MoveType            = Sig::FindPlatformOffset(gd, "CBaseEntity::MoveType", kEnt_MoveType);
@@ -37,13 +35,18 @@ namespace BotController::targets
         kPawn_Controller         = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::Controller", kPawn_Controller);
         kPawn_OriginalController = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::OriginalController", kPawn_OriginalController);
         kPawn_ViewAngle          = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::ViewAngle", kPawn_ViewAngle);
+        kPawn_ViewAnglePrevious  = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::ViewAnglePrevious", kPawn_ViewAnglePrevious);
+        kPawn_ServerViewAngleChanges = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::ServerViewAngleChanges", kPawn_ServerViewAngleChanges);
         kPawn_EyeAngles          = Sig::FindPlatformOffset(gd, "CCSPlayerPawn::EyeAngles", kPawn_EyeAngles);
+        kBuy_InitialDelay        = Sig::FindPlatformOffset(gd, "BuyState::InitialDelay", kBuy_InitialDelay);
+        kBuy_DoneBuying          = Sig::FindPlatformOffset(gd, "BuyState::DoneBuying", kBuy_DoneBuying);
         kWs_ActiveWeapon         = Sig::FindPlatformOffset(gd, "CCSPlayer_WeaponServices::ActiveWeapon", kWs_ActiveWeapon);
         kWeapon_ItemDefIndex     = Sig::FindPlatformOffset(gd, "CBasePlayerWeapon::ItemDefIndex", kWeapon_ItemDefIndex);
         kServices_Pawn           = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Pawn", kServices_Pawn);
         kServices_Buttons        = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Buttons", kServices_Buttons);
         kServices_Buttons1       = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Buttons1", kServices_Buttons1);
         kServices_Buttons2       = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Buttons2", kServices_Buttons2);
+        kServices_OldViewAngles  = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::OldViewAngles", kServices_OldViewAngles);
         kServices_LadderNormal   = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::LadderNormal", kServices_LadderNormal);
         kServices_Ducked         = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Ducked", kServices_Ducked);
         kServices_DuckAmount     = Sig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::DuckAmount", kServices_DuckAmount);

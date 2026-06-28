@@ -108,11 +108,6 @@ namespace BotController
             return v - 1;
         }
 
-        static bool IsGrenadeDef(int def)
-        {
-            return def >= 43 && def <= 48;
-        }
-
         // ---- edge-triggered logging ----
 
         static int g_lastLoggedLock[64] = {0};
@@ -196,9 +191,6 @@ namespace BotController
 
             int engineSlot = LockTargetToEngineSlot(lt);
             if (engineSlot < 0 || !g_pGetSlot)
-                return g_origSelectItem(ws, weapon, flag);
-
-            if (engineSlot == 3 && weapon && IsGrenadeDef(ReadDefIndex(weapon)))
                 return g_origSelectItem(ws, weapon, flag);
 
             void *targetWeapon = g_pGetSlot(ws, engineSlot, 0xFFFFFFFFu);
