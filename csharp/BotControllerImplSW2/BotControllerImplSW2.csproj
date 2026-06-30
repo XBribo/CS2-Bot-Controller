@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>BotControllerImplSW2</AssemblyName>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+    <PublishDir>$(OutputPath)publish/BotControllerImplSW2</PublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SwiftlyS2.CS2" Version="*" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../BotControllerApi/BotControllerApi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../BotControllerImpl/BotController.NativeApi.cs" Link="BotController.NativeApi.cs" />
+  </ItemGroup>
+
+
+  <Target Name="CreateZip" AfterTargets="Publish">
+    <ItemGroup>
+      <PublishFiles Include="$(PublishDir)**\*.*" />
+    </ItemGroup>
+    <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName).zip" Overwrite="true" />
+  </Target>
+
+  <Target Name="CopyContractsToExports" AfterTargets="Build;Publish">
+    <MakeDir Directories="$(OutputPath)resources\exports" />
+    <Copy SourceFiles="$(OutputPath)BotControllerApi.dll"
+          DestinationFolder="$(OutputPath)resources\exports"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(OutputPath)BotControllerApi.dll')" />
+    <MakeDir Directories="$(PublishDir)resources\exports" Condition="Exists('$(PublishDir)')" />
+    <Copy SourceFiles="$(PublishDir)BotControllerApi.dll"
+          DestinationFolder="$(PublishDir)resources\exports"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(PublishDir)BotControllerApi.dll')" />
+  </Target>
+
+</Project>

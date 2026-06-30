@@ -14,6 +14,8 @@ $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 $DistWin = Join-Path $Root "dist/windows"
 $DistLin = Join-Path $Root "dist/linux"
+$DistCss = Join-Path $Root "dist/CounterStrikeSharp"
+$DistSw2 = Join-Path $Root "dist/SwiftlyS2"
 
 # Default: build both platforms when no platform switch is given
 if (-not ($Windows -or $Linux)) {
@@ -95,10 +97,15 @@ echo "BUILD_OK"
 }
 
 # --- Dist ----------------------------------------------------------------
-# Copy the staged addons tree into the per-platform dist folder
-function Build-Dist([string]$nativePkg, [string]$destRoot) {
+# Recreate a dist root so each artifact family is packaged independently.
+function Reset-DistRoot([string]$destRoot) {
     if (Test-Path $destRoot) { Remove-Item -Recurse -Force $destRoot }
     New-Item -ItemType Directory -Force $destRoot | Out-Null
+}
+
+# Copy the staged native addons tree into a per-platform dist folder.
+function Build-Dist([string]$nativePkg, [string]$destRoot) {
+    Reset-DistRoot $destRoot
     if ($nativePkg) {
         Copy-Item -Recurse -Force "$nativePkg/addons" $destRoot
     }
@@ -125,6 +132,7 @@ function Build-CSharp {
 # Deploy managed DLLs into a dist tree's CounterStrikeSharp layout.
 function Deploy-CSharp([hashtable]$csOut, [string]$destRoot) {
     if (-not $csOut) { return }
+    Reset-DistRoot $destRoot
     $css = Join-Path $destRoot "addons/counterstrikesharp"
     $sharedDir = Join-Path $css "shared/BotControllerApi"
     $pluginDir = Join-Path $css "plugins/BotControllerImpl"
@@ -135,24 +143,57 @@ function Deploy-CSharp([hashtable]$csOut, [string]$destRoot) {
     Write-Ok "deployed C# into $((Resolve-Path $css).Path)"
 }
 
+# --- SwiftlyS2 plugin ----------------------------------------------------
+# Build the BotControllerImplSW2 plugin for SwiftlyS2.
+function Build-CSharpSW2 {
+    Write-Step "C# SwiftlyS2 (BotControllerImplSW2)"
+    $sw2 = Join-Path $Root "csharp/BotControllerImplSW2"
+    dotnet build $sw2 -c $Config | Out-Host
+    if ($LASTEXITCODE) { throw "dotnet build (swiftlys2) failed" }
+    $buildDir = Join-Path $sw2 "build"
+    $pluginDll = Join-Path $buildDir "BotControllerImplSW2.dll"
+    if (-not (Test-Path $pluginDll)) { throw "swiftlys2 build produced no BotControllerImplSW2.dll" }
+    $dlls = Get-ChildItem -Path $buildDir -Filter "*.dll" | Select-Object -ExpandProperty FullName
+    Write-Ok "BotControllerImplSW2.dll built ($($dlls.Count) assemblies in output)"
+    return @{ BuildDir = $buildDir; Dlls = $dlls }
+}
+
+# Deploy SwiftlyS2 managed DLLs into a dist tree's swiftlys2 layout.
+function Deploy-CSharpSW2([hashtable]$sw2Out, [string]$destRoot) {
+    if (-not $sw2Out) { return }
+    Reset-DistRoot $destRoot
+    $sw2Dir = Join-Path $destRoot "addons/swiftlys2/plugins/BotControllerImplSW2"
+    New-Item -ItemType Directory -Force $sw2Dir | Out-Null
+    Copy-Item -Recurse -Force -Path "$($sw2Out.BuildDir)/*" -Destination $sw2Dir
+    Write-Ok "deployed SwiftlyS2 into $((Resolve-Path $sw2Dir).Path)"
+}
+
 # --- Main ----------------------------------------------------------------
 $winPkg = $null; $linPkg = $null
 if ($Windows) { $winPkg = Build-Windows }
 if ($Linux) { $linPkg = Build-Linux }
 
-Write-Step "Dist"
+Write-Step "Dist (Native)"
 if ($Windows) { Build-Dist $winPkg $DistWin }
 if ($Linux) { Build-Dist $linPkg $DistLin }
 
 # C# managed plugins: build once, deploy into each assembled dist tree
-$csOut = $null
-if (-not $SkipCsharp) { $csOut = Build-CSharp }
+$csOut = $null; $sw2Out = $null
+if (-not $SkipCsharp) {
+    $csOut = Build-CSharp
+    $sw2Out = Build-CSharpSW2
+}
 if ($csOut) {
-    Write-Step "Deploy C#"
-    if ($Windows) { Deploy-CSharp $csOut $DistWin }
-    if ($Linux) { Deploy-CSharp $csOut $DistLin }
+    Write-Step "Deploy C# (CounterStrikeSharp)"
+    Deploy-CSharp $csOut $DistCss
+}
+if ($sw2Out) {
+    Write-Step "Deploy C# (SwiftlyS2)"
+    Deploy-CSharpSW2 $sw2Out $DistSw2
 }
 
 Write-Step "Done"
 if ($Windows) { Write-Ok "Windows -> dist/windows/" }
 if ($Linux) { Write-Ok "Linux   -> dist/linux/" }
+if ($csOut) { Write-Ok "CounterStrikeSharp -> dist/CounterStrikeSharp/" }
+if ($sw2Out) { Write-Ok "SwiftlyS2         -> dist/SwiftlyS2/" }
