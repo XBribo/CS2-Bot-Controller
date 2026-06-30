@@ -201,14 +201,6 @@ Key operations exposed by both managed integrations:
 
 ------------------------------------------------------------------------
 
-## Special thanks
-
-- [cs2kz-metamod](https://github.com/KZGlobalTeam/cs2kz-metamod) for helping determine the replay framework.
-- [Misaka17032](https://github.com/Misaka17032) for adding Linux support to the plugin.
-- [nicedayzhu](https://github.com/nicedayzhu) for adding swiftlys2 api support to the plugin.
-
-------------------------------------------------------------------------
-
 ## License
 
 CS2-Bot-Controller is licensed under the GNU Affero General Public License version 3 (AGPL-3.0).

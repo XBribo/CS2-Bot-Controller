@@ -41,8 +41,8 @@ public:
     const char *GetName() override { return "BotController"; }
     const char *GetDescription() override { return "Record & Replay and Lock CS2 bots."; }
     const char *GetURL() override { return ""; }
-    const char *GetLicense() override { return "GPLv3"; }
-    const char *GetVersion() override { return "0.4.7"; }
+    const char *GetLicense() override { return "AGPL-3.0"; }
+    const char *GetVersion() override { return "0.5.0"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BL"; }
 };
