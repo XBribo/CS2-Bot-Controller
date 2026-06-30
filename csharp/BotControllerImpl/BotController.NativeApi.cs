@@ -1,9 +1,5 @@
 // P/Invoke wrapper for BotController.dll (ABI 12). Check IsCompatible() before use.
 // Main-thread only.
-//
-// Provider-internal: data types (LockKind/ReplayTick/BotProfileData/...) come
-// from the shared BotControllerApi.dll, not redefined here. This file is the
-// native bridge the provider uses to implement IBotControllerApi.
 
 using System.Runtime.InteropServices;
 

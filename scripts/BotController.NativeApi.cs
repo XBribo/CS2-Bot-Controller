@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 10). Check IsCompatible() before use.
+// P/Invoke wrapper for BotController.dll (ABI 12). Check IsCompatible() before use.
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -188,6 +188,9 @@ namespace BotControllerApi
 
         // Native ABI must match what this wrapper expects.
         public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
+
+        // Native C-ABI version the loaded DLL reports.
+        public static int AbiVersion => BotController_GetVersion();
 
         // ---- locks ----
 

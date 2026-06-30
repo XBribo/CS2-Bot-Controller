@@ -22,6 +22,10 @@
     <ProjectReference Include="../BotControllerApi/BotControllerApi.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../BotControllerImpl/BotController.NativeApi.cs" Link="BotController.NativeApi.cs" />
+  </ItemGroup>
+
 
   <Target Name="CreateZip" AfterTargets="Publish">
     <ItemGroup>
