@@ -43,7 +43,7 @@ It also ships optional integrations for **CounterStrikeSharp** and
 
 ## Install
 
-1. Download the latest `BotController-windows.zip` or `BotController-linux.zip` from the [Releases page](https://github.com/XBribo/CS2-Bot-Controller/releases/latest).
+1. Download the latest `BotController-MM-windows.zip` or `BotController-MM-linux.zip` from the [Releases page](https://github.com/XBribo/CS2-Bot-Controller/releases/latest).
 2. Download the latest `BotController-CSS-API.zip (CounterStrikeSharp)`
 or `BotController-SW2-API.zip (SwiftlyS2)` from the [Releases page](https://github.com/XBribo/CS2-Bot-Controller/releases/latest).
 3. Extract the archive and copy the `/addons/` folder into your server's `/game/csgo/` directory.

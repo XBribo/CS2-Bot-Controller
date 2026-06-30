@@ -103,11 +103,18 @@ function Reset-DistRoot([string]$destRoot) {
     New-Item -ItemType Directory -Force $destRoot | Out-Null
 }
 
-# Copy the staged native addons tree into a per-platform dist folder.
+# Copy only the expected native package files into a per-platform dist folder.
 function Build-Dist([string]$nativePkg, [string]$destRoot) {
     Reset-DistRoot $destRoot
     if ($nativePkg) {
-        Copy-Item -Recurse -Force "$nativePkg/addons" $destRoot
+        $dstBot = Join-Path $destRoot "addons/BotController"
+        $dstMeta = Join-Path $destRoot "addons/metamod"
+        New-Item -ItemType Directory -Force $dstBot | Out-Null
+        New-Item -ItemType Directory -Force $dstMeta | Out-Null
+
+        Copy-Item -Recurse -Force "$nativePkg/addons/BotController/bin" $dstBot
+        Copy-Item -Force "$nativePkg/addons/BotController/gamedata.json" $dstBot
+        Copy-Item -Force "$nativePkg/addons/metamod/BotController.vdf" $dstMeta
     }
     Write-Ok "assembled $((Resolve-Path $destRoot).Path)"
 }
