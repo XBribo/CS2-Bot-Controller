@@ -1,0 +1,56 @@
+# Build output
+build/
+out/
+cmake-build-*/
+*.dll
+*.pdb
+*.lib
+*.exp
+*.obj
+*.ilk
+.clangd
+
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# IDE
+.idea/
+.vs/
+.vscode/
+*.user
+*.sln
+*.vcxproj*
+*.suo
+*.code-workspace
+
+# CLion / ReSharper
+.idea_modules/
+_ReSharper.*/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local overrides
+local.cmake
+*.local.cmake
+
+# .NET (csharp/)
+[Bb]in/
+[Oo]bj/
+*.nupkg
+project.assets.json
+*.nuget.cache
+
+# Python
+__pycache__/
+*.pyc
+
+dist/
