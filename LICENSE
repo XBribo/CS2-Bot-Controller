@@ -1,5 +1,6 @@
 CS2-Bot-Controller is licensed under the GNU Affero General Public License, version 3 (AGPL-3.0).
 
+Prior to v0.4.7, BotController was licensed under GPL-3.0-only.  
 Starting with version 0.4.8, the project as a whole is licensed under AGPL-3.0-only, with the following exceptions:
 - Components inside the third_party/ directory retain their original upstream licenses.
 
