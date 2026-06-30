@@ -55,9 +55,9 @@ or `BotController-SW2-API.zip (SwiftlyS2)` from the [Releases page](https://gith
 
 | Command | Description |
 |---------|-------------|
-| `bc_lock <all|aim|jump|weapon> <slot> [slot1..slot5]` | Apply a lock to a bot slot |
-| `bc_unlock <all|aim|jump|weapon> <slot>` | Remove a lock from a bot slot |
-| `bc_unlock_all <all|aim|jump|weapon>` | Remove one lock kind from all bot slots |
+| `bc_lock <all\|aim\|jump\|weapon> <slot> [slot1..slot5]` | Apply a lock to a bot slot |
+| `bc_unlock <all\|aim\|jump\|weapon> <slot>` | Remove a lock from a bot slot |
+| `bc_unlock_all <all\|aim\|jump\|weapon>` | Remove one lock kind from all bot slots |
 | `bc_status` | Show current hook status and per-slot lock state |
 
 `weapon` mode requires the weapon slot as the third argument.
