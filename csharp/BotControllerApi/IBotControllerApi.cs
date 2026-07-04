@@ -85,5 +85,31 @@ namespace BotControllerApi
 
         // Plan item count: -1 none, 0 skip/empty, >0 alias count.
         int BuyPlanItemCount(int slot);
+
+        // ---- voice ----
+
+        // Returns true when the native plugin can send voice net messages.
+        bool CanSendVoice();
+
+        // Returns 0 when voice sending is ready, otherwise a negative setup code.
+        int GetVoiceStatus();
+
+        // Sends one encoded Opus voice frame to a recipient player slot.
+        int SendVoiceFrame(
+            int recipientSlot,
+            int senderClient,
+            ulong senderXuid,
+            byte[] audio,
+            int audioBytes,
+            int sampleRate,
+            float voiceLevel,
+            int sequenceBytes,
+            int sectionNumber,
+            int uncompressedSampleOffset,
+            uint numPackets,
+            uint[] packetOffsets,
+            int packetOffsetCount,
+            int tick,
+            int audibleMask);
     }
 }

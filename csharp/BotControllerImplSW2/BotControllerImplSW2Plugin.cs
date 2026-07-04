@@ -19,7 +19,7 @@ namespace BotControllerImplSW2;
 
 [PluginMetadata(
     Id = "botcontroller.sw2",
-    Version = "1.1.6",
+    Version = "0.5.1",
     Name = "BotController",
     Author = "XBribo & nicedayzhu",
     Description = "Record a player's movement and replay it on a bot."
@@ -106,6 +106,44 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool ClearAllBuyPlans() => BotController.ClearAllBuyPlans();
         // Returns the number of configured buy-plan items.
         public int BuyPlanItemCount(int slot) => BotController.BuyPlanItemCount(slot);
+
+        // Reports whether native voice frame sending is available.
+        public bool CanSendVoice() => BotController.CanSendVoice();
+        // Returns the native voice sender setup status.
+        public int GetVoiceStatus() => BotController.GetVoiceStatus();
+        // Sends one encoded Opus voice frame through the native module.
+        public int SendVoiceFrame(
+            int recipientSlot,
+            int senderClient,
+            ulong senderXuid,
+            byte[] audio,
+            int audioBytes,
+            int sampleRate,
+            float voiceLevel,
+            int sequenceBytes,
+            int sectionNumber,
+            int uncompressedSampleOffset,
+            uint numPackets,
+            uint[] packetOffsets,
+            int packetOffsetCount,
+            int tick,
+            int audibleMask)
+            => BotController.SendVoiceFrame(
+                recipientSlot,
+                senderClient,
+                senderXuid,
+                audio,
+                audioBytes,
+                sampleRate,
+                voiceLevel,
+                sequenceBytes,
+                sectionNumber,
+                uncompressedSampleOffset,
+                numPackets,
+                packetOffsets,
+                packetOffsetCount,
+                tick,
+                audibleMask);
     }
 
     // ---- Lifecycle ----

@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 12;
+        private const int ExpectedAbiVersion = 13;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -95,6 +95,30 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetBuyPlanItemCount(int slot);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CanSendVoice();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetVoiceStatus();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SendVoiceFrame(
+            int recipientSlot,
+            int senderClient,
+            ulong senderXuid,
+            [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 4)] byte[] audio,
+            int audioBytes,
+            int sampleRate,
+            float voiceLevel,
+            int sequenceBytes,
+            int sectionNumber,
+            int uncompressedSampleOffset,
+            uint numPackets,
+            [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 12)] uint[] packetOffsets,
+            int packetOffsetCount,
+            int tick,
+            int audibleMask);
 
         // Native ABI must match what this wrapper expects.
         public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
@@ -225,5 +249,55 @@ namespace BotControllerApi
         // Plan item count: -1 none, 0 skip/empty, >0 alias count.
         public static int BuyPlanItemCount(int slot)
             => BotController_GetBuyPlanItemCount(slot);
+
+        // ---- voice ----
+
+        // Returns true when the native plugin can send voice net messages.
+        public static bool CanSendVoice() => BotController_CanSendVoice() != 0;
+
+        // Returns 0 when voice sending is ready, otherwise a negative setup code.
+        public static int GetVoiceStatus() => BotController_GetVoiceStatus();
+
+        // Sends one encoded Opus voice frame to a recipient player slot.
+        public static int SendVoiceFrame(
+            int recipientSlot,
+            int senderClient,
+            ulong senderXuid,
+            byte[] audio,
+            int audioBytes,
+            int sampleRate,
+            float voiceLevel,
+            int sequenceBytes,
+            int sectionNumber,
+            int uncompressedSampleOffset,
+            uint numPackets,
+            uint[] packetOffsets,
+            int packetOffsetCount,
+            int tick,
+            int audibleMask)
+        {
+            audio ??= Array.Empty<byte>();
+            packetOffsets ??= Array.Empty<uint>();
+            if (audioBytes < 0 || audioBytes > audio.Length ||
+                packetOffsetCount < 0 || packetOffsetCount > packetOffsets.Length)
+                return -2;
+
+            return BotController_SendVoiceFrame(
+                recipientSlot,
+                senderClient,
+                senderXuid,
+                audio,
+                audioBytes,
+                sampleRate,
+                voiceLevel,
+                sequenceBytes,
+                sectionNumber,
+                uncompressedSampleOffset,
+                numPackets,
+                packetOffsets,
+                packetOffsetCount,
+                tick,
+                audibleMask);
+        }
     }
 }

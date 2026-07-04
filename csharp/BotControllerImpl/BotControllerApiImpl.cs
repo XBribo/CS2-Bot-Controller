@@ -49,5 +49,41 @@ namespace BotControllerApi
         public bool ClearBuyPlan(int slot) => BotController.ClearBuyPlan(slot);
         public bool ClearAllBuyPlans() => BotController.ClearAllBuyPlans();
         public int BuyPlanItemCount(int slot) => BotController.BuyPlanItemCount(slot);
+
+        // ---- voice ----
+        public bool CanSendVoice() => BotController.CanSendVoice();
+        public int GetVoiceStatus() => BotController.GetVoiceStatus();
+        public int SendVoiceFrame(
+            int recipientSlot,
+            int senderClient,
+            ulong senderXuid,
+            byte[] audio,
+            int audioBytes,
+            int sampleRate,
+            float voiceLevel,
+            int sequenceBytes,
+            int sectionNumber,
+            int uncompressedSampleOffset,
+            uint numPackets,
+            uint[] packetOffsets,
+            int packetOffsetCount,
+            int tick,
+            int audibleMask)
+            => BotController.SendVoiceFrame(
+                recipientSlot,
+                senderClient,
+                senderXuid,
+                audio,
+                audioBytes,
+                sampleRate,
+                voiceLevel,
+                sequenceBytes,
+                sectionNumber,
+                uncompressedSampleOffset,
+                numPackets,
+                packetOffsets,
+                packetOffsetCount,
+                tick,
+                audibleMask);
     }
 }

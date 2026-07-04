@@ -5,6 +5,7 @@
 #include "InputInjector.h"
 #include "BuyControllerState.h"
 #include "BotProfile.h"
+#include "VoiceSender.h"
 
 #include <cstdint>
 #include <string>
@@ -42,7 +43,55 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 
 extern "C" BC_EXPORT int BotController_GetVersion()
 {
-    return 12;
+    return 13;
+}
+
+// Return 1 when the plugin can allocate and send voice net messages.
+extern "C" BC_EXPORT int BotController_CanSendVoice()
+{
+    return BotController::VoiceSender::IsAvailable() ? 1 : 0;
+}
+
+// Return 0 when voice sending is ready, otherwise a negative setup code.
+extern "C" BC_EXPORT int BotController_GetVoiceStatus()
+{
+    return BotController::VoiceSender::GetStatus();
+}
+
+// Send one encoded Opus voice frame to a recipient player slot.
+extern "C" BC_EXPORT int BotController_SendVoiceFrame(
+    int recipientSlot,
+    int senderClient,
+    uint64_t senderXuid,
+    const uint8_t *audio,
+    int audioBytes,
+    int sampleRate,
+    float voiceLevel,
+    int sequenceBytes,
+    int sectionNumber,
+    int uncompressedSampleOffset,
+    uint32_t numPackets,
+    const uint32_t *packetOffsets,
+    int packetOffsetCount,
+    int tick,
+    int audibleMask)
+{
+    return BotController::VoiceSender::SendVoiceFrame(
+        recipientSlot,
+        senderClient,
+        senderXuid,
+        audio,
+        audioBytes,
+        sampleRate,
+        voiceLevel,
+        sequenceBytes,
+        sectionNumber,
+        uncompressedSampleOffset,
+        numPackets,
+        packetOffsets,
+        packetOffsetCount,
+        tick,
+        audibleMask);
 }
 
 // Read a bot's BotProfile by slot. 0 ok / -1 no live bot or null profile.

@@ -1,6 +1,7 @@
 # Build output
 build/
 out/
+dist/
 cmake-build-*/
 *.dll
 *.pdb
@@ -53,4 +54,9 @@ project.assets.json
 __pycache__/
 *.pyc
 
-dist/
+# Coding
+CLAUDE.md
+AGENTS.md
+.agents/
+.claude/
+docs/

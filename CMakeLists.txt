@@ -33,7 +33,13 @@ if(NOT PROTOC_VER MATCHES "libprotoc 3\\.21\\.")
 endif()
 message(STATUS "protoc: ${PROTOC_EXE} (${PROTOC_VER})")
 
-set(PROTO_FILES network_connection.proto networkbasetypes.proto usercmd.proto cs_usercmd.proto)
+set(PROTO_FILES
+    network_connection.proto
+    networkbasetypes.proto
+    source2_steam_stats.proto
+    netmessages.proto
+    usercmd.proto
+    cs_usercmd.proto)
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
 set(PROTO_PATHS
@@ -121,6 +127,7 @@ add_library(BotController SHARED
     src/BuyController/BuyControllerState.cpp
     src/BotRecorder/InputInjector.cpp
     src/BotRecorder/MotionRecorder.cpp
+    src/VoiceSender/VoiceSender.cpp
     src/BotProfile/BotProfile.cpp
     src/common/sig_scan.cpp
     src/common/version_targets.cpp
@@ -140,6 +147,7 @@ target_include_directories(BotController PRIVATE
     src/BotController
     src/BuyController
     src/BotRecorder
+    src/VoiceSender
     src/BotProfile
     ${CMAKE_SOURCE_DIR}/third_party
     ${GENERATED_DIR}
