@@ -58,6 +58,17 @@ public class BotControllerPlugin : BasePlugin
         return null;
     }
 
+    // Registers the live bot pawn pointer required by the current native replay path.
+    private static bool RegisterReplayPawnForSlot(int slot)
+    {
+        var player = ControllerForSlot(slot);
+        if (player is not { IsValid: true } ||
+            player.PlayerPawn is not { IsValid: true, Value.IsValid: true })
+            return false;
+
+        return BotController.SetReplayPawn(slot, player.PlayerPawn.Value.Handle);
+    }
+
     [ConsoleCommand("css_record", "Start recording your per-tick movement")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnRecord(CCSPlayerController? player, CommandInfo cmd)
@@ -115,6 +126,7 @@ public class BotControllerPlugin : BasePlugin
         BotController.Lock(botSlot, LockKind.All);
 
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
+            RegisterReplayPawnForSlot(botSlot) &&
             BotController.StartReplay(botSlot, loop))
         {
             _driver.Track(botSlot);

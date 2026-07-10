@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace BotController
 {
@@ -31,8 +33,35 @@ namespace BotController
     // Full diagnostic version returning intermediate values.
     SlotResolution ResolveSlot(void *bot);
 
-    // pawn->m_hController only, no m_hOriginalController fallback
-    // used to detect human takeover
+    // Resolves either a CCSBot pointer or a helper context containing one at +0x10.
+    SlotResolution ResolveSlotFromBotOrContext(void *botOrContext);
+
+    // Returns a player slot from a CCSBot pointer or helper context.
+    int CCSBotContextToSlot(void *botOrContext);
+
+    // Reads engine memory without allowing an invalid pointer to crash Windows.
+    bool TryReadMemory(void *base, int offset, void *out, size_t size);
+
+    // Writes engine memory without allowing an invalid pointer to crash Windows.
+    bool TryWriteMemory(void *base, int offset, const void *value, size_t size);
+
+    // Reads a trivially-copyable engine field through the guarded memory path.
+    template <typename T>
+    bool ReadField(void *base, int offset, T &out)
+    {
+        static_assert(std::is_trivially_copyable_v<T>);
+        return TryReadMemory(base, offset, &out, sizeof(T));
+    }
+
+    // Writes a trivially-copyable engine field through the guarded memory path.
+    template <typename T>
+    bool WriteField(void *base, int offset, const T &value)
+    {
+        static_assert(std::is_trivially_copyable_v<T>);
+        return TryWriteMemory(base, offset, &value, sizeof(T));
+    }
+
+    // Resolves the owning slot through m_hController, then m_hOriginalController.
     int ControllerSlotForPawn(void *pawn);
 
     PawnControllerHandles ReadPawnControllerHandles(void *pawn);

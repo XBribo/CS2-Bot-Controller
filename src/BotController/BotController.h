@@ -25,6 +25,9 @@ namespace BotController
         void *JumpAddress();
         void *UpdateLookAnglesAddress();
 
+        // Publishes replay-owned eye angles through the current engine path.
+        bool ApplyReplayEyeAngles(void *pawn, float pitch, float yaw);
+
         // Last CCSBot* seen in Update for this slot, or nullptr. Used to read
         // the bot's BotProfile by slot.
         void *BotForSlot(int slot);

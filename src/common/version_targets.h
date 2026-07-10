@@ -17,24 +17,24 @@ namespace BotController::targets
 
     // ---- BotProfile (CCSBot+kBot_Profile) ----
 
-    inline int kProf_Aggression = 0x08;   // float, 0..1
-    inline int kProf_Skill = 0x0C;        // float, 0..1
-    inline int kProf_Teamwork = 0x10;     // float, 0..1
-    inline int kProf_WeaponPref = 0x24;   // WORD[16] item def index, stride 2
+    inline int kProf_Aggression = 0x08;      // float, 0..1
+    inline int kProf_Skill = 0x0C;           // float, 0..1
+    inline int kProf_Teamwork = 0x10;        // float, 0..1
+    inline int kProf_WeaponPref = 0x24;      // WORD[16] item def index, stride 2
     inline int kProf_WeaponPrefCount = 0x44; // int
-    inline int kProf_Cost = 0x48;         // int
-    inline int kProf_Difficulty = 0x50;   // u8 bitflags EASY/NORMAL/HARD/EXPERT
-    inline int kProf_ReactionTime = 0x58; // float
-    inline int kProf_AttackDelay = 0x5C;  // float
-    inline int kProf_LookAccelAtk = 0x78; // float m_lookAngleMaxAccelAttacking
-    inline int kProf_LookStiffAtk = 0x7C; // float m_lookAngleStiffnessAttacking
-    inline int kProf_LookDampAtk = 0x80;  // float m_lookAngleDampingAttacking
+    inline int kProf_Cost = 0x48;            // int
+    inline int kProf_Difficulty = 0x50;      // u8 bitflags EASY/NORMAL/HARD/EXPERT
+    inline int kProf_ReactionTime = 0x58;    // float
+    inline int kProf_AttackDelay = 0x5C;     // float
+    inline int kProf_LookAccelAtk = 0x78;    // float m_lookAngleMaxAccelAttacking
+    inline int kProf_LookStiffAtk = 0x7C;    // float m_lookAngleStiffnessAttacking
+    inline int kProf_LookDampAtk = 0x80;     // float m_lookAngleDampingAttacking
 
-    // ---- BuyState (a1 in BuyState::OnUpdate) ----
+    // ---- BuyState ----
 
-    // m_isInitialDelay (bool); rising edge each round = freshly entered BuyState
+    // m_isInitialDelay (bool)
     inline int kBuy_InitialDelay = 0x08;
-    // m_doneBuying (bool); set 1 to make vanilla skip the rest of buying
+    // m_doneBuying (bool)
     inline int kBuy_DoneBuying = 0x18;
 
     // ---- CBaseEntity / CEntityIdentity ----
@@ -43,9 +43,9 @@ namespace BotController::targets
     inline int kEnt_Identity = 0x10;
     // CEntityIdentity -> m_EHandle (low 15 bits = entity index)
     inline int kEntIdentity_EHandle = 0x10;
-    // m_MoveType (MoveType_t, 1 byte) — restored each replay tick for §8
+    // m_MoveType (MoveType_t, 1 byte) — restored each replay tick
     inline int kEnt_MoveType = 0x2F3;
-    // m_nActualMoveType (MoveType_t, 1 byte) — networked move type (ladder anim)
+    // m_nActualMoveType (MoveType_t, 1 byte) — networked move type
     inline int kEnt_ActualMoveType = 0x2F5;
     // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
     inline int kEnt_Flags = 0x388;
@@ -54,21 +54,27 @@ namespace BotController::targets
     inline constexpr unsigned kFL_Ducking = 1u << 1;
     // m_vecAbsVelocity
     inline int kEnt_AbsVelocity = 0x38C;
-    // entity -> m_pGameSceneNode -> m_vecAbsOrigin (world pos), written each
-    // replay tick (direct write, not Teleport, to keep client interp smooth)
-    inline int kEnt_GameSceneNode = 0x270;
+    // entity -> m_CBodyComponent -> m_pSceneNode
+    inline int kEnt_BodyComponent = 0x30;
+    inline int kBody_SceneNode = 0x08;
     inline int kNode_AbsOrigin = 0xC8;
 
     // ---- CCSPlayerPawn ----
 
     // m_pWeaponServices
     inline int kPawn_WeaponServices = 0xA30;
+    // m_pMovementServices
+    inline int kPawn_MovementServices = 0xA70;
     // m_hController (CHandle)
     inline int kPawn_Controller = 0xBB0;
     // m_hOriginalController (CHandle)
     inline int kPawn_OriginalController = 0xD24;
     // CCSPlayerPawn -> v_angle (QAngle)
     inline int kPawn_ViewAngle = 0xAE8;
+    // CCSPlayerPawn -> v_anglePrevious (QAngle)
+    inline int kPawn_ViewAnglePrevious = 0xAF4;
+    // Embedded server view-angle change vector
+    inline int kPawn_ServerViewAngleChanges = 0xA80;
     // m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
     inline int kPawn_EyeAngles = 0x1368;
 
@@ -79,9 +85,8 @@ namespace BotController::targets
 
     // ---- CBasePlayerWeapon ----
 
-    // m_AttributeManager(0x978) -> m_Item(0x50) -> m_iItemDefinitionIndex(0x38),
-    // all embedded; net direct add (no deref)
-    inline int kWeapon_ItemDefIndex = 0x978 + 0x50 + 0x38; // 0xA00
+    // m_AttributeManager -> m_Item -> m_iItemDefinitionIndex,
+    inline int kWeapon_ItemDefIndex = 0x978 + 0x50 + 0x38;
 
     // ---- CCSPlayer_MovementServices ----
 
@@ -112,7 +117,6 @@ namespace BotController::targets
     inline int kVtIdx_PlayerRunCommand = 25;
     inline int kVtIdx_FinishMove = 38;
 
-    // Override the above from gamedata[name].offsets[platform]; missing keeps default
     void LoadFromGamedata(const nlohmann::json &gd);
 
 } // namespace BotController::targets

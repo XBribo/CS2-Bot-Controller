@@ -1,13 +1,24 @@
-// CCSBot* -> player slot via pawn (+0x18) -> m_hController (+0xB80).
+// CCSBot* -> player slot via pawn (+0x18) -> controller handle.
 
 #include "ccsbot_slot.h"
 #include "version_targets.h"
 
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <unordered_set>
 
 #include <tier0/dbg.h>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace tg = BotController::targets;
 
@@ -33,6 +44,58 @@ namespace BotController
         return idx - 1;
     }
 
+    // Reads an engine field and converts access violations into a failed lookup.
+    bool TryReadMemory(void *base, int offset, void *out, size_t size)
+    {
+        if (!base || !out || offset < 0 || size == 0)
+            return false;
+
+        const auto baseAddress = reinterpret_cast<uintptr_t>(base);
+        const auto address = baseAddress + static_cast<uintptr_t>(offset);
+        if (address < 0x10000u || address < baseAddress || address + size < address)
+            return false;
+
+#if defined(_WIN32)
+        __try
+        {
+            std::memcpy(out, reinterpret_cast<const void *>(address), size);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        std::memcpy(out, reinterpret_cast<const void *>(address), size);
+#endif
+        return true;
+    }
+
+    // Writes an engine field and converts access violations into a failed update.
+    bool TryWriteMemory(void *base, int offset, const void *value, size_t size)
+    {
+        if (!base || !value || offset < 0 || size == 0)
+            return false;
+
+        const auto baseAddress = reinterpret_cast<uintptr_t>(base);
+        const auto address = baseAddress + static_cast<uintptr_t>(offset);
+        if (address < 0x10000u || address < baseAddress || address + size < address)
+            return false;
+
+#if defined(_WIN32)
+        __try
+        {
+            std::memcpy(reinterpret_cast<void *>(address), value, size);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        std::memcpy(reinterpret_cast<void *>(address), value, size);
+#endif
+        return true;
+    }
+
     PawnControllerHandles ReadPawnControllerHandles(void *pawn)
     {
         PawnControllerHandles out{};
@@ -44,14 +107,15 @@ namespace BotController
         if (!pawn)
             return out;
 
-        out.controllerHandle = *reinterpret_cast<uint32_t *>(
-            reinterpret_cast<char *>(pawn) + tg::kPawn_Controller);
-        out.originalControllerHandle = *reinterpret_cast<uint32_t *>(
-            reinterpret_cast<char *>(pawn) + tg::kPawn_OriginalController);
+        if (!ReadField(pawn, tg::kPawn_Controller, out.controllerHandle) ||
+            !ReadField(pawn, tg::kPawn_OriginalController, out.originalControllerHandle))
+            return out;
         out.controllerIndex = EntIndexFromHandle(out.controllerHandle);
         out.originalControllerIndex = EntIndexFromHandle(out.originalControllerHandle);
         out.controllerSlot = SlotFromEntityIndex(out.controllerIndex);
-        out.ownerSlot = out.controllerSlot;
+        out.ownerSlot = out.controllerSlot >= 0
+                            ? out.controllerSlot
+                            : SlotFromEntityIndex(out.originalControllerIndex);
         return out;
     }
 
@@ -62,8 +126,9 @@ namespace BotController
         Msg("[BWL][scan] pawn=%p candidate handles idx 1..64, 0x008..0x1000:\n", pawn);
         for (int off = 0x8; off < 0x1000; off += 4)
         {
-            uint32_t v = *reinterpret_cast<uint32_t *>(
-                reinterpret_cast<char *>(pawn) + off);
+            uint32_t v = 0;
+            if (!ReadField(pawn, off, v))
+                continue;
             if (v == 0u || v == 0xFFFFFFFFu)
                 continue;
             int idx = static_cast<int>(v & 0x7FFFu);
@@ -80,22 +145,25 @@ namespace BotController
         if (!bot)
             return out;
 
-        void *pawn = *reinterpret_cast<void **>(
-            reinterpret_cast<char *>(bot) + tg::kBot_Pawn);
+        void *pawn = nullptr;
+        if (!ReadField(bot, tg::kBot_Pawn, pawn))
+            return out;
         if (!pawn)
             return out;
         out.pawn = pawn;
 
-        void *identity = *reinterpret_cast<void **>(
-            reinterpret_cast<char *>(pawn) + tg::kEnt_Identity);
-        if (identity)
-        {
-            uint32_t handle = *reinterpret_cast<uint32_t *>(
-                reinterpret_cast<char *>(identity) + tg::kEntIdentity_EHandle);
-            int idx = EntIndexFromHandle(handle);
-            if (idx > 0)
-                out.pawnEntIndex = idx;
-        }
+        void *identity = nullptr;
+        if (!ReadField(pawn, tg::kEnt_Identity, identity))
+            return out;
+        if (!identity)
+            return out;
+
+        uint32_t handle = 0;
+        if (!ReadField(identity, tg::kEntIdentity_EHandle, handle))
+            return out;
+        out.pawnEntIndex = EntIndexFromHandle(handle);
+        if (out.pawnEntIndex <= 0)
+            return out;
 
         out.slot = ReadPawnControllerHandles(pawn).ownerSlot;
 
@@ -114,12 +182,33 @@ namespace BotController
         return ResolveSlot(bot).slot;
     }
 
-    // pawn+0xB80 m_hController -> entindex -> slot.
+    // Resolves direct bot pointers first, then the July 2026 helper context layout.
+    SlotResolution ResolveSlotFromBotOrContext(void *botOrContext)
+    {
+        SlotResolution direct = ResolveSlot(botOrContext);
+        if (direct.slot >= 0)
+            return direct;
+
+        void *bot = nullptr;
+        if (!ReadField(botOrContext, 0x10, bot))
+            return direct;
+
+        SlotResolution viaContext = ResolveSlot(bot);
+        return viaContext.slot >= 0 ? viaContext : direct;
+    }
+
+    // Returns the slot resolved from either supported bot argument shape.
+    int CCSBotContextToSlot(void *botOrContext)
+    {
+        return ResolveSlotFromBotOrContext(botOrContext).slot;
+    }
+
+    // Resolves the current controller and falls back to the stable original owner.
     int ControllerSlotForPawn(void *pawn)
     {
         if (!pawn)
             return -1;
-        return ReadPawnControllerHandles(pawn).controllerSlot;
+        return ReadPawnControllerHandles(pawn).ownerSlot;
     }
 
     // CCSPlayerController*'s own identity ehandle -> entindex -> slot.
@@ -127,12 +216,14 @@ namespace BotController
     {
         if (!controller)
             return -1;
-        void *identity = *reinterpret_cast<void **>(
-            reinterpret_cast<char *>(controller) + tg::kEnt_Identity);
+        void *identity = nullptr;
+        if (!ReadField(controller, tg::kEnt_Identity, identity))
+            return -1;
         if (!identity)
             return -1;
-        uint32_t h = *reinterpret_cast<uint32_t *>(
-            reinterpret_cast<char *>(identity) + tg::kEntIdentity_EHandle);
+        uint32_t h = 0;
+        if (!ReadField(identity, tg::kEntIdentity_EHandle, h))
+            return -1;
         int idx = EntIndexFromHandle(h);
         if (idx < 1 || idx > 64)
             return -1;

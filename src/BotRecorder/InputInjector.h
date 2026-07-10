@@ -27,6 +27,15 @@ namespace BotController
         // Resolved address of the hooked function.
         void *ProcessUsercmdAddress();
 
+        // Registers the authoritative replay pawn supplied by the managed plugin.
+        bool SetReplayPawn(int slot, void *pawn);
+
+        // Clears the registered replay pawn for a slot.
+        void ClearReplayPawn(int slot);
+
+        // Resolves and validates the pawn owning the supplied movement services.
+        void *ResolveReplayPawn(int slot, void *services);
+
         // Diagnostics
         uint64_t HookCallCount();
         int LastResolvedSlot();

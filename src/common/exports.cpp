@@ -43,7 +43,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 
 extern "C" BC_EXPORT int BotController_GetVersion()
 {
-    return 13;
+    return 14;
 }
 
 // Return 1 when the plugin can allocate and send voice net messages.
@@ -236,6 +236,16 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
 {
     return BotController::MotionRecorder::StartReplay(slot, loop != 0) ? 0 : -1;
+}
+
+// Registers the managed plugin's authoritative pawn pointer for replay.
+extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
+{
+    return BotController::InputInjector::SetReplayPawn(
+               slot,
+               reinterpret_cast<void *>(static_cast<uintptr_t>(pawnPtr)))
+               ? 0
+               : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StopReplay(int slot)

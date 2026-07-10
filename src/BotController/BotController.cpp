@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -39,6 +40,9 @@ namespace BotController
         static void *g_addrUpdateLookAngles = nullptr;
         static SetEyeAngles_t g_origSetEyeAngles = nullptr;
         static void *g_addrSetEyeAngles = nullptr;
+#if defined(_WIN32)
+        static void **g_ppEntityIdentityChunks = nullptr;
+#endif
         static bool g_installed = false;
         static std::string g_status = "not_attempted";
 
@@ -52,6 +56,102 @@ namespace BotController
         static Hook g_hookUpdateLookAngles;
         static Hook g_hookSetEyeAngles;
 
+        // Normalizes an angle to the engine's expected [-180, 180) range.
+        static float NormalizeDeg(float angle)
+        {
+            angle = std::fmod(angle + 180.0f, 360.0f);
+            if (angle < 0.0f)
+                angle += 360.0f;
+            return angle - 180.0f;
+        }
+
+#if defined(_WIN32)
+        // Resolves the entity identity chunk pointer referenced by SetEyeAngles.
+        static void ResolveSetEyeAnglesEntityChunks(void *setEyeAngles)
+        {
+            g_ppEntityIdentityChunks = nullptr;
+            if (!setEyeAngles)
+                return;
+
+            auto *code = reinterpret_cast<uint8_t *>(setEyeAngles);
+            constexpr size_t kSearchBytes = 0x120;
+            for (size_t i = 0; i + 10 <= kSearchBytes; ++i)
+            {
+                if (code[i] != 0x4C || code[i + 1] != 0x8B || code[i + 2] != 0x05 ||
+                    code[i + 7] != 0x4D || code[i + 8] != 0x85 || code[i + 9] != 0xC0)
+                    continue;
+
+                int32_t relative = 0;
+                std::memcpy(&relative, code + i + 3, sizeof(relative));
+                g_ppEntityIdentityChunks =
+                    reinterpret_cast<void **>(code + i + 7 + relative);
+                return;
+            }
+        }
+
+        // Resolves the live controller owning a replay pawn through entity chunks.
+        static void *ReplayControllerForPawn(void *pawn)
+        {
+            if (!pawn || !g_ppEntityIdentityChunks)
+                return nullptr;
+
+            uint32_t handle = 0;
+            if (!ReadField(pawn, tg::kPawn_Controller, handle) ||
+                handle == 0xFFFFFFFFu || handle == 0xFFFFFFFEu)
+                return nullptr;
+
+            void *chunks = nullptr;
+            if (!TryReadMemory(g_ppEntityIdentityChunks, 0, &chunks, sizeof(chunks)) || !chunks)
+                return nullptr;
+
+            const uint32_t entityIndex = handle & 0x7FFFu;
+            void *chunk = nullptr;
+            if (!TryReadMemory(chunks,
+                               static_cast<int>((entityIndex >> 9) * sizeof(void *)),
+                               &chunk, sizeof(chunk)) ||
+                !chunk)
+                return nullptr;
+
+            constexpr int kIdentitySize = 0x70;
+            auto *identity = reinterpret_cast<uint8_t *>(chunk) +
+                             static_cast<size_t>(entityIndex & 0x1FFu) * kIdentitySize;
+            uint32_t liveHandle = 0;
+            void *controller = nullptr;
+            if (!ReadField(identity, 0x10, liveHandle) || liveHandle != handle ||
+                !ReadField(identity, 0x00, controller))
+                return nullptr;
+            return controller;
+        }
+#endif
+
+        // Calls SetEyeAngles while temporarily bypassing the new fake-client early-out.
+        static bool ApplyReplayEyeAnglesInternal(void *pawn, float pitch, float yaw)
+        {
+            if (!pawn || !g_origSetEyeAngles)
+                return false;
+
+            float angle[3] = {pitch, NormalizeDeg(yaw), 0.0f};
+#if defined(_WIN32)
+            void *controller = ReplayControllerForPawn(pawn);
+            uint32_t controllerFlags = 0;
+            bool restoreFakeClient = false;
+            if (controller &&
+                ReadField(controller, tg::kEnt_Flags, controllerFlags) &&
+                (controllerFlags & 0x100u) != 0)
+            {
+                const uint32_t publishedFlags = controllerFlags & ~0x100u;
+                restoreFakeClient =
+                    WriteField(controller, tg::kEnt_Flags, publishedFlags);
+            }
+#endif
+            g_origSetEyeAngles(pawn, angle);
+#if defined(_WIN32)
+            if (restoreFakeClient)
+                WriteField(controller, tg::kEnt_Flags, controllerFlags);
+#endif
+            return true;
+        }
+
         // Skip the Bot tick under All lock OR while replaying
         static void BC_FASTCALL HookedUpdate(void *bot)
         {
@@ -64,7 +164,8 @@ namespace BotController
             if (slot >= 0 &&
                 (BotControllerState::GetAll(slot) || MotionRecorder::IsReplaying(slot)))
             {
-                *(reinterpret_cast<uint8_t *>(bot) + tg::kBot_AiTickedFlag) = 1;
+                const uint8_t ticked = 1;
+                WriteField(bot, tg::kBot_AiTickedFlag, ticked);
                 return;
             }
             g_origUpdate(bot);
@@ -76,13 +177,9 @@ namespace BotController
 
         static void BC_FASTCALL HookedUpkeep(void *bot)
         {
-            int slot = CCSBotToSlot(bot);
+            int slot = CCSBotContextToSlot(bot);
             if (slot >= 0 && MotionRecorder::IsReplaying(slot))
-            {
-                if (g_origUpdateLookAngles)
-                    HookedUpdateLookAngles(bot); // view only, no locomotion
                 return;
-            }
             if (slot >= 0 &&
                 (BotControllerState::GetAll(slot) || BotControllerState::GetAim(slot)))
             {
@@ -94,6 +191,12 @@ namespace BotController
         // view replay
         static void BC_FASTCALL HookedUpdateLookAngles(void *bot)
         {
+            int slot = CCSBotContextToSlot(bot);
+            if (slot >= 0 &&
+                (MotionRecorder::IsReplaying(slot) ||
+                 BotControllerState::GetAll(slot) ||
+                 BotControllerState::GetAim(slot)))
+                return;
             g_origUpdateLookAngles(bot);
         }
 
@@ -101,13 +204,8 @@ namespace BotController
         static void BC_FASTCALL HookedSetEyeAngles(void *pawn, float *angle)
         {
             int slot = pawn ? ControllerSlotForPawn(pawn) : -1;
-            ReplayTick t{};
-            if (slot >= 0 && MotionRecorder::CurrentReplayTick(slot, t))
-            {
-                float a[3] = {t.post.pitch, t.post.yaw, 0.0f};
-                g_origSetEyeAngles(pawn, a);
+            if (slot >= 0 && MotionRecorder::IsReplaying(slot))
                 return;
-            }
             g_origSetEyeAngles(pawn, angle);
         }
 
@@ -181,6 +279,12 @@ namespace BotController
                               seaErr);
                 DebugOut(dbg);
             }
+#if defined(_WIN32)
+            else
+            {
+                ResolveSetEyeAnglesEntityChunks(g_addrSetEyeAngles);
+            }
+#endif
 
             // required: Update
             if (!g_hookUpdate.Create(g_addrUpdate,
@@ -273,6 +377,9 @@ namespace BotController
                 return;
             g_hookSetEyeAngles.Remove();
             g_origSetEyeAngles = nullptr;
+#if defined(_WIN32)
+            g_ppEntityIdentityChunks = nullptr;
+#endif
             g_hookUpdateLookAngles.Remove();
             g_origUpdateLookAngles = nullptr;
             g_hookJump.Remove();
@@ -295,6 +402,12 @@ namespace BotController
         void *UpkeepAddress() { return g_addrUpkeep; }
         void *JumpAddress() { return g_addrJump; }
         void *UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
+
+        // Publishes a replay angle without depending on the bot upkeep path.
+        bool ApplyReplayEyeAngles(void *pawn, float pitch, float yaw)
+        {
+            return ApplyReplayEyeAnglesInternal(pawn, pitch, yaw);
+        }
 
         // Last CCSBot* seen in Update for this slot
         void *BotForSlot(int slot)

@@ -43,6 +43,9 @@ namespace BotControllerApi
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
 
+        // Registers the current native pawn pointer before replay starts.
+        bool SetReplayPawn(int slot, nint pawn);
+
         bool StartReplay(int slot, bool loop = false);
 
         bool StopReplay(int slot);

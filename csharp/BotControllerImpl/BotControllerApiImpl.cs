@@ -26,6 +26,8 @@ namespace BotControllerApi
             => BotController.LoadReplay(slot, ticks, subs);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
+        // Registers the authoritative native pawn pointer for replay.
+        public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
         public bool StopReplay(int slot) => BotController.StopReplay(slot);
         public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);

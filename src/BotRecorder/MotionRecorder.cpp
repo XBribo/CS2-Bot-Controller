@@ -1,8 +1,10 @@
 // Motion recording & replay implementation
 
 #include "MotionRecorder.h"
+#include "BotController.h"
 #include "InputInjector.h"
 #include "WeaponLocker.h"
+#include "ccsbot_slot.h"
 #include "version_targets.h"
 #include "platform.h"
 
@@ -72,51 +74,66 @@ namespace BotController
                 .count();
         }
 
+        // Reads a three-float engine vector through one guarded memory operation.
+        static bool ReadVector3(void *base, int offset, float &x, float &y, float &z)
+        {
+            float values[3] = {};
+            if (!TryReadMemory(base, offset, values, sizeof(values)))
+                return false;
+            x = values[0];
+            y = values[1];
+            z = values[2];
+            return true;
+        }
+
+        // Writes a three-float engine vector through one guarded memory operation.
+        static bool WriteVector3(void *base, int offset, float x, float y, float z)
+        {
+            const float values[3] = {x, y, z};
+            return TryWriteMemory(base, offset, values, sizeof(values));
+        }
+
+        // Resolves the current scene node through the July 2026 body component layout.
+        static void *ResolveSceneNode(void *entity)
+        {
+            void *body = nullptr;
+            if (!ReadField(entity, tg::kEnt_BodyComponent, body) || !body)
+                return nullptr;
+
+            void *node = nullptr;
+            return ReadField(body, tg::kBody_SceneNode, node) ? node : nullptr;
+        }
+
         // Read a MovementSnapshot from live engine state (services -> pawn).
-        static bool ReadSnapshot(void *services, MovementSnapshot &out)
+        static bool ReadSnapshot(int slot, void *services, MovementSnapshot &out)
         {
             if (!services)
                 return false;
-            auto *s = reinterpret_cast<char *>(services);
-            void *pawn = *reinterpret_cast<void **>(s + tg::kServices_Pawn);
+            void *pawn = InputInjector::ResolveReplayPawn(slot, services);
             if (!pawn)
                 return false;
-            auto *p = reinterpret_cast<char *>(pawn);
 
-            out.velX = *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 0);
-            out.velY = *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 4);
-            out.velZ = *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 8);
-            out.entityFlags = *reinterpret_cast<uint32_t *>(p + tg::kEnt_Flags);
-            out.moveType = *reinterpret_cast<uint8_t *>(p + tg::kEnt_MoveType);
-            out.actualMoveType = *reinterpret_cast<uint8_t *>(p + tg::kEnt_ActualMoveType);
-            out.buttons = *reinterpret_cast<uint64_t *>(s + tg::kServices_Buttons);
-            out.buttons1 = *reinterpret_cast<uint64_t *>(s + tg::kServices_Buttons1);
-            out.buttons2 = *reinterpret_cast<uint64_t *>(s + tg::kServices_Buttons2);
-
-            // duck/ladder state (drives crouch + ladder anim on replay)
-            out.duckAmount = *reinterpret_cast<float *>(s + tg::kServices_DuckAmount);
-            out.duckSpeed = *reinterpret_cast<float *>(s + tg::kServices_DuckSpeed);
-            out.ladderNormalX = *reinterpret_cast<float *>(s + tg::kServices_LadderNormal + 0);
-            out.ladderNormalY = *reinterpret_cast<float *>(s + tg::kServices_LadderNormal + 4);
-            out.ladderNormalZ = *reinterpret_cast<float *>(s + tg::kServices_LadderNormal + 8);
-            out.ducked = *reinterpret_cast<uint8_t *>(s + tg::kServices_Ducked);
-            out.ducking = *reinterpret_cast<uint8_t *>(s + tg::kServices_Ducking);
-            out.desiresDuck = *reinterpret_cast<uint8_t *>(s + tg::kServices_DesiresDuck);
-
-            // view angles from pawn v_angle
-            out.pitch = *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 0);
-            out.yaw = *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 4);
-            out.roll = *reinterpret_cast<float *>(p + tg::kPawn_ViewAngle + 8);
-
-            void *node = *reinterpret_cast<void **>(p + tg::kEnt_GameSceneNode);
-            if (node)
-            {
-                auto *n = reinterpret_cast<char *>(node);
-                out.originX = *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 0);
-                out.originY = *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 4);
-                out.originZ = *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 8);
-            }
-            return true;
+            void *node = ResolveSceneNode(pawn);
+            return node &&
+                   ReadVector3(pawn, tg::kEnt_AbsVelocity,
+                               out.velX, out.velY, out.velZ) &&
+                   ReadField(pawn, tg::kEnt_Flags, out.entityFlags) &&
+                   ReadField(pawn, tg::kEnt_MoveType, out.moveType) &&
+                   ReadField(pawn, tg::kEnt_ActualMoveType, out.actualMoveType) &&
+                   ReadField(services, tg::kServices_Buttons, out.buttons) &&
+                   ReadField(services, tg::kServices_Buttons1, out.buttons1) &&
+                   ReadField(services, tg::kServices_Buttons2, out.buttons2) &&
+                   ReadField(services, tg::kServices_DuckAmount, out.duckAmount) &&
+                   ReadField(services, tg::kServices_DuckSpeed, out.duckSpeed) &&
+                   ReadVector3(services, tg::kServices_LadderNormal,
+                               out.ladderNormalX, out.ladderNormalY, out.ladderNormalZ) &&
+                   ReadField(services, tg::kServices_Ducked, out.ducked) &&
+                   ReadField(services, tg::kServices_Ducking, out.ducking) &&
+                   ReadField(services, tg::kServices_DesiresDuck, out.desiresDuck) &&
+                   ReadVector3(pawn, tg::kPawn_ViewAngle,
+                               out.pitch, out.yaw, out.roll) &&
+                   ReadVector3(node, tg::kNode_AbsOrigin,
+                               out.originX, out.originY, out.originZ);
         }
 
         // ---- recording ----
@@ -201,7 +218,7 @@ namespace BotController
             if (!r.recording.load(std::memory_order_acquire))
                 return;
             MovementSnapshot pre{};
-            if (!ReadSnapshot(services, pre))
+            if (!ReadSnapshot(slot, services, pre))
                 return;
             std::lock_guard<std::mutex> lk(r.mu);
             r.pendingPre = pre;
@@ -246,15 +263,13 @@ namespace BotController
                 return;
 
             MovementSnapshot post{};
-            if (!ReadSnapshot(services, post))
+            if (!ReadSnapshot(slot, services, post))
                 return;
 
             if (cmd)
             {
-                auto *m = reinterpret_cast<char *>(cmd);
-                post.originX = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0);
-                post.originY = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4);
-                post.originZ = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 8);
+                ReadVector3(cmd, tg::kMove_AbsOrigin,
+                            post.originX, post.originY, post.originZ);
             }
 
             // Active weapon def for this tick.
@@ -298,9 +313,8 @@ namespace BotController
             float mvX = 0, mvY = 0;
             if (cmd)
             {
-                auto *m = reinterpret_cast<char *>(cmd);
-                mvX = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0);
-                mvY = *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4);
+                float mvZ = 0.0f;
+                ReadVector3(cmd, tg::kMove_AbsOrigin, mvX, mvY, mvZ);
             }
             g_recLastQpc[slot] = now;
             g_recLastNodeX[slot] = post.originX;
@@ -400,6 +414,7 @@ namespace BotController
             if (!ValidSlot(slot))
                 return false;
             g_rep[slot].playing.store(false, std::memory_order_release);
+            InputInjector::ClearReplayPawn(slot);
             return true;
         }
 
@@ -583,61 +598,50 @@ namespace BotController
         }
 
         // Write replay velocity onto the pawn. View replay is driven by SetEyeAngles.
-        static void WriteVelocityToPawn(void *services, const MovementSnapshot &s)
+        static void WriteVelocityToPawn(int slot, void *services,
+                                        const MovementSnapshot &s)
         {
-            auto *sv = reinterpret_cast<char *>(services);
-            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
+            void *pawn = InputInjector::ResolveReplayPawn(slot, services);
             if (!pawn)
                 return;
-            auto *p = reinterpret_cast<char *>(pawn);
-
-            *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 0) = s.velX;
-            *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 4) = s.velY;
-            *reinterpret_cast<float *>(p + tg::kEnt_AbsVelocity + 8) = s.velZ;
+            WriteVector3(pawn, tg::kEnt_AbsVelocity, s.velX, s.velY, s.velZ);
         }
 
-        static void WriteSceneNodeOrigin(void *services, const MovementSnapshot &s,
+        // Writes replay origin through the current body-component scene node.
+        static void WriteSceneNodeOrigin(int slot, void *services,
+                                         const MovementSnapshot &s,
                                          float zBias = 0.0f)
         {
-            auto *sv = reinterpret_cast<char *>(services);
-            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
+            void *pawn = InputInjector::ResolveReplayPawn(slot, services);
             if (!pawn)
                 return;
 
-            void *node = *reinterpret_cast<void **>(
-                reinterpret_cast<char *>(pawn) + tg::kEnt_GameSceneNode);
+            void *node = ResolveSceneNode(pawn);
             if (!node)
                 return;
 
-            auto *n = reinterpret_cast<char *>(node);
-            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 0) = s.originX;
-            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 4) = s.originY;
-            *reinterpret_cast<float *>(n + tg::kNode_AbsOrigin + 8) = s.originZ + zBias;
+            WriteVector3(node, tg::kNode_AbsOrigin,
+                         s.originX, s.originY, s.originZ + zBias);
         }
 
         // Write origin + velocity into CMoveData.
         static void WriteMoveData(void *moveData, const MovementSnapshot &s)
         {
-            auto *m = reinterpret_cast<char *>(moveData);
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 0) = s.originX;
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 4) = s.originY;
-            *reinterpret_cast<float *>(m + tg::kMove_AbsOrigin + 8) = s.originZ;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 0) = s.velX;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 4) = s.velY;
-            *reinterpret_cast<float *>(m + tg::kMove_Velocity + 8) = s.velZ;
+            WriteVector3(moveData, tg::kMove_AbsOrigin,
+                         s.originX, s.originY, s.originZ);
+            WriteVector3(moveData, tg::kMove_Velocity, s.velX, s.velY, s.velZ);
         }
 
+        // Restores duck and ladder state through guarded field writes.
         static void WriteMovementServiceState(void *services, const MovementSnapshot &s)
         {
-            auto *sv = reinterpret_cast<char *>(services);
-            *reinterpret_cast<float *>(sv + tg::kServices_DuckAmount) = s.duckAmount;
-            *reinterpret_cast<float *>(sv + tg::kServices_DuckSpeed) = s.duckSpeed;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 0) = s.ladderNormalX;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 4) = s.ladderNormalY;
-            *reinterpret_cast<float *>(sv + tg::kServices_LadderNormal + 8) = s.ladderNormalZ;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducked) = s.ducked;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_Ducking) = s.ducking;
-            *reinterpret_cast<uint8_t *>(sv + tg::kServices_DesiresDuck) = s.desiresDuck;
+            WriteField(services, tg::kServices_DuckAmount, s.duckAmount);
+            WriteField(services, tg::kServices_DuckSpeed, s.duckSpeed);
+            WriteVector3(services, tg::kServices_LadderNormal,
+                         s.ladderNormalX, s.ladderNormalY, s.ladderNormalZ);
+            WriteField(services, tg::kServices_Ducked, s.ducked);
+            WriteField(services, tg::kServices_Ducking, s.ducking);
+            WriteField(services, tg::kServices_DesiresDuck, s.desiresDuck);
         }
 
         // ProcessMovement (pre): seed CMoveData + pawn + moveType with pre state.
@@ -658,19 +662,19 @@ namespace BotController
                 t = p.ticks[cur];
             }
             WriteMoveData(moveData, t.pre);
-            WriteVelocityToPawn(services, t.pre);
+            WriteVelocityToPawn(slot, services, t.pre);
             WriteMovementServiceState(services, t.pre);
-            auto *sv = reinterpret_cast<char *>(services);
             // Feed recorded buttons so the engine's Duck()/ladder logic runs
-            *reinterpret_cast<uint64_t *>(sv + tg::kServices_Buttons) = t.pre.buttons;
-            *reinterpret_cast<uint64_t *>(sv + tg::kServices_Buttons1) = t.pre.buttons1;
-            *reinterpret_cast<uint64_t *>(sv + tg::kServices_Buttons2) = t.pre.buttons2;
-            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
+            WriteField(services, tg::kServices_Buttons, t.pre.buttons);
+            WriteField(services, tg::kServices_Buttons1, t.pre.buttons1);
+            WriteField(services, tg::kServices_Buttons2, t.pre.buttons2);
+            void *pawn = InputInjector::ResolveReplayPawn(slot, services);
             if (pawn)
             {
-                auto *pp = reinterpret_cast<char *>(pawn);
-                *reinterpret_cast<uint8_t *>(pp + tg::kEnt_MoveType) = t.pre.moveType;
-                WriteSceneNodeOrigin(services, t.pre);
+                WriteField(pawn, tg::kEnt_MoveType, t.pre.moveType);
+                WriteSceneNodeOrigin(slot, services, t.pre);
+                BotControllerHooks::ApplyReplayEyeAngles(
+                    pawn, t.pre.pitch, t.pre.yaw);
             }
         }
 
@@ -693,9 +697,9 @@ namespace BotController
             }
             WriteMoveData(moveData, t.post);
 #if defined(_WIN32)
-            WriteSceneNodeOrigin(services, t.post, 1000.0f);
+            WriteSceneNodeOrigin(slot, services, t.post, 1000.0f);
 #else
-            WriteSceneNodeOrigin(services, t.post);
+            WriteSceneNodeOrigin(slot, services, t.post);
 #endif
         }
 
@@ -722,27 +726,31 @@ namespace BotController
                         return;
                     }
                     p.playing.store(false, std::memory_order_release);
+                    InputInjector::ClearReplayPawn(slot);
                     return;
                 }
                 t = p.ticks[cur];
             }
 
-            auto *sv = reinterpret_cast<char *>(services);
-            void *pawn = *reinterpret_cast<void **>(sv + tg::kServices_Pawn);
+            void *pawn = InputInjector::ResolveReplayPawn(slot, services);
             if (pawn)
             {
-                auto *pp = reinterpret_cast<char *>(pawn);
-                *reinterpret_cast<uint8_t *>(pp + tg::kEnt_MoveType) = t.post.moveType;
-                *reinterpret_cast<uint8_t *>(pp + tg::kEnt_ActualMoveType) = t.post.actualMoveType;
+                WriteField(pawn, tg::kEnt_MoveType, t.post.moveType);
+                WriteField(pawn, tg::kEnt_ActualMoveType, t.post.actualMoveType);
                 // Merge ground + ducking bits from the recording, keep the rest live.
-                uint32_t live = *reinterpret_cast<uint32_t *>(pp + tg::kEnt_Flags);
+                uint32_t live = 0;
                 uint32_t mask = tg::kFL_OnGround | tg::kFL_Ducking;
-                live = (live & ~mask) | (t.post.entityFlags & mask);
-                *reinterpret_cast<uint32_t *>(pp + tg::kEnt_Flags) = live;
+                if (ReadField(pawn, tg::kEnt_Flags, live))
+                {
+                    live = (live & ~mask) | (t.post.entityFlags & mask);
+                    WriteField(pawn, tg::kEnt_Flags, live);
+                }
+                BotControllerHooks::ApplyReplayEyeAngles(
+                    pawn, t.post.pitch, t.post.yaw);
             }
 
-            WriteVelocityToPawn(services, t.post);
-            WriteSceneNodeOrigin(services, t.post);
+            WriteVelocityToPawn(slot, services, t.post);
+            WriteSceneNodeOrigin(slot, services, t.post);
             WriteMovementServiceState(services, t.post);
 
             p.cursor.store(cur + 1, std::memory_order_relaxed);
@@ -798,6 +806,7 @@ namespace BotController
                 g_rec[i].liveWs.store(nullptr, std::memory_order_relaxed);
                 g_rep[i].cursor.store(0, std::memory_order_relaxed);
                 g_rep[i].lastAppliedDef.store(-1, std::memory_order_relaxed);
+                InputInjector::ClearReplayPawn(i);
             }
         }
     }

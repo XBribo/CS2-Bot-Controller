@@ -72,6 +72,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
+        // Registers the authoritative native pawn pointer for replay.
+        public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         // Starts replay for a bot slot.
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
         // Stops replay for a bot slot.
@@ -192,6 +194,17 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private static string Tag(string msg) =>
         $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
 
+    // Registers the live bot pawn pointer required by the current native replay path.
+    private bool RegisterReplayPawnForSlot(int slot)
+    {
+        var player = Core.PlayerManager.GetPlayer(slot);
+        var pawn = player?.PlayerPawn;
+        return pawn is { IsValid: true } &&
+               BotController.SetReplayPawn(
+                   slot,
+                   ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address);
+    }
+
     // Returns the cached native availability state, probing once on first use.
     private bool EnsureNativeApiAvailability()
     {
@@ -287,6 +300,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         BotController.Lock(botSlot, LockKind.All);
 
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
+            RegisterReplayPawnForSlot(botSlot) &&
             BotController.StartReplay(botSlot, loop))
         {
             _driver.Track(botSlot);

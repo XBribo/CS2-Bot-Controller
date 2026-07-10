@@ -54,6 +54,7 @@ namespace BotController
 
         // slot -> live CCSPlayer_MovementServices*
         static std::array<std::atomic<void *>, kMaxSlots> g_slotServices{};
+        static std::array<std::atomic<void *>, kMaxSlots> g_slotPawns{};
 
         static std::atomic<uint64_t> g_hookCalls{0};
         static std::atomic<int> g_lastSlot{-1};
@@ -77,6 +78,88 @@ namespace BotController
             return def >= 43 && def <= 48;
         }
 
+        // Reports whether a slot can index the fixed replay state arrays.
+        static bool ValidSlotIndex(int slot)
+        {
+            return slot >= 0 && slot < kMaxSlots;
+        }
+
+        // Reads the helper pawn field embedded in movement services.
+        static void *ServicesToPawnField(void *services)
+        {
+            void *pawn = nullptr;
+            return ReadField(services, tg::kServices_Pawn, pawn) ? pawn : nullptr;
+        }
+
+        // Verifies that a pawn currently owns the supplied movement services.
+        static bool PawnOwnsServices(void *pawn, void *services)
+        {
+            if (!pawn || !services)
+                return false;
+            void *liveServices = nullptr;
+            return ReadField(pawn, tg::kPawn_MovementServices, liveServices) &&
+                   liveServices == services;
+        }
+
+        // Registers a readable pawn whose current owner matches the requested slot.
+        bool SetReplayPawn(int slot, void *pawn)
+        {
+            if (!ValidSlotIndex(slot))
+                return false;
+            g_slotPawns[slot].store(nullptr, std::memory_order_release);
+            if (!pawn)
+                return false;
+
+            void *identity = nullptr;
+            uint32_t handle = 0;
+            if (!ReadField(pawn, tg::kEnt_Identity, identity) || !identity ||
+                !ReadField(identity, tg::kEntIdentity_EHandle, handle) ||
+                handle == 0u || handle == 0xFFFFFFFFu)
+                return false;
+
+            int ownerSlot = ControllerSlotForPawn(pawn);
+            if (ownerSlot >= 0 && ownerSlot != slot)
+                return false;
+
+            g_slotPawns[slot].store(pawn, std::memory_order_release);
+            return true;
+        }
+
+        // Removes a registered pawn before the entity can be recycled.
+        void ClearReplayPawn(int slot)
+        {
+            if (ValidSlotIndex(slot))
+                g_slotPawns[slot].store(nullptr, std::memory_order_release);
+        }
+
+        // Returns a registered pawn only when its movement-services link is current.
+        void *ResolveReplayPawn(int slot, void *services)
+        {
+            if (ValidSlotIndex(slot))
+            {
+                void *registered = g_slotPawns[slot].load(std::memory_order_acquire);
+                if (PawnOwnsServices(registered, services))
+                    return registered;
+            }
+
+            void *fieldPawn = ServicesToPawnField(services);
+            return PawnOwnsServices(fieldPawn, services) ? fieldPawn : nullptr;
+        }
+
+        // Finds a registered slot by validating every pawn-to-services link.
+        static int RegisteredSlotForServices(void *services)
+        {
+            if (!services)
+                return -1;
+            for (int slot = 0; slot < kMaxSlots; ++slot)
+            {
+                void *pawn = g_slotPawns[slot].load(std::memory_order_acquire);
+                if (PawnOwnsServices(pawn, services))
+                    return slot;
+            }
+            return -1;
+        }
+
         static int ServicesToSlot(void *services)
         {
             g_slotResolveCalls.fetch_add(1, std::memory_order_relaxed);
@@ -93,13 +176,9 @@ namespace BotController
                 g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
                 return -1;
             }
-            void *pawn = *reinterpret_cast<void **>(
-                reinterpret_cast<char *>(services) + tg::kServices_Pawn);
-            if (!pawn)
-            {
-                g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
-                return -1;
-            }
+            void *pawn = ServicesToPawnField(services);
+            if (!PawnOwnsServices(pawn, services))
+                pawn = nullptr;
 
             PawnControllerHandles handles = ReadPawnControllerHandles(pawn);
             g_lastPawn.store(reinterpret_cast<uintptr_t>(pawn), std::memory_order_relaxed);
@@ -107,23 +186,25 @@ namespace BotController
             g_lastOriginalControllerHandle.store(handles.originalControllerHandle, std::memory_order_relaxed);
             g_lastControllerIndex.store(handles.controllerIndex, std::memory_order_relaxed);
             g_lastOriginalControllerIndex.store(handles.originalControllerIndex, std::memory_order_relaxed);
-            g_lastOwnerSlot.store(handles.ownerSlot, std::memory_order_relaxed);
-            if (handles.ownerSlot < 0)
+            int ownerSlot = handles.ownerSlot;
+            if (ownerSlot < 0)
+                ownerSlot = RegisteredSlotForServices(services);
+            g_lastOwnerSlot.store(ownerSlot, std::memory_order_relaxed);
+            if (ownerSlot < 0)
                 g_slotResolveFailures.fetch_add(1, std::memory_order_relaxed);
-            return handles.ownerSlot;
+            return ownerSlot;
         }
 
         // services -> pawn -> WeaponServices*, for the recording weapon tap.
-        static void *ServicesToWeaponServices(void *services)
+        static void *ServicesToWeaponServices(int slot, void *services)
         {
-            if (!services)
-                return nullptr;
-            void *pawn = *reinterpret_cast<void **>(
-                reinterpret_cast<char *>(services) + tg::kServices_Pawn);
+            void *pawn = ResolveReplayPawn(slot, services);
             if (!pawn)
                 return nullptr;
-            return *reinterpret_cast<void **>(
-                reinterpret_cast<char *>(pawn) + tg::kPawn_WeaponServices);
+            void *weaponServices = nullptr;
+            return ReadField(pawn, tg::kPawn_WeaponServices, weaponServices)
+                       ? weaponServices
+                       : nullptr;
         }
 
         static float NormalizeDeg(float a)
@@ -160,7 +241,7 @@ namespace BotController
             // Recording weapon tap
             if (recording)
             {
-                MotionRecorder::SetLiveWs(slot, ServicesToWeaponServices(services));
+                MotionRecorder::SetLiveWs(slot, ServicesToWeaponServices(slot, services));
                 if (!g_physicsActive)
                     MotionRecorder::OnCapturePre(slot, services, moveData);
             }
@@ -384,11 +465,13 @@ namespace BotController
                 return;
             if (!services)
                 return;
-            void **vt = *reinterpret_cast<void ***>(services);
-            if (!vt)
+            void **vt = nullptr;
+            if (!ReadField(services, 0, vt) || !vt)
                 return;
 
-            g_addrFinishMove = vt[tg::kVtIdx_FinishMove];
+            ReadField(vt,
+                      tg::kVtIdx_FinishMove * static_cast<int>(sizeof(void *)),
+                      g_addrFinishMove);
             if (g_addrFinishMove &&
                 g_hookFinishMove.Create(g_addrFinishMove,
                                         reinterpret_cast<void *>(&HookedFinishMove),
@@ -396,7 +479,9 @@ namespace BotController
                 g_hookFinishMove.Enable();
 
             // PlayerRunCommand (subtick record/re-inject)
-            g_addrPlayerRunCommand = vt[tg::kVtIdx_PlayerRunCommand];
+            ReadField(vt,
+                      tg::kVtIdx_PlayerRunCommand * static_cast<int>(sizeof(void *)),
+                      g_addrPlayerRunCommand);
             if (g_addrPlayerRunCommand &&
                 g_hookPlayerRunCommand.Create(g_addrPlayerRunCommand,
                                               reinterpret_cast<void *>(&HookedPlayerRunCommand),
@@ -504,6 +589,8 @@ namespace BotController
             g_vtHooksTried.store(false, std::memory_order_release);
             for (auto &s : g_slotServices)
                 s.store(nullptr, std::memory_order_release);
+            for (auto &pawn : g_slotPawns)
+                pawn.store(nullptr, std::memory_order_release);
             g_installed = false;
             g_status = "not_attempted";
         }
