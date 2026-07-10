@@ -97,11 +97,11 @@ namespace BotController
         static void *ResolveSceneNode(void *entity)
         {
             void *body = nullptr;
-            if (!ReadField(entity, tg::kEnt_BodyComponent, body) || !body)
+            if (!SafeRead(entity, tg::kEnt_BodyComponent, body) || !body)
                 return nullptr;
 
             void *node = nullptr;
-            return ReadField(body, tg::kBody_SceneNode, node) ? node : nullptr;
+            return SafeRead(body, tg::kBody_SceneNode, node) ? node : nullptr;
         }
 
         // Read a MovementSnapshot from live engine state (services -> pawn).
@@ -117,19 +117,19 @@ namespace BotController
             return node &&
                    ReadVector3(pawn, tg::kEnt_AbsVelocity,
                                out.velX, out.velY, out.velZ) &&
-                   ReadField(pawn, tg::kEnt_Flags, out.entityFlags) &&
-                   ReadField(pawn, tg::kEnt_MoveType, out.moveType) &&
-                   ReadField(pawn, tg::kEnt_ActualMoveType, out.actualMoveType) &&
-                   ReadField(services, tg::kServices_Buttons, out.buttons) &&
-                   ReadField(services, tg::kServices_Buttons1, out.buttons1) &&
-                   ReadField(services, tg::kServices_Buttons2, out.buttons2) &&
-                   ReadField(services, tg::kServices_DuckAmount, out.duckAmount) &&
-                   ReadField(services, tg::kServices_DuckSpeed, out.duckSpeed) &&
+                   SafeRead(pawn, tg::kEnt_Flags, out.entityFlags) &&
+                   SafeRead(pawn, tg::kEnt_MoveType, out.moveType) &&
+                   SafeRead(pawn, tg::kEnt_ActualMoveType, out.actualMoveType) &&
+                   SafeRead(services, tg::kServices_Buttons, out.buttons) &&
+                   SafeRead(services, tg::kServices_Buttons1, out.buttons1) &&
+                   SafeRead(services, tg::kServices_Buttons2, out.buttons2) &&
+                   SafeRead(services, tg::kServices_DuckAmount, out.duckAmount) &&
+                   SafeRead(services, tg::kServices_DuckSpeed, out.duckSpeed) &&
                    ReadVector3(services, tg::kServices_LadderNormal,
                                out.ladderNormalX, out.ladderNormalY, out.ladderNormalZ) &&
-                   ReadField(services, tg::kServices_Ducked, out.ducked) &&
-                   ReadField(services, tg::kServices_Ducking, out.ducking) &&
-                   ReadField(services, tg::kServices_DesiresDuck, out.desiresDuck) &&
+                   SafeRead(services, tg::kServices_Ducked, out.ducked) &&
+                   SafeRead(services, tg::kServices_Ducking, out.ducking) &&
+                   SafeRead(services, tg::kServices_DesiresDuck, out.desiresDuck) &&
                    ReadVector3(pawn, tg::kPawn_ViewAngle,
                                out.pitch, out.yaw, out.roll) &&
                    ReadVector3(node, tg::kNode_AbsOrigin,
@@ -740,7 +740,7 @@ namespace BotController
                 // Merge ground + ducking bits from the recording, keep the rest live.
                 uint32_t live = 0;
                 uint32_t mask = tg::kFL_OnGround | tg::kFL_Ducking;
-                if (ReadField(pawn, tg::kEnt_Flags, live))
+                if (SafeRead(pawn, tg::kEnt_Flags, live))
                 {
                     live = (live & ~mask) | (t.post.entityFlags & mask);
                     WriteField(pawn, tg::kEnt_Flags, live);

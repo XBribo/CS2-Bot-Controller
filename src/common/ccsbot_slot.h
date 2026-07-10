@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 namespace BotController
@@ -40,17 +41,21 @@ namespace BotController
     int CCSBotContextToSlot(void *botOrContext);
 
     // Reads engine memory without allowing an invalid pointer to crash Windows.
-    bool TryReadMemory(void *base, int offset, void *out, size_t size);
+    bool TryReadMemory(const void *base, int offset, void *out, size_t size);
 
     // Writes engine memory without allowing an invalid pointer to crash Windows.
     bool TryWriteMemory(void *base, int offset, const void *value, size_t size);
 
-    // Reads a trivially-copyable engine field through the guarded memory path.
+    // Reads a field into a temporary and publishes it only after full success
     template <typename T>
-    bool ReadField(void *base, int offset, T &out)
+    bool SafeRead(const void *base, int offset, T &out)
     {
         static_assert(std::is_trivially_copyable_v<T>);
-        return TryReadMemory(base, offset, &out, sizeof(T));
+        alignas(T) std::byte value[sizeof(T)]{};
+        if (!TryReadMemory(base, offset, value, sizeof(T)))
+            return false;
+        std::memcpy(&out, value, sizeof(T));
+        return true;
     }
 
     // Writes a trivially-copyable engine field through the guarded memory path.

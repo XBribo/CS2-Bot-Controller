@@ -78,12 +78,12 @@ namespace BotController
             if (!bot || slot < 0 || slot >= 64)
                 return;
             void *pawn = nullptr;
-            if (!ReadField(bot, tg::kBot_Pawn, pawn))
+            if (!SafeRead(bot, tg::kBot_Pawn, pawn))
                 return;
             if (!pawn)
                 return;
             void *ws = nullptr;
-            if (!ReadField(pawn, tg::kPawn_WeaponServices, ws))
+            if (!SafeRead(pawn, tg::kPawn_WeaponServices, ws))
                 return;
             if (!ws)
                 return;
@@ -363,7 +363,7 @@ namespace BotController
             if (!weapon)
                 return -1;
             uint16_t def = 0;
-            return ReadField(weapon, tg::kWeapon_ItemDefIndex, def) ? def : -1;
+            return SafeRead(weapon, tg::kWeapon_ItemDefIndex, def) ? def : -1;
         }
 
         // entity -> identity(0x10) -> m_EHandle(0x10), low 15 bits = index.
@@ -372,12 +372,12 @@ namespace BotController
             if (!entity)
                 return -1;
             void *identity = nullptr;
-            if (!ReadField(entity, tg::kEnt_Identity, identity))
+            if (!SafeRead(entity, tg::kEnt_Identity, identity))
                 return -1;
             if (!identity)
                 return -1;
             uint32_t h = 0;
-            if (!ReadField(identity, tg::kEntIdentity_EHandle, h))
+            if (!SafeRead(identity, tg::kEntIdentity_EHandle, h))
                 return -1;
             if (h == 0u || h == 0xFFFFFFFFu)
                 return -1;
@@ -397,7 +397,7 @@ namespace BotController
             // m_hActiveWeapon is a handle; resolve it by matching its entity
             // index against the pointers GetSlot returns
             uint32_t activeH = 0;
-            if (!ReadField(ws, tg::kWs_ActiveWeapon, activeH))
+            if (!SafeRead(ws, tg::kWs_ActiveWeapon, activeH))
                 return -1;
             if (activeH == 0u || activeH == 0xFFFFFFFFu)
                 return -1;

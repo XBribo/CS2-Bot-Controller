@@ -88,7 +88,7 @@ namespace BotController
         static void *ServicesToPawnField(void *services)
         {
             void *pawn = nullptr;
-            return ReadField(services, tg::kServices_Pawn, pawn) ? pawn : nullptr;
+            return SafeRead(services, tg::kServices_Pawn, pawn) ? pawn : nullptr;
         }
 
         // Verifies that a pawn currently owns the supplied movement services.
@@ -97,7 +97,7 @@ namespace BotController
             if (!pawn || !services)
                 return false;
             void *liveServices = nullptr;
-            return ReadField(pawn, tg::kPawn_MovementServices, liveServices) &&
+            return SafeRead(pawn, tg::kPawn_MovementServices, liveServices) &&
                    liveServices == services;
         }
 
@@ -112,8 +112,8 @@ namespace BotController
 
             void *identity = nullptr;
             uint32_t handle = 0;
-            if (!ReadField(pawn, tg::kEnt_Identity, identity) || !identity ||
-                !ReadField(identity, tg::kEntIdentity_EHandle, handle) ||
+            if (!SafeRead(pawn, tg::kEnt_Identity, identity) || !identity ||
+                !SafeRead(identity, tg::kEntIdentity_EHandle, handle) ||
                 handle == 0u || handle == 0xFFFFFFFFu)
                 return false;
 
@@ -202,7 +202,7 @@ namespace BotController
             if (!pawn)
                 return nullptr;
             void *weaponServices = nullptr;
-            return ReadField(pawn, tg::kPawn_WeaponServices, weaponServices)
+            return SafeRead(pawn, tg::kPawn_WeaponServices, weaponServices)
                        ? weaponServices
                        : nullptr;
         }
@@ -466,12 +466,13 @@ namespace BotController
             if (!services)
                 return;
             void **vt = nullptr;
-            if (!ReadField(services, 0, vt) || !vt)
+            if (!SafeRead(services, 0, vt) || !vt)
                 return;
 
-            ReadField(vt,
-                      tg::kVtIdx_FinishMove * static_cast<int>(sizeof(void *)),
-                      g_addrFinishMove);
+            if (!SafeRead(vt,
+                          tg::kVtIdx_FinishMove * static_cast<int>(sizeof(void *)),
+                          g_addrFinishMove))
+                g_addrFinishMove = nullptr;
             if (g_addrFinishMove &&
                 g_hookFinishMove.Create(g_addrFinishMove,
                                         reinterpret_cast<void *>(&HookedFinishMove),
@@ -479,9 +480,10 @@ namespace BotController
                 g_hookFinishMove.Enable();
 
             // PlayerRunCommand (subtick record/re-inject)
-            ReadField(vt,
-                      tg::kVtIdx_PlayerRunCommand * static_cast<int>(sizeof(void *)),
-                      g_addrPlayerRunCommand);
+            if (!SafeRead(vt,
+                          tg::kVtIdx_PlayerRunCommand * static_cast<int>(sizeof(void *)),
+                          g_addrPlayerRunCommand))
+                g_addrPlayerRunCommand = nullptr;
             if (g_addrPlayerRunCommand &&
                 g_hookPlayerRunCommand.Create(g_addrPlayerRunCommand,
                                               reinterpret_cast<void *>(&HookedPlayerRunCommand),

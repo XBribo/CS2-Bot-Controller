@@ -45,7 +45,7 @@ namespace BotController
     }
 
     // Reads an engine field and converts access violations into a failed lookup.
-    bool TryReadMemory(void *base, int offset, void *out, size_t size)
+    bool TryReadMemory(const void *base, int offset, void *out, size_t size)
     {
         if (!base || !out || offset < 0 || size == 0)
             return false;
@@ -107,8 +107,8 @@ namespace BotController
         if (!pawn)
             return out;
 
-        if (!ReadField(pawn, tg::kPawn_Controller, out.controllerHandle) ||
-            !ReadField(pawn, tg::kPawn_OriginalController, out.originalControllerHandle))
+        if (!SafeRead(pawn, tg::kPawn_Controller, out.controllerHandle) ||
+            !SafeRead(pawn, tg::kPawn_OriginalController, out.originalControllerHandle))
             return out;
         out.controllerIndex = EntIndexFromHandle(out.controllerHandle);
         out.originalControllerIndex = EntIndexFromHandle(out.originalControllerHandle);
@@ -127,7 +127,7 @@ namespace BotController
         for (int off = 0x8; off < 0x1000; off += 4)
         {
             uint32_t v = 0;
-            if (!ReadField(pawn, off, v))
+            if (!SafeRead(pawn, off, v))
                 continue;
             if (v == 0u || v == 0xFFFFFFFFu)
                 continue;
@@ -146,20 +146,20 @@ namespace BotController
             return out;
 
         void *pawn = nullptr;
-        if (!ReadField(bot, tg::kBot_Pawn, pawn))
+        if (!SafeRead(bot, tg::kBot_Pawn, pawn))
             return out;
         if (!pawn)
             return out;
         out.pawn = pawn;
 
         void *identity = nullptr;
-        if (!ReadField(pawn, tg::kEnt_Identity, identity))
+        if (!SafeRead(pawn, tg::kEnt_Identity, identity))
             return out;
         if (!identity)
             return out;
 
         uint32_t handle = 0;
-        if (!ReadField(identity, tg::kEntIdentity_EHandle, handle))
+        if (!SafeRead(identity, tg::kEntIdentity_EHandle, handle))
             return out;
         out.pawnEntIndex = EntIndexFromHandle(handle);
         if (out.pawnEntIndex <= 0)
@@ -190,7 +190,7 @@ namespace BotController
             return direct;
 
         void *bot = nullptr;
-        if (!ReadField(botOrContext, 0x10, bot))
+        if (!SafeRead(botOrContext, 0x10, bot))
             return direct;
 
         SlotResolution viaContext = ResolveSlot(bot);
@@ -217,12 +217,12 @@ namespace BotController
         if (!controller)
             return -1;
         void *identity = nullptr;
-        if (!ReadField(controller, tg::kEnt_Identity, identity))
+        if (!SafeRead(controller, tg::kEnt_Identity, identity))
             return -1;
         if (!identity)
             return -1;
         uint32_t h = 0;
-        if (!ReadField(identity, tg::kEntIdentity_EHandle, h))
+        if (!SafeRead(identity, tg::kEntIdentity_EHandle, h))
             return -1;
         int idx = EntIndexFromHandle(h);
         if (idx < 1 || idx > 64)

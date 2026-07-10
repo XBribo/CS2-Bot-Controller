@@ -73,8 +73,12 @@ namespace BotController
             if (!setEyeAngles)
                 return;
 
-            auto *code = reinterpret_cast<uint8_t *>(setEyeAngles);
             constexpr size_t kSearchBytes = 0x120;
+            uint8_t code[kSearchBytes] = {};
+            if (!TryReadMemory(setEyeAngles, 0, code, sizeof(code)))
+                return;
+
+            auto *functionBase = reinterpret_cast<uint8_t *>(setEyeAngles);
             for (size_t i = 0; i + 10 <= kSearchBytes; ++i)
             {
                 if (code[i] != 0x4C || code[i + 1] != 0x8B || code[i + 2] != 0x05 ||
@@ -84,7 +88,7 @@ namespace BotController
                 int32_t relative = 0;
                 std::memcpy(&relative, code + i + 3, sizeof(relative));
                 g_ppEntityIdentityChunks =
-                    reinterpret_cast<void **>(code + i + 7 + relative);
+                    reinterpret_cast<void **>(functionBase + i + 7 + relative);
                 return;
             }
         }
@@ -96,7 +100,7 @@ namespace BotController
                 return nullptr;
 
             uint32_t handle = 0;
-            if (!ReadField(pawn, tg::kPawn_Controller, handle) ||
+            if (!SafeRead(pawn, tg::kPawn_Controller, handle) ||
                 handle == 0xFFFFFFFFu || handle == 0xFFFFFFFEu)
                 return nullptr;
 
@@ -117,8 +121,8 @@ namespace BotController
                              static_cast<size_t>(entityIndex & 0x1FFu) * kIdentitySize;
             uint32_t liveHandle = 0;
             void *controller = nullptr;
-            if (!ReadField(identity, 0x10, liveHandle) || liveHandle != handle ||
-                !ReadField(identity, 0x00, controller))
+            if (!SafeRead(identity, 0x10, liveHandle) || liveHandle != handle ||
+                !SafeRead(identity, 0x00, controller))
                 return nullptr;
             return controller;
         }
@@ -136,7 +140,7 @@ namespace BotController
             uint32_t controllerFlags = 0;
             bool restoreFakeClient = false;
             if (controller &&
-                ReadField(controller, tg::kEnt_Flags, controllerFlags) &&
+                SafeRead(controller, tg::kEnt_Flags, controllerFlags) &&
                 (controllerFlags & 0x100u) != 0)
             {
                 const uint32_t publishedFlags = controllerFlags & ~0x100u;

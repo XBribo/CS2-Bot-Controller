@@ -75,7 +75,7 @@ namespace BotController
                 return g_origOnUpdate(self, me);
 
             uint8_t init = 0;
-            if (!ReadField(self, tg::kBuy_InitialDelay, init))
+            if (!SafeRead(self, tg::kBuy_InitialDelay, init))
                 return g_origOnUpdate(self, me);
             // Rising edge of m_isInitialDelay = freshly entered BuyState this round
             if (init && !g_lastInitDelay[slot])

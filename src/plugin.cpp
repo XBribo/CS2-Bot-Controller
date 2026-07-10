@@ -44,7 +44,7 @@ public:
     const char *GetDescription() override { return "Record & Replay and Lock CS2 bots."; }
     const char *GetURL() override { return ""; }
     const char *GetLicense() override { return "AGPL-3.0"; }
-    const char *GetVersion() override { return "0.5.1"; }
+    const char *GetVersion() override { return "0.5.2"; }
     const char *GetDate() override { return __DATE__; }
     const char *GetLogTag() override { return "BC"; }
 };
