@@ -93,6 +93,7 @@ bc_status
 - [cs2kz-metamod](https://github.com/KZGlobalTeam/cs2kz-metamod) for helping determine the replay framework.
 - [Misaka17032](https://github.com/Misaka17032) for adding Linux support to the plugin.
 - [nicedayzhu](https://github.com/nicedayzhu) for adding swiftlys2 api support to the plugin.
+- [unicbm](https://github.com/unicbm) for the voice framework and signature updates.
 
 ------------------------------------------------------------------------
 

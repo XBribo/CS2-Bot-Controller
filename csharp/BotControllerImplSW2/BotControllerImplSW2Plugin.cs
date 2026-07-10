@@ -296,9 +296,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         if (rec.Tickrate != Tickrate)
             context.Reply(Tag($"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}."));
 
-        // Freeze the bot's AI so it doesn't fight the replayed motion.
-        BotController.Lock(botSlot, LockKind.All);
-
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
             RegisterReplayPawnForSlot(botSlot) &&
             BotController.StartReplay(botSlot, loop))
@@ -308,7 +305,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         }
         else
         {
-            BotController.Unlock(botSlot, LockKind.All);
             context.Reply(Tag("Failed to start replay."));
         }
     }

@@ -46,7 +46,7 @@ public:
     const char *GetLicense() override { return "AGPL-3.0"; }
     const char *GetVersion() override { return "0.5.1"; }
     const char *GetDate() override { return __DATE__; }
-    const char *GetLogTag() override { return "BL"; }
+    const char *GetLogTag() override { return "BC"; }
 };
 
 BotControllerPlugin g_BotControllerPlugin;

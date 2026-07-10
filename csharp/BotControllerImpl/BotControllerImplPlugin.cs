@@ -122,9 +122,6 @@ public class BotControllerPlugin : BasePlugin
         if (rec.Tickrate != Tickrate)
             cmd.ReplyToCommand($"[BotController] WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
 
-        // Freeze the bot's AI so it doesn't fight the replayed motion.
-        BotController.Lock(botSlot, LockKind.All);
-
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
             RegisterReplayPawnForSlot(botSlot) &&
             BotController.StartReplay(botSlot, loop))
@@ -134,7 +131,6 @@ public class BotControllerPlugin : BasePlugin
         }
         else
         {
-            BotController.Unlock(botSlot, LockKind.All);
             cmd.ReplyToCommand("[BotController] Failed to start replay.");
         }
     }

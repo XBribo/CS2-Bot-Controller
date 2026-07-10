@@ -1,4 +1,4 @@
-// Per-tick replay: release the AI lock when a replay ends
+// Per-tick replay lifecycle tracking
 
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -15,10 +15,9 @@ public sealed class ReplayDriver
     // Begin tracking a bot slot once its replay has been started natively.
     public void Track(int slot) => _active.Add(slot);
 
-    // Stop tracking and release the AI lock for one slot
+    // Stops tracking a replay slot without touching public lock state
     public void Release(int slot)
     {
-        BotController.Unlock(slot, LockKind.All);
         _active.Remove(slot);
     }
 
