@@ -38,6 +38,7 @@ set(PROTO_FILES
     networkbasetypes.proto
     source2_steam_stats.proto
     netmessages.proto
+    valveextensions.proto
     usercmd.proto
     cs_usercmd.proto)
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
