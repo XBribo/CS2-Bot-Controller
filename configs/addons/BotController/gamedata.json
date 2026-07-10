@@ -34,7 +34,7 @@
   "CCSBot::Update": {
     "signatures": {
       "library": "server",
-      "windows": "40 55 56 57 41 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8D 05",
+      "windows": "40 55 56 57 41 54 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8D 05 ? ? ? ? C6 81 ? ? ? ? 00",
       "linux": "55 48 8D 05 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 E5 41 57 41 56 41 55 4C 8D AD ? ? ? ? 41 54 4C 89 EA 53 48 89 FB 48 81 EC ? ? ? ? C6 87 08 06 00 00 00"
     },
     "comment": "Per-tick decision entry; PathFollower + look-around + reaction + weapon."
@@ -42,7 +42,7 @@
   "CCSBot::Upkeep": {
     "signatures": {
       "library": "server",
-      "windows": "40 53 57 41 54 48 81 EC",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC ? 4C 8B F1 33 ED 48 8B 49 ? 48 39 A9 ? ? ? ?",
       "linux": "55 48 8D 05 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 E5 41 55 41 54 48 8D 55 C0 53 48 89 FB 48 8D 3D"
     },
     "comment": "Per-frame view mBotntenance; UpdateLookAround + jitter + UpdateLookAngles."
@@ -104,17 +104,17 @@
   "CBasePlayerController::OnSimulateUserCommands": {
     "signatures": {
       "library": "server",
-      "windows": "40 55 53 56 57 41 54 41 56 48 8D AC 24 ? ? ? ? 48 81 EC",
+      "windows": "40 55 53 56 57 41 55 41 56 48 8D AC 24 08 F9 FF FF",
       "linux": "55 ? ? ? ? ? ? ? ? ? ? ? ? ? ? 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 8D 3D ? ? ? ? 48 81 EC ? 00 00 00"
     },
     "comment": "Per-tick controller usercmd simulation boundary,replay commits cursor after original."
   },
   "CCSBot::AiTickedFlag": {
     "offsets": {
-      "windows": 21196,
+      "windows": 1552,
       "linux": 1544
     },
-    "comment": "AI-ran-this-tick byte flag."
+    "comment": "AI-ran-this-tick byte flag (0x610)."
   },
   "CCSBot::Pawn": {
     "offsets": {
@@ -272,38 +272,38 @@
   },
   "CCSPlayerPawn::WeaponServices": {
     "offsets": {
-      "windows": 2560,
+      "windows": 2608,
       "linux": 3296
     },
-    "comment": "m_pWeaponServices (0xA00)."
+    "comment": "m_pWeaponServices (0xA30)."
   },
   "CCSPlayerPawn::Controller": {
     "offsets": {
-      "windows": 2944,
+      "windows": 2992,
       "linux": 3680
     },
-    "comment": "m_hController (0xB80)."
+    "comment": "m_hController (0xBB0)."
   },
   "CCSPlayerPawn::OriginalController": {
     "offsets": {
-      "windows": 2948,
+      "windows": 3364,
       "linux": 4044
     },
-    "comment": "m_hOriginalController (0xB84)."
+    "comment": "m_hOriginalController (0xD24)."
   },
   "CCSPlayerPawn::ViewAngle": {
     "offsets": {
-      "windows": 2744,
+      "windows": 2792,
       "linux": 3480
     },
-    "comment": "v_angle (0xAB8)."
+    "comment": "v_angle (0xAE8)."
   },
   "CCSPlayerPawn::EyeAngles": {
     "offsets": {
-      "windows": 4928,
+      "windows": 4968,
       "linux": 5648
     },
-    "comment": "m_angEyeAngles (0x1340)."
+    "comment": "m_angEyeAngles (0x1368)."
   },
   "CCSPlayer_WeaponServices::ActiveWeapon": {
     "offsets": {
@@ -314,10 +314,10 @@
   },
   "CBasePlayerWeapon::ItemDefIndex": {
     "offsets": {
-      "windows": 2528,
+      "windows": 2560,
       "linux": 3264
     },
-    "comment": "m_iItemDefinitionIndex (0x9E0)."
+    "comment": "m_iItemDefinitionIndex (0xA00)."
   },
   "CCSPlayer_MovementServices::Pawn": {
     "offsets": {
@@ -405,14 +405,14 @@
   },
   "vtidx::PlayerRunCommand": {
     "offsets": {
-      "windows": 22,
+      "windows": 25,
       "linux": 23
     },
     "comment": "CCSPlayer_MovementServices vtable index."
   },
   "vtidx::FinishMove": {
     "offsets": {
-      "windows": 35,
+      "windows": 38,
       "linux": 36
     },
     "comment": "CCSPlayer_MovementServices vtable index."

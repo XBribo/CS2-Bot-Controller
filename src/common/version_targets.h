@@ -9,7 +9,7 @@ namespace BotController::targets
     // ---- CCSBot ----
 
     // AI-ran-this-tick byte flag; set to 1 to fake a completed tick
-    inline int kBot_AiTickedFlag = 21196;
+    inline int kBot_AiTickedFlag = 0x610;
     // CCSBot -> pawn (CCSPlayerPawn*)
     inline int kBot_Pawn = 0x18;
     // CCSBot -> m_profile (BotProfile*)
@@ -62,15 +62,15 @@ namespace BotController::targets
     // ---- CCSPlayerPawn ----
 
     // m_pWeaponServices
-    inline int kPawn_WeaponServices = 0xA00;
+    inline int kPawn_WeaponServices = 0xA30;
     // m_hController (CHandle)
-    inline int kPawn_Controller = 0xB80;
+    inline int kPawn_Controller = 0xBB0;
     // m_hOriginalController (CHandle)
-    inline int kPawn_OriginalController = 0xB84;
+    inline int kPawn_OriginalController = 0xD24;
     // CCSPlayerPawn -> v_angle (QAngle)
-    inline int kPawn_ViewAngle = 0xAB8;
+    inline int kPawn_ViewAngle = 0xAE8;
     // m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
-    inline int kPawn_EyeAngles = 0x1340;
+    inline int kPawn_EyeAngles = 0x1368;
 
     // ---- CCSPlayer_WeaponServices ----
 
@@ -79,9 +79,9 @@ namespace BotController::targets
 
     // ---- CBasePlayerWeapon ----
 
-    // m_AttributeManager(0x958) -> m_Item(0x50) -> m_iItemDefinitionIndex(0x38),
+    // m_AttributeManager(0x978) -> m_Item(0x50) -> m_iItemDefinitionIndex(0x38),
     // all embedded; net direct add (no deref)
-    inline int kWeapon_ItemDefIndex = 0x958 + 0x50 + 0x38; // 0x9E0
+    inline int kWeapon_ItemDefIndex = 0x978 + 0x50 + 0x38; // 0xA00
 
     // ---- CCSPlayer_MovementServices ----
 
@@ -109,8 +109,8 @@ namespace BotController::targets
 
     // ---- vtable indices (CCSPlayer_MovementServices) ----
 
-    inline int kVtIdx_PlayerRunCommand = 22;
-    inline int kVtIdx_FinishMove = 35;
+    inline int kVtIdx_PlayerRunCommand = 25;
+    inline int kVtIdx_FinishMove = 38;
 
     // Override the above from gamedata[name].offsets[platform]; missing keeps default
     void LoadFromGamedata(const nlohmann::json &gd);
