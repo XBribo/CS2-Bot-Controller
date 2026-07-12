@@ -95,8 +95,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
 
         // Returns the live profile data for a bot slot.
-        public bool TryGetProfile(int slot, out BotProfileData profile)
-            => BotController.TryGetProfile(slot, out profile);
+        public bool GetBotProfile(int slot, out BotProfileData profile)
+            => BotController.GetBotProfile(slot, out profile);
 
         // Sets the round buy plan for a bot slot.
         public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);

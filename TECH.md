@@ -196,7 +196,7 @@ Key operations exposed by both managed integrations:
 - `StopReplay`
 - `TryGetReplayTick`
 - `SwitchBotWeapon`
-- `TryGetProfile`
+- `GetBotProfile`
 - buy-plan operations
 
 ------------------------------------------------------------------------

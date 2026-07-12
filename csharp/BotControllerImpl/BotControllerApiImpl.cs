@@ -42,8 +42,8 @@ namespace BotControllerApi
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
 
         // ---- profile ----
-        public bool TryGetProfile(int slot, out BotProfileData profile)
-            => BotController.TryGetProfile(slot, out profile);
+        public bool GetBotProfile(int slot, out BotProfileData profile)
+            => BotController.GetBotProfile(slot, out profile);
 
         // ---- buy plans ----
         public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);

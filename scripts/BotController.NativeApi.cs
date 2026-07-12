@@ -324,7 +324,7 @@ namespace BotControllerApi
 
         // Read the BotProfile of the bot on this slot. Returns false if the slot
         // has no live bot (it must have ticked at least once) or null profile.
-        public static bool TryGetProfile(int slot, out BotProfileData profile)
+        public static bool GetBotProfile(int slot, out BotProfileData profile)
             => BotController_GetProfile(slot, out profile) == 0;
 
         // ---- buy plans ----
