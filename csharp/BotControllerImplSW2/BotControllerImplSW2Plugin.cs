@@ -1,7 +1,7 @@
 // SwiftlyS2 plugin: record a player's per-tick input and replay it on a bot.
 // Commands:
-//   !record / !stoprecord        capture your own input, save to disk
-//   !replay <botSlot> [loop]     play your recording back on a bot
+//   !record [fileName] / !stoprecord  capture your own input, save to disk
+//   !replay <botSlot> [fileName]      play a recording back on a bot
 //   !stopreplay <botSlot>        stop a bot's replay
 //
 // Also exposes IBotControllerApi via IInterfaceManager for cross-plugin use.
@@ -33,6 +33,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private const string InterfaceKey = "botcontroller:api";
 
     private readonly ReplayDriver _driver = new();
+    private readonly Dictionary<int, string> _recordingFiles = new();
     private bool _nativeApiChecked;
     private bool _nativeApiAvailable;
 
@@ -186,9 +187,32 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Returns the plugin-local recordings directory.
     private string RecordingsDir => Path.Combine(Core.PluginPath, "recordings");
 
-    // Returns the recording path for a player's SteamID.
-    private string FileFor(ulong steamId) =>
-        Path.Combine(RecordingsDir, $"{steamId}.json");
+    // Resolves an optional recording name to a safe plugin-local JSON path
+    private bool TryGetRecordingFile(string? fileName, ulong steamId, out string file)
+    {
+        string name = string.IsNullOrWhiteSpace(fileName)
+            ? steamId.ToString()
+            : fileName;
+
+        if (name != Path.GetFileName(name) ||
+            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            file = string.Empty;
+            return false;
+        }
+
+        if (name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            name = name[..^5];
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            file = string.Empty;
+            return false;
+        }
+
+        file = Path.Combine(RecordingsDir, $"{name}.json");
+        return true;
+    }
 
     // Formats a colored chat tag for BotController replies.
     private static string Tag(string msg) =>
@@ -244,11 +268,19 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         var player = context.Sender;
         if (player == null || !player.IsValid) return;
 
+        string? fileName = context.Args.Length >= 1 ? context.Args[0] : null;
+        if (context.Args.Length > 1 ||
+            !TryGetRecordingFile(fileName, player.SteamID, out string file))
+        {
+            context.Reply(Tag("Usage: !record [fileName]"));
+            return;
+        }
         if (!BotController.StartRecord(player.Slot))
         {
             context.Reply(Tag("Failed to start recording."));
             return;
         }
+        _recordingFiles[player.Slot] = file;
         context.Reply(Tag("Recording. Use !stoprecord to finish."));
     }
 
@@ -261,7 +293,11 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
         BotController.StopRecord(player.Slot);
 
-        int saved = MotionStore.SaveToFile(player.Slot, FileFor(player.SteamID), Tickrate);
+        if (!_recordingFiles.Remove(player.Slot, out string? file) &&
+            !TryGetRecordingFile(null, player.SteamID, out file))
+            return;
+
+        int saved = MotionStore.SaveToFile(player.Slot, file, Tickrate);
         context.Reply(saved > 0
             ? Tag($"Saved {saved} ticks.")
             : Tag("Nothing recorded."));
@@ -274,13 +310,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         var player = context.Sender;
         if (player == null || !player.IsValid) return;
 
-        if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int botSlot))
+        string? fileName = context.Args.Length >= 2 ? context.Args[1] : null;
+        if (context.Args.Length is < 1 or > 2 ||
+            !int.TryParse(context.Args[0], out int botSlot) ||
+            !TryGetRecordingFile(fileName, player.SteamID, out string file))
         {
-            context.Reply(Tag("Usage: !replay <botSlot> [loop]"));
+            context.Reply(Tag("Usage: !replay <botSlot> [fileName]"));
             return;
         }
-        bool loop = context.Args.Length >= 2 && context.Args[1] == "loop";
-        string file = FileFor(player.SteamID);
         if (!File.Exists(file))
         {
             context.Reply(Tag("No recording found. Use !record first."));
@@ -298,10 +335,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
             RegisterReplayPawnForSlot(botSlot) &&
-            BotController.StartReplay(botSlot, loop))
+            BotController.StartReplay(botSlot))
         {
             _driver.Track(botSlot);
-            context.Reply(Tag($"Replaying on bot slot {botSlot}{(loop ? " (loop)" : "")}."));
+            context.Reply(Tag($"Replaying on bot slot {botSlot}."));
         }
         else
         {

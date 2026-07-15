@@ -1,7 +1,7 @@
 // CounterStrikeSharp plugin: record a player's per-tick input and replay it on
 // Chat commands:
-//   !record / !stoprecord        capture your own input, save to disk
-//   !replay <botSlot> [loop]     play your recording back on a bot
+//   !record [fileName] / !stoprecord  capture your own input, save to disk
+//   !replay <botSlot> [fileName]      play a recording back on a bot
 //   !stopreplay <botSlot>        stop a bot's replay
 
 using System.IO;
@@ -28,7 +28,9 @@ public class BotControllerPlugin : BasePlugin
     private const int Tickrate = 64;
 
     private readonly ReplayDriver _driver = new();
+    private readonly Dictionary<int, string> _recordingFiles = new();
 
+    // Loads the managed plugin and publishes its shared API
     public override void Load(bool hotReload)
     {
         if (!BotController.IsCompatible())
@@ -47,8 +49,32 @@ public class BotControllerPlugin : BasePlugin
     }
 
     private string RecordingsDir => Path.Combine(ModuleDirectory, "recordings");
-    private string FileFor(CCSPlayerController p) =>
-        Path.Combine(RecordingsDir, $"{p.SteamID}.json");
+    // Resolves an optional recording name to a safe plugin-local JSON path
+    private bool TryGetRecordingFile(string? fileName, ulong steamId, out string file)
+    {
+        string name = string.IsNullOrWhiteSpace(fileName)
+            ? steamId.ToString()
+            : fileName;
+
+        if (name != Path.GetFileName(name) ||
+            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            file = string.Empty;
+            return false;
+        }
+
+        if (name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            name = name[..^5];
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            file = string.Empty;
+            return false;
+        }
+
+        file = Path.Combine(RecordingsDir, $"{name}.json");
+        return true;
+    }
 
     // Find a connected player/bot by its slot, or null.
     private static CCSPlayerController? ControllerForSlot(int slot)
@@ -69,19 +95,29 @@ public class BotControllerPlugin : BasePlugin
         return BotController.SetReplayPawn(slot, player.PlayerPawn.Value.Handle);
     }
 
-    [ConsoleCommand("css_record", "Start recording your per-tick movement")]
+    // Starts recording under the optional file name
+    [ConsoleCommand("css_record", "Start recording: !record [fileName]")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnRecord(CCSPlayerController? player, CommandInfo cmd)
     {
         if (player == null || !player.IsValid) return;
+        string? fileName = cmd.ArgCount >= 2 ? cmd.GetArg(1) : null;
+        if (cmd.ArgCount > 2 ||
+            !TryGetRecordingFile(fileName, player.SteamID, out string file))
+        {
+            cmd.ReplyToCommand("[BotController] Usage: !record [fileName]");
+            return;
+        }
         if (!BotController.StartRecord(player.Slot))
         {
             cmd.ReplyToCommand("[BotController] Failed to start recording.");
             return;
         }
+        _recordingFiles[player.Slot] = file;
         cmd.ReplyToCommand("[BotController] Recording. Use !stoprecord to finish.");
     }
 
+    // Stops recording and saves it under the selected file name
     [ConsoleCommand("css_stoprecord", "Stop recording and save to disk")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopRecord(CCSPlayerController? player, CommandInfo cmd)
@@ -89,24 +125,30 @@ public class BotControllerPlugin : BasePlugin
         if (player == null || !player.IsValid) return;
         BotController.StopRecord(player.Slot);
 
-        int saved = MotionStore.SaveToFile(player.Slot, FileFor(player), Tickrate);
+        if (!_recordingFiles.Remove(player.Slot, out string? file) &&
+            !TryGetRecordingFile(null, player.SteamID, out file))
+            return;
+
+        int saved = MotionStore.SaveToFile(player.Slot, file, Tickrate);
         cmd.ReplyToCommand(saved > 0
             ? $"[BotController] Saved {saved} ticks."
             : "[BotController] Nothing recorded.");
     }
 
-    [ConsoleCommand("css_replay", "Replay your recording on a bot: !replay <botSlot> [loop]")]
-    [CommandHelper(minArgs: 1, usage: "<botSlot> [loop]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    // Loads the optional recording file and replays it on a bot
+    [ConsoleCommand("css_replay", "Replay a recording: !replay <botSlot> [fileName]")]
+    [CommandHelper(minArgs: 1, usage: "<botSlot> [fileName]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnReplay(CCSPlayerController? player, CommandInfo cmd)
     {
         if (player == null || !player.IsValid) return;
-        if (!int.TryParse(cmd.GetArg(1), out int botSlot))
+        string? fileName = cmd.ArgCount >= 3 ? cmd.GetArg(2) : null;
+        if (cmd.ArgCount > 3 ||
+            !int.TryParse(cmd.GetArg(1), out int botSlot) ||
+            !TryGetRecordingFile(fileName, player.SteamID, out string file))
         {
-            cmd.ReplyToCommand("[BotController] Usage: !replay <botSlot> [loop]");
+            cmd.ReplyToCommand("[BotController] Usage: !replay <botSlot> [fileName]");
             return;
         }
-        bool loop = cmd.ArgCount >= 3 && cmd.GetArg(2) == "loop";
-        string file = FileFor(player);
         if (!File.Exists(file))
         {
             cmd.ReplyToCommand("[BotController] No recording found. Use !record first.");
@@ -124,10 +166,10 @@ public class BotControllerPlugin : BasePlugin
 
         if (BotController.LoadReplay(botSlot, rec.Ticks, rec.Subticks) &&
             RegisterReplayPawnForSlot(botSlot) &&
-            BotController.StartReplay(botSlot, loop))
+            BotController.StartReplay(botSlot))
         {
             _driver.Track(botSlot);
-            cmd.ReplyToCommand($"[BotController] Replaying on bot slot {botSlot}{(loop ? " (loop)" : "")}.");
+            cmd.ReplyToCommand($"[BotController] Replaying on bot slot {botSlot}.");
         }
         else
         {
@@ -135,6 +177,7 @@ public class BotControllerPlugin : BasePlugin
         }
     }
 
+    // Stops replay on the selected bot slot
     [ConsoleCommand("css_stopreplay", "Stop a bot's replay: !stopreplay <botSlot>")]
     [CommandHelper(minArgs: 1, usage: "<botSlot>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopReplay(CCSPlayerController? player, CommandInfo cmd)

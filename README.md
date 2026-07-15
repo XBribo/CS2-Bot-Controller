@@ -12,8 +12,7 @@
 
 ## Overview
 
-`CS2-Bot-Controller` is a plugin for **Counter-Strike 2** that takes control of
-bot behavior at the engine level.
+`CS2-Bot-Controller` is a plugin for **Counter-Strike 2** that takes control of bot behavior at the engine level.
 
 It can:
 
@@ -23,21 +22,6 @@ It can:
 - fully freeze a bot for external control
 - record a player's movement
 - replay that movement on any bot
-
-It also ships optional integrations for **CounterStrikeSharp** and
-**SwiftlyS2**.
-
-------------------------------------------------------------------------
-
-## Features
-
-- `Weapon` lock to pin a bot to one weapon slot
-- `Aim` lock to freeze view control without stopping movement AI
-- `Jump` lock to block bot jumping only
-- `All` lock to fully freeze the bot for replay or custom control
-- Per-tick record and replay with subtick input support
-- Native Metamod package for both Windows and Linux
-- Managed plugin packages for CounterStrikeSharp and SwiftlyS2
 
 ------------------------------------------------------------------------
 
@@ -66,8 +50,6 @@ Examples:
 
 ```text
 bc_lock aim 1
-bc_lock jump 1
-bc_lock all 1
 bc_lock weapon 1 slot3
 bc_unlock_all weapon
 bc_status
@@ -78,11 +60,13 @@ bc_status
 ## Chat Commands
 
 ```text
-!record
+!record [fileName]
 !stoprecord
-!replay <botSlot> [loop]
+!replay <botSlot> [fileName]
 !stopreplay <botSlot>
 ```
+
+`fileName` is optional. When omitted, the invoking player's SteamID is used.
 
 - API usage, build details, ABI notes, and integration examples are documented in [TECH.md](TECH.md).
 
