@@ -51,7 +51,47 @@ namespace BotController
         float pitchDelta;    // pitch_delta
         float yawDelta;      // yaw_delta
     };
+
+    // Optional command data captured for one replay tick
+    struct ReplayCommandFrameData
+    {
+        float forwardMove;
+        float leftMove;
+        float upMove;
+        float pitch;
+        float yaw;
+        float roll;
+        uint64_t buttons;
+        uint64_t buttons1;
+        uint64_t buttons2;
+        int32_t mouseDx;
+        int32_t mouseDy;
+        int32_t weaponSelect;
+        uint32_t fields;
+        uint8_t leftHandDesired;
+        uint8_t _pad[3];
+    };
+
+    // Optional movement-service state captured for one replay tick
+    struct ReplayMovementExtra
+    {
+        uint32_t fields;
+        float jumpPressedTime;
+        float lastDuckTime;
+        int32_t lastActualJumpPressTick;
+        float lastActualJumpPressFrac;
+        int32_t lastUsableJumpPressTick;
+        float lastUsableJumpPressFrac;
+        int32_t lastLandedTick;
+        float lastLandedFrac;
+        float lastLandedVelocityX;
+        float lastLandedVelocityY;
+        float lastLandedVelocityZ;
+    };
 #pragma pack(pop)
+
+    static_assert(sizeof(ReplayCommandFrameData) == 68);
+    static_assert(sizeof(ReplayMovementExtra) == 48);
 
     namespace MotionRecorder
     {
@@ -83,9 +123,16 @@ namespace BotController
         int CopySubticks(int slot, SubtickMove *out, int maxSubticks);
 
         // ---- replay ----
-        // Load parallel arrays into a slot's replay buffer
+        // Load legacy replay arrays through the extended loader
         bool LoadReplay(int slot, const ReplayTick *ticks, int tickCount,
-                        const SubtickMove *subs, int subCount);
+                        const SubtickMove *subs, int subCount) noexcept;
+        // Load all parallel replay arrays into a slot's replay buffer
+        bool LoadReplayExtended(int slot, const ReplayTick *ticks, int tickCount,
+                                const SubtickMove *subs, int subCount,
+                                const ReplayCommandFrameData *commands,
+                                int commandCount,
+                                const ReplayMovementExtra *movementExtras,
+                                int movementExtraCount) noexcept;
         bool StartReplay(int slot, bool loop); // play from tick 0
         bool StopReplay(int slot);             // stop + clear injection
         bool IsReplaying(int slot);

@@ -49,9 +49,11 @@ namespace BotControllerApi
             int slot, [Out] SubtickMove[] subs, int maxSubticks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_LoadReplay(
+        private static extern int BotController_LoadReplayExtended(
             int slot, [In] ReplayTick[] ticks, int tickCount,
-            [In] SubtickMove[] subs, int subCount);
+            [In] SubtickMove[] subs, int subCount,
+            [In] ReplayCommandFrame[] commands, int commandCount,
+            [In] ReplayMovementExtra[] movementExtras, int movementExtraCount);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -190,10 +192,29 @@ namespace BotControllerApi
 
         // Load ticks + subticks into a slot's replay buffer (native copies in).
         public static bool LoadReplay(int slot, ReplayTick[] ticks, SubtickMove[] subs)
+            => LoadReplayExtended(
+                slot, ticks, subs,
+                Array.Empty<ReplayCommandFrame>(),
+                Array.Empty<ReplayMovementExtra>());
+
+        // Load replay buffers with optional per-tick command and movement data
+        public static bool LoadReplayExtended(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras)
             => ticks is { Length: > 0 }
-               && BotController_LoadReplay(slot, ticks, ticks.Length,
-                                       subs ?? Array.Empty<SubtickMove>(),
-                                       subs?.Length ?? 0) == 0;
+               && BotController_LoadReplayExtended(
+                   slot,
+                   ticks,
+                   ticks.Length,
+                   subs ?? Array.Empty<SubtickMove>(),
+                   subs?.Length ?? 0,
+                   commands ?? Array.Empty<ReplayCommandFrame>(),
+                   commands?.Length ?? 0,
+                   movementExtras ?? Array.Empty<ReplayMovementExtra>(),
+                   movementExtras?.Length ?? 0) == 0;
 
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.

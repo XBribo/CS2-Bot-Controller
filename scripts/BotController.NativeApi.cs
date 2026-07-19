@@ -76,6 +76,47 @@ namespace BotControllerApi
         public float YawDelta;
     }
 
+    /** Optional replay usercmd frame. Must match C++ ReplayCommandFrameData */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplayCommandFrame
+    {
+        public float ForwardMove;
+        public float LeftMove;
+        public float UpMove;
+        public float Pitch;
+        public float Yaw;
+        public float Roll;
+        public ulong Buttons;
+        public ulong Buttons1;
+        public ulong Buttons2;
+        public int MouseDx;
+        public int MouseDy;
+        public int WeaponSelect;
+        public uint Fields;
+        public byte LeftHandDesired;
+        public byte Pad0;
+        public byte Pad1;
+        public byte Pad2;
+    }
+
+    /** Optional offset-backed replay movement state. Must match C++ ReplayMovementExtra */
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplayMovementExtra
+    {
+        public uint Fields;
+        public float JumpPressedTime;
+        public float LastDuckTime;
+        public int LastActualJumpPressTick;
+        public float LastActualJumpPressFrac;
+        public int LastUsableJumpPressTick;
+        public float LastUsableJumpPressFrac;
+        public int LastLandedTick;
+        public float LastLandedFrac;
+        public float LastLandedVelocityX;
+        public float LastLandedVelocityY;
+        public float LastLandedVelocityZ;
+    }
+
     /** Bot personality / aim / weapon preference. Mirrors C++ BotProfileData */
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     public struct BotProfileData
@@ -139,9 +180,11 @@ namespace BotControllerApi
             int slot, [Out] SubtickMove[] subs, int maxSubticks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_LoadReplay(
+        private static extern int BotController_LoadReplayExtended(
             int slot, [In] ReplayTick[] ticks, int tickCount,
-            [In] SubtickMove[] subs, int subCount);
+            [In] SubtickMove[] subs, int subCount,
+            [In] ReplayCommandFrame[] commands, int commandCount,
+            [In] ReplayMovementExtra[] movementExtras, int movementExtraCount);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -280,10 +323,29 @@ namespace BotControllerApi
 
         // Load ticks + subticks into a slot's replay buffer (native copies in).
         public static bool LoadReplay(int slot, ReplayTick[] ticks, SubtickMove[] subs)
+            => LoadReplayExtended(
+                slot, ticks, subs,
+                Array.Empty<ReplayCommandFrame>(),
+                Array.Empty<ReplayMovementExtra>());
+
+        // Load replay buffers with optional per-tick command and movement data
+        public static bool LoadReplayExtended(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras)
             => ticks is { Length: > 0 }
-               && BotController_LoadReplay(slot, ticks, ticks.Length,
-                                       subs ?? Array.Empty<SubtickMove>(),
-                                       subs?.Length ?? 0) == 0;
+               && BotController_LoadReplayExtended(
+                   slot,
+                   ticks,
+                   ticks.Length,
+                   subs ?? Array.Empty<SubtickMove>(),
+                   subs?.Length ?? 0,
+                   commands ?? Array.Empty<ReplayCommandFrame>(),
+                   commands?.Length ?? 0,
+                   movementExtras ?? Array.Empty<ReplayMovementExtra>(),
+                   movementExtras?.Length ?? 0) == 0;
 
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.

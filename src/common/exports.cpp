@@ -201,11 +201,27 @@ extern "C" BC_EXPORT int BotController_CopyRecordedSubticks(int slot, BotControl
 
 // Load parallel tick + subtick arrays into a slot's replay buffer. 0 ok.
 extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
-                                                          const BotController::ReplayTick *ticks, int tickCount,
-                                                          const BotController::SubtickMove *subs, int subCount)
+                                                  const BotController::ReplayTick *ticks, int tickCount,
+                                                  const BotController::SubtickMove *subs, int subCount) noexcept
 {
     return BotController::MotionRecorder::LoadReplay(slot, ticks, tickCount,
                                                      subs, subCount)
+               ? 0
+               : -1;
+}
+
+// Load replay buffers with optional per-tick command and movement data
+extern "C" BC_EXPORT int BotController_LoadReplayExtended(
+    int slot,
+    const BotController::ReplayTick *ticks, int tickCount,
+    const BotController::SubtickMove *subs, int subCount,
+    const BotController::ReplayCommandFrameData *commands, int commandCount,
+    const BotController::ReplayMovementExtra *movementExtras,
+    int movementExtraCount) noexcept
+{
+    return BotController::MotionRecorder::LoadReplayExtended(
+               slot, ticks, tickCount, subs, subCount,
+               commands, commandCount, movementExtras, movementExtraCount)
                ? 0
                : -1;
 }
@@ -227,8 +243,9 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
                    : 0;
     if (gotT <= 0)
         return -1;
-    return BotController::MotionRecorder::LoadReplay(
-               dstSlot, ticks.data(), gotT, subs.data(), gotS)
+    return BotController::MotionRecorder::LoadReplayExtended(
+               dstSlot, ticks.data(), gotT, subs.data(), gotS,
+               nullptr, 0, nullptr, 0)
                ? 0
                : -1;
 }

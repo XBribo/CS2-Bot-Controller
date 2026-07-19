@@ -43,6 +43,8 @@ namespace BotController
             std::atomic<bool> loop{false};
             std::vector<ReplayTick> ticks;
             std::vector<SubtickMove> subs;
+            std::vector<ReplayCommandFrameData> commands;
+            std::vector<ReplayMovementExtra> movementExtras;
             std::vector<uint32_t> subOffset; // prefix sum, size ticks.size()+1
             std::atomic<int> cursor{0};
             std::atomic<int> lastAppliedDef{-1};
@@ -360,36 +362,90 @@ namespace BotController
 
         // ---- replay ----
 
-        // Rebuild the prefix-sum offset table from each tick's numSubtick.
-        // subOffset[i] = first subtick index for tick i; size = nTicks+1.
-        static void RebuildSubOffset(ReplayState &p)
+        // Load legacy buffers by supplying empty extended buffers
+        bool LoadReplay(int slot, const ReplayTick *ticks, int tickCount,
+                        const SubtickMove *subs, int subCount) noexcept
         {
-            p.subOffset.assign(p.ticks.size() + 1, 0);
-            uint32_t acc = 0;
-            for (size_t i = 0; i < p.ticks.size(); ++i)
-            {
-                p.subOffset[i] = acc;
-                acc += p.ticks[i].numSubtick;
-            }
-            p.subOffset[p.ticks.size()] = acc;
+            return LoadReplayExtended(slot, ticks, tickCount, subs, subCount,
+                                      nullptr, 0, nullptr, 0);
         }
 
-        bool LoadReplay(int slot, const ReplayTick *ticks, int tickCount,
-                        const SubtickMove *subs, int subCount)
+        // Validate, stage, and atomically replace all replay buffers
+        bool LoadReplayExtended(int slot, const ReplayTick *ticks, int tickCount,
+                                const SubtickMove *subs, int subCount,
+                                const ReplayCommandFrameData *commands,
+                                int commandCount,
+                                const ReplayMovementExtra *movementExtras,
+                                int movementExtraCount) noexcept
         {
-            if (!ValidSlot(slot) || !ticks || tickCount < 0 ||
-                (subCount > 0 && !subs))
+            try
+            {
+                if (!ValidSlot(slot) || !ticks || tickCount < 0 || subCount < 0 ||
+                    (subCount > 0 && !subs) ||
+                    (commandCount != 0 && commandCount != tickCount) ||
+                    (commandCount > 0 && !commands) ||
+                    (movementExtraCount != 0 && movementExtraCount != tickCount) ||
+                    (movementExtraCount > 0 && !movementExtras))
+                {
+                    return false;
+                }
+
+                ReplayState &p = g_rep[slot];
+                if (p.playing.load(std::memory_order_acquire))
+                    return false;
+
+                std::vector<ReplayTick> stagedTicks;
+                std::vector<SubtickMove> stagedSubs;
+                std::vector<ReplayCommandFrameData> stagedCommands;
+                std::vector<ReplayMovementExtra> stagedMovementExtras;
+                std::vector<uint32_t> stagedOffsets(
+                    static_cast<size_t>(tickCount) + 1, 0);
+
+                uint64_t totalSubticks = 0;
+                for (int i = 0; i < tickCount; ++i)
+                {
+                    if (ticks[i].numSubtick > kMaxSubtickPerTick)
+                        return false;
+                    stagedOffsets[static_cast<size_t>(i)] =
+                        static_cast<uint32_t>(totalSubticks);
+                    totalSubticks += ticks[i].numSubtick;
+                    if (totalSubticks > static_cast<uint64_t>(subCount))
+                        return false;
+                }
+                if (totalSubticks != static_cast<uint64_t>(subCount))
+                    return false;
+                stagedOffsets[static_cast<size_t>(tickCount)] =
+                    static_cast<uint32_t>(totalSubticks);
+
+                if (tickCount > 0)
+                    stagedTicks.assign(ticks, ticks + tickCount);
+                if (subCount > 0)
+                    stagedSubs.assign(subs, subs + subCount);
+                if (commandCount > 0)
+                    stagedCommands.assign(commands, commands + commandCount);
+                if (movementExtraCount > 0)
+                {
+                    stagedMovementExtras.assign(
+                        movementExtras, movementExtras + movementExtraCount);
+                }
+
+                std::lock_guard<std::mutex> lk(p.mu);
+                if (p.playing.load(std::memory_order_acquire))
+                    return false;
+
+                p.ticks.swap(stagedTicks);
+                p.subs.swap(stagedSubs);
+                p.commands.swap(stagedCommands);
+                p.movementExtras.swap(stagedMovementExtras);
+                p.subOffset.swap(stagedOffsets);
+                p.cursor.store(0, std::memory_order_relaxed);
+                p.lastAppliedDef.store(-1, std::memory_order_relaxed);
+                return true;
+            }
+            catch (...)
+            {
                 return false;
-            ReplayState &p = g_rep[slot];
-            if (p.playing.load(std::memory_order_acquire))
-                return false; // don't swap frames mid-playback
-            std::lock_guard<std::mutex> lk(p.mu);
-            p.ticks.assign(ticks, ticks + tickCount);
-            p.subs.assign(subs, subs + (subCount > 0 ? subCount : 0));
-            RebuildSubOffset(p);
-            p.cursor.store(0, std::memory_order_relaxed);
-            p.lastAppliedDef.store(-1, std::memory_order_relaxed);
-            return true;
+            }
         }
 
         bool StartReplay(int slot, bool loop)
@@ -800,6 +856,8 @@ namespace BotController
                     std::lock_guard<std::mutex> lk(g_rep[i].mu);
                     g_rep[i].ticks.clear();
                     g_rep[i].subs.clear();
+                    g_rep[i].commands.clear();
+                    g_rep[i].movementExtras.clear();
                     g_rep[i].subOffset.clear();
                 }
                 g_rec[i].currentDef.store(-1, std::memory_order_relaxed);
