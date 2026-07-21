@@ -19,7 +19,7 @@ namespace BotControllerImpl;
 public class BotControllerPlugin : BasePlugin
 {
     public override string ModuleName => "BotControllerImpl";
-    public override string ModuleVersion => "0.5.4";
+    public override string ModuleVersion => "0.5.3";
     public override string ModuleAuthor => "XBribo";
     public override string ModuleDescription =>
         "Record a player's movement and replay it on a bot.";

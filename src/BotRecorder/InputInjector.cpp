@@ -15,9 +15,11 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <vector>
 
 namespace tg = BotController::targets;
@@ -55,8 +57,27 @@ namespace BotController
         // slot -> live CCSPlayer_MovementServices*
         static std::array<std::atomic<void *>, kMaxSlots> g_slotServices{};
         static std::array<std::atomic<void *>, kMaxSlots> g_slotPawns{};
-        static std::array<std::atomic<uint64_t>, kMaxSlots> g_buttonPulseMasks{};
-        static std::array<std::atomic<int>, kMaxSlots> g_buttonPulsePhases{};
+
+        enum class UsercmdInjectionPhase
+        {
+            PendingPress,
+            Holding,
+            PendingRelease
+        };
+
+        struct UsercmdInjection
+        {
+            int64_t id;
+            uint64_t buttonMask;
+            int64_t expiresAtMs;
+            int durationMs;
+            UsercmdInjectionPhase phase;
+        };
+
+        static std::array<std::vector<UsercmdInjection>, kMaxSlots> g_usercmdInjections{};
+        static std::array<uint64_t, kMaxSlots> g_injectedHeldMasks{};
+        static std::mutex g_usercmdInjectionMutex;
+        static std::atomic<int64_t> g_nextUsercmdInjectionId{1};
 
         static std::atomic<uint64_t> g_hookCalls{0};
         static std::atomic<int> g_lastSlot{-1};
@@ -217,46 +238,112 @@ namespace BotController
             return a - 180.0f;
         }
 
-        // Queues a button edge pair for the next two commands on a slot
-        bool PulseUsercmdButton(int slot, uint64_t buttonMask)
+        // Returns monotonic time in milliseconds for injection expiry checks
+        static int64_t MonotonicMilliseconds()
         {
-            if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_subtickActive)
-                return false;
-
-            g_buttonPulsePhases[slot].store(0, std::memory_order_release);
-            g_buttonPulseMasks[slot].store(buttonMask, std::memory_order_relaxed);
-            g_buttonPulsePhases[slot].store(1, std::memory_order_release);
-            return true;
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now().time_since_epoch())
+                .count();
         }
 
-        // Applies and advances one pending button pulse without replacing other inputs
-        static bool ApplyButtonPulse(int slot, PlayerCommand *pc, CBaseUserCmdPB *base)
+        // Creates an independently cancellable usercmd button injection
+        int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
+        {
+            if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 ||
+                !g_subtickActive)
+                return -1;
+
+            int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
+            std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+            g_usercmdInjections[slot].push_back({
+                id,
+                buttonMask,
+                0,
+                durationMs,
+                UsercmdInjectionPhase::PendingPress});
+            return id;
+        }
+
+        // Cancels one injection without affecting other active tokens
+        bool CancelUsercmdInjection(int slot, int64_t injectionId)
+        {
+            if (!ValidSlotIndex(slot) || injectionId <= 0)
+                return false;
+
+            std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+            auto &injections = g_usercmdInjections[slot];
+            for (auto it = injections.begin(); it != injections.end(); ++it)
+            {
+                if (it->id != injectionId)
+                    continue;
+
+                if (it->phase == UsercmdInjectionPhase::PendingPress)
+                    injections.erase(it);
+                else
+                    it->phase = UsercmdInjectionPhase::PendingRelease;
+                return true;
+            }
+            return false;
+        }
+
+        // Reports whether a slot has injections waiting for command processing
+        static bool HasUsercmdInjection(int slot)
+        {
+            if (!ValidSlotIndex(slot))
+                return false;
+
+            std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+            return !g_usercmdInjections[slot].empty();
+        }
+
+        // Merges active injections and emits aggregate press and release edges
+        static bool ApplyUsercmdInjections(int slot, PlayerCommand *pc, CBaseUserCmdPB *base)
         {
             if (!ValidSlotIndex(slot) || !pc || !base)
                 return false;
 
-            int phase = g_buttonPulsePhases[slot].load(std::memory_order_acquire);
-            if (phase != 1 && phase != 2)
-                return false;
+            uint64_t activeMask = 0;
+            uint64_t previousMask = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+                auto &injections = g_usercmdInjections[slot];
+                int64_t nowMs = MonotonicMilliseconds();
+                for (auto it = injections.begin(); it != injections.end();)
+                {
+                    UsercmdInjectionPhase phase = it->phase;
+                    if (phase == UsercmdInjectionPhase::PendingRelease ||
+                        (phase == UsercmdInjectionPhase::Holding &&
+                         nowMs >= it->expiresAtMs))
+                    {
+                        it = injections.erase(it);
+                        continue;
+                    }
 
-            uint64_t mask = g_buttonPulseMasks[slot].load(std::memory_order_relaxed);
+                    activeMask |= it->buttonMask;
+                    if (phase == UsercmdInjectionPhase::PendingPress)
+                    {
+                        if (it->durationMs > 0)
+                            it->expiresAtMs = nowMs + it->durationMs;
+                        it->phase = it->durationMs == 0
+                                        ? UsercmdInjectionPhase::PendingRelease
+                                        : UsercmdInjectionPhase::Holding;
+                    }
+                    ++it;
+                }
+
+                previousMask = g_injectedHeldMasks[slot];
+                g_injectedHeldMasks[slot] = activeMask;
+            }
+
+            uint64_t pressedMask = activeMask & ~previousMask;
+            uint64_t releasedMask = previousMask & ~activeMask;
             uint64_t held = pc->buttonstates.m_pButtonStates[0];
             uint64_t pressed = pc->buttonstates.m_pButtonStates[1];
             uint64_t released = pc->buttonstates.m_pButtonStates[2];
-            if (phase == 1)
-            {
-                held |= mask;
-                pressed |= mask;
-                released &= ~mask;
-                g_buttonPulsePhases[slot].store(2, std::memory_order_release);
-            }
-            else
-            {
-                held &= ~mask;
-                pressed &= ~mask;
-                released |= mask;
-                g_buttonPulsePhases[slot].store(0, std::memory_order_release);
-            }
+
+            held = (held & ~releasedMask) | activeMask;
+            pressed = (pressed & ~releasedMask) | pressedMask;
+            released = (released & ~pressedMask) | releasedMask;
 
             CInButtonStatePB *buttons = base->mutable_buttons_pb();
             buttons->set_buttonstate1(held);
@@ -344,10 +431,9 @@ namespace BotController
                              MotionRecorder::IsRecording(slot);
             bool replaying = slot >= 0 && slot < kMaxSlots &&
                              MotionRecorder::IsReplaying(slot);
-            bool hasButtonPulse = slot >= 0 && slot < kMaxSlots &&
-                                  g_buttonPulsePhases[slot].load(std::memory_order_acquire) != 0;
+            bool hasUsercmdInjection = HasUsercmdInjection(slot);
 
-            if (cmd && (recording || replaying || hasButtonPulse))
+            if (cmd && (recording || replaying || hasUsercmdInjection))
             {
                 // Compiler computes the multiple-inheritance adjust here.
                 auto *pc = reinterpret_cast<PlayerCommand *>(cmd);
@@ -475,8 +561,8 @@ namespace BotController
                     }
                 }
 
-                if (hasButtonPulse)
-                    ApplyButtonPulse(slot, pc, base);
+                if (hasUsercmdInjection)
+                    ApplyUsercmdInjections(slot, pc, base);
             }
 
             g_origPlayerRunCommand(services, cmd);
@@ -651,10 +737,12 @@ namespace BotController
                 s.store(nullptr, std::memory_order_release);
             for (auto &pawn : g_slotPawns)
                 pawn.store(nullptr, std::memory_order_release);
-            for (auto &mask : g_buttonPulseMasks)
-                mask.store(0, std::memory_order_release);
-            for (auto &phase : g_buttonPulsePhases)
-                phase.store(0, std::memory_order_release);
+            {
+                std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+                for (auto &injections : g_usercmdInjections)
+                    injections.clear();
+                g_injectedHeldMasks.fill(0);
+            }
             g_installed = false;
             g_status = "not_attempted";
         }

@@ -40,9 +40,12 @@ namespace BotControllerApi
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
-        // Queues one native usercmd button press followed by its release
-        public bool PulseUsercmdButton(int slot, ulong buttonMask)
-            => BotController.PulseUsercmdButton(slot, buttonMask);
+        // Creates an independently cancellable native usercmd injection
+        public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
+            => BotController.InjectUsercmd(slot, buttonMask, durationMs);
+        // Cancels one native usercmd injection by its token
+        public bool CancelUsercmdInjection(int slot, long injectionId)
+            => BotController.CancelUsercmdInjection(slot, injectionId);
 
         // ---- profile ----
         public bool GetBotProfile(int slot, out BotProfileData profile)

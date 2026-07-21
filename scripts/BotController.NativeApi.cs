@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 15), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 16), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -139,7 +139,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 15;
+        private const int ExpectedAbiVersion = 16;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -159,9 +159,15 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetVersion();
 
-        // Imports the native usercmd button pulse export
+        // Imports the native usercmd injection export
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_PulseUsercmdButton(int slot, ulong buttonMask);
+        private static extern long BotController_InjectUsercmd(
+            int slot, ulong buttonMask, int durationMs);
+
+        // Imports the native usercmd injection cancellation export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CancelUsercmdInjection(
+            int slot, long injectionId);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartRecord(int slot);
@@ -266,9 +272,13 @@ namespace BotControllerApi
         // Native C-ABI version the loaded DLL reports.
         public static int AbiVersion => BotController_GetVersion();
 
-        // Queues one native usercmd button press followed by its release
-        public static bool PulseUsercmdButton(int slot, ulong buttonMask)
-            => BotController_PulseUsercmdButton(slot, buttonMask) == 0;
+        // Creates an independently cancellable native usercmd injection
+        public static long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
+            => BotController_InjectUsercmd(slot, buttonMask, durationMs);
+
+        // Cancels one native usercmd injection by its token
+        public static bool CancelUsercmdInjection(int slot, long injectionId)
+            => BotController_CancelUsercmdInjection(slot, injectionId) == 0;
 
         // ---- locks ----
 

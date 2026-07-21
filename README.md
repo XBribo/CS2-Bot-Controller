@@ -22,6 +22,7 @@ It can:
 - fully freeze a bot for external control
 - record a player's movement
 - replay that movement on any bot
+- inject concurrent, cancellable usercmd buttons with optional durations
 
 ------------------------------------------------------------------------
 

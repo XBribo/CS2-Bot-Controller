@@ -36,8 +36,11 @@ namespace BotController
         // Resolves and validates the pawn owning the supplied movement services.
         void *ResolveReplayPawn(int slot, void *services);
 
-        // Queues one usercmd button press followed by its release
-        bool PulseUsercmdButton(int slot, uint64_t buttonMask);
+        // Creates an independently cancellable usercmd button injection
+        int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs);
+
+        // Cancels one usercmd injection by its token
+        bool CancelUsercmdInjection(int slot, int64_t injectionId);
 
         // Diagnostics
         uint64_t HookCallCount();

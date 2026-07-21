@@ -43,13 +43,20 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 
 extern "C" BC_EXPORT int BotController_GetVersion()
 {
-    return 15;
+    return 16;
 }
 
-// Queue one usercmd button press and release for a bot slot
-extern "C" BC_EXPORT int BotController_PulseUsercmdButton(int slot, uint64_t buttonMask)
+// Create an independently cancellable usercmd injection
+extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(
+    int slot, uint64_t buttonMask, int durationMs)
 {
-    return BotController::InputInjector::PulseUsercmdButton(slot, buttonMask) ? 0 : -1;
+    return BotController::InputInjector::InjectUsercmd(slot, buttonMask, durationMs);
+}
+
+// Cancel one usercmd injection by its token
+extern "C" BC_EXPORT int BotController_CancelUsercmdInjection(int slot, int64_t injectionId)
+{
+    return BotController::InputInjector::CancelUsercmdInjection(slot, injectionId) ? 0 : -1;
 }
 
 // Return 1 when the plugin can allocate and send voice net messages.

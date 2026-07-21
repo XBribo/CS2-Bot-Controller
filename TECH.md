@@ -2,14 +2,7 @@
 
 ## Technical Overview
 
-`CS2-Bot-Controller` consists of:
-
-- a native Metamod:Source plugin that hooks bot behavior
-- a shared managed contract assembly `BotControllerApi`
-- a CounterStrikeSharp plugin
-- a SwiftlyS2 plugin
-
-Current ABI : `12`
+Current ABI: `16`
 
 ------------------------------------------------------------------------
 
@@ -65,6 +58,32 @@ Current `dist/` layout:
 
 ------------------------------------------------------------------------
 
+## Usercmd Injection
+
+The managed API exposes token-based usercmd injection:
+
+- `long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)` creates an independent injection and returns a positive token, or `-1` on failure
+- `bool CancelUsercmdInjection(int slot, long injectionId)` interrupts one injection.
+`durationMs = 0` presses the buttons for one command and releases them on the next command.
+A positive duration holds the buttons from the first injected command until the duration expires.
+
+Injection fails when the slot, button mask, or duration is invalid, or when the native `PlayerRunCommand` hook is unavailable.
+
+Button masks use the engine `IN_*` values. For example, CounterStrikeSharp exposes weapon inspect as `PlayerButtons.Inspect`:
+
+```csharp
+int botSlot = 1;
+ulong inspectMask = (ulong)PlayerButtons.Inspect;
+long inspectInjection = _bots?.InjectUsercmd(botSlot, inspectMask) ?? -1;
+
+ulong attackMask = (ulong)PlayerButtons.Attack;
+long attackInjection = _bots?.InjectUsercmd(botSlot, attackMask, 250) ?? -1;
+if (attackInjection > 0)
+    _bots?.CancelUsercmdInjection(botSlot, attackInjection);
+```
+
+------------------------------------------------------------------------
+
 ## Record And Replay
 
 The native plugin records:
@@ -88,13 +107,11 @@ Typical flow:
 6. Apply `Lock(All)` to the bot slot.
 7. Call `StartReplay`.
 
-`ReplayTick` and `SubtickMove` mirror the native C++ layout byte-for-byte.
-
 ------------------------------------------------------------------------
 
 ## CounterStrikeSharp Integration
 
-### Recommended: Shared Capability
+### Shared Capability
 
 Reference the deployed shared contract:
 
@@ -116,16 +133,6 @@ public override void OnAllPluginsLoaded(bool hotReload)
 {
     _bots = BotControllerCapability.Cap.Get();
 }
-```
-
-### Legacy: Static P/Invoke
-
-Drop `scripts/BotController.NativeApi.cs` into your project and check ABI compatibility:
-
-```csharp
-using BotControllerApi;
-
-if (!BotController.IsCompatible()) return;
 ```
 
 ------------------------------------------------------------------------
@@ -186,6 +193,8 @@ Key operations exposed by both managed integrations:
 - `StopReplay`
 - `TryGetReplayTick`
 - `SwitchBotWeapon`
+- `InjectUsercmd`
+- `CancelUsercmdInjection`
 - `GetBotProfile`
 - buy-plan operations
 
