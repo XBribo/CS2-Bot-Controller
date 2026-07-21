@@ -43,7 +43,13 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 
 extern "C" BC_EXPORT int BotController_GetVersion()
 {
-    return 14;
+    return 15;
+}
+
+// Queue one usercmd button press and release for a bot slot
+extern "C" BC_EXPORT int BotController_PulseUsercmdButton(int slot, uint64_t buttonMask)
+{
+    return BotController::InputInjector::PulseUsercmdButton(slot, buttonMask) ? 0 : -1;
 }
 
 // Return 1 when the plugin can allocate and send voice net messages.

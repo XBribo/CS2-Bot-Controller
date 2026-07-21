@@ -40,6 +40,9 @@ namespace BotControllerApi
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
+        // Queues one native usercmd button press followed by its release
+        public bool PulseUsercmdButton(int slot, ulong buttonMask)
+            => BotController.PulseUsercmdButton(slot, buttonMask);
 
         // ---- profile ----
         public bool GetBotProfile(int slot, out BotProfileData profile)

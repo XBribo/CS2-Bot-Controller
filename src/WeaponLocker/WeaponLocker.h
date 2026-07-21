@@ -27,32 +27,30 @@ namespace BotController
         void *GetSlotAddress();
 
         // Force bot at `slot` to its locked weapon
-        // Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed.
+        // Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed
         int SwitchToLockTarget(int slot, bool quiet = false);
 
         // ---- helpers for MotionRecorder ----
 
-        // True once GetSlot + SelectItem are resolved and hooks installed.
+        // True once GetSlot + SelectItem are resolved and hooks installed
         bool WeaponHooksReady();
 
-        // Read a weapon's item-definition index (weapon+0x9E0). -1 if null.
+        // Read a weapon's item-definition index (weapon+0x9E0). -1 if null
         int ReadDefIndex(void *weapon);
 
-        // Entity index of a weapon (identity ehandle low bits). -1 if null.
-        // For writing cmd.weaponselect on replay (engine-native switch path).
+        // Entity index of a weapon (identity ehandle low bits). -1 if null
         int WeaponEntIndex(void *weapon);
 
-        // Active weapon's def index for a WeaponServices*, matched by entity
-        // handle against GetSlot(0..4). -1 if none/unresolved (no false match).
+        // Active weapon's def index for a WeaponServices*. -1 if none/unresolved
         int ActiveWeaponDef(void *ws);
 
-        // First weapon in slots 0..4 whose def index == def. nullptr if absent.
+        // First weapon in slots 0..4 whose def index == def
         void *FindWeaponByDef(void *ws, int def);
 
-        // Switch via the original (un-hooked) SelectItem. Proven reliable path.
+        // Switch via the original SelectItem
         bool SelectWeaponRaw(void *ws, void *weapon);
 
-        // Cached WeaponServices* for a bot slot (populated when its AI ticks).
+        // Cached WeaponServices* for a bot slot
         void *WsForSlot(int slot);
     }
 }

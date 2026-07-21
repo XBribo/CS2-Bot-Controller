@@ -55,6 +55,8 @@ namespace BotController
         // slot -> live CCSPlayer_MovementServices*
         static std::array<std::atomic<void *>, kMaxSlots> g_slotServices{};
         static std::array<std::atomic<void *>, kMaxSlots> g_slotPawns{};
+        static std::array<std::atomic<uint64_t>, kMaxSlots> g_buttonPulseMasks{};
+        static std::array<std::atomic<int>, kMaxSlots> g_buttonPulsePhases{};
 
         static std::atomic<uint64_t> g_hookCalls{0};
         static std::atomic<int> g_lastSlot{-1};
@@ -215,6 +217,57 @@ namespace BotController
             return a - 180.0f;
         }
 
+        // Queues a button edge pair for the next two commands on a slot
+        bool PulseUsercmdButton(int slot, uint64_t buttonMask)
+        {
+            if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_subtickActive)
+                return false;
+
+            g_buttonPulsePhases[slot].store(0, std::memory_order_release);
+            g_buttonPulseMasks[slot].store(buttonMask, std::memory_order_relaxed);
+            g_buttonPulsePhases[slot].store(1, std::memory_order_release);
+            return true;
+        }
+
+        // Applies and advances one pending button pulse without replacing other inputs
+        static bool ApplyButtonPulse(int slot, PlayerCommand *pc, CBaseUserCmdPB *base)
+        {
+            if (!ValidSlotIndex(slot) || !pc || !base)
+                return false;
+
+            int phase = g_buttonPulsePhases[slot].load(std::memory_order_acquire);
+            if (phase != 1 && phase != 2)
+                return false;
+
+            uint64_t mask = g_buttonPulseMasks[slot].load(std::memory_order_relaxed);
+            uint64_t held = pc->buttonstates.m_pButtonStates[0];
+            uint64_t pressed = pc->buttonstates.m_pButtonStates[1];
+            uint64_t released = pc->buttonstates.m_pButtonStates[2];
+            if (phase == 1)
+            {
+                held |= mask;
+                pressed |= mask;
+                released &= ~mask;
+                g_buttonPulsePhases[slot].store(2, std::memory_order_release);
+            }
+            else
+            {
+                held &= ~mask;
+                pressed &= ~mask;
+                released |= mask;
+                g_buttonPulsePhases[slot].store(0, std::memory_order_release);
+            }
+
+            CInButtonStatePB *buttons = base->mutable_buttons_pb();
+            buttons->set_buttonstate1(held);
+            buttons->set_buttonstate2(pressed);
+            buttons->set_buttonstate3(released);
+            pc->buttonstates.m_pButtonStates[0] = held;
+            pc->buttonstates.m_pButtonStates[1] = pressed;
+            pc->buttonstates.m_pButtonStates[2] = released;
+            return true;
+        }
+
         // ---- ProcessMovement: record pre/post + replay pre ----
 
         // Defined after HookedFinishMove
@@ -291,8 +344,10 @@ namespace BotController
                              MotionRecorder::IsRecording(slot);
             bool replaying = slot >= 0 && slot < kMaxSlots &&
                              MotionRecorder::IsReplaying(slot);
+            bool hasButtonPulse = slot >= 0 && slot < kMaxSlots &&
+                                  g_buttonPulsePhases[slot].load(std::memory_order_acquire) != 0;
 
-            if (cmd && (recording || replaying))
+            if (cmd && (recording || replaying || hasButtonPulse))
             {
                 // Compiler computes the multiple-inheritance adjust here.
                 auto *pc = reinterpret_cast<PlayerCommand *>(cmd);
@@ -419,6 +474,9 @@ namespace BotController
                         DebugOut(dbg);
                     }
                 }
+
+                if (hasButtonPulse)
+                    ApplyButtonPulse(slot, pc, base);
             }
 
             g_origPlayerRunCommand(services, cmd);
@@ -593,6 +651,10 @@ namespace BotController
                 s.store(nullptr, std::memory_order_release);
             for (auto &pawn : g_slotPawns)
                 pawn.store(nullptr, std::memory_order_release);
+            for (auto &mask : g_buttonPulseMasks)
+                mask.store(0, std::memory_order_release);
+            for (auto &phase : g_buttonPulsePhases)
+                phase.store(0, std::memory_order_release);
             g_installed = false;
             g_status = "not_attempted";
         }

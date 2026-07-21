@@ -5,16 +5,12 @@
 #include "sig_scan.h"
 #include "WeaponLockerState.h"
 #include "ccsbot_slot.h"
-#include "dispatch.h"
 #include "MotionRecorder.h"
 #include "version_targets.h"
 #include "hook.h"
 #include "platform.h"
 
 #include <tier0/dbg.h>
-#include <eiface.h>
-#include <playerslot.h>
-
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
@@ -60,7 +56,7 @@ namespace BotController
         static void *g_slotToWs[64] = {nullptr};
         static std::mutex g_wsToSlotMu;
 
-        // Broadcast a debug line
+        // Writes one weapon-lock debug line to the server console
         static void DebugLine(const char *fmt, ...)
         {
             char buf[256];
@@ -69,8 +65,6 @@ namespace BotController
             std::vsnprintf(buf, sizeof(buf), fmt, ap);
             va_end(ap);
             Msg("%s", buf);
-            if (Dispatch::g_pEngine)
-                Dispatch::g_pEngine->ClientPrintf(CPlayerSlot(0), buf);
         }
 
         static void RememberWsForBot(void *bot, int slot)
@@ -127,7 +121,7 @@ namespace BotController
             if (g_lastLoggedLock[sr.slot] == curr)
                 return;
             g_lastLoggedLock[sr.slot] = curr;
-            DebugLine("[BL][hook] %s slot=%d lock=%d bot=%p\n",
+            DebugLine("[BC][hook] %s slot=%d lock=%d bot=%p\n",
                       which, sr.slot, curr, bot);
         }
 
@@ -217,7 +211,7 @@ namespace BotController
             if (slot >= 0 && slot < 64 && g_lastBlockedWeapon[slot] != weapon)
             {
                 g_lastBlockedWeapon[slot] = weapon;
-                DebugLine("[BL][block] SelectItem slot=%d lock=%d weapon=%p target=%p\n",
+                DebugLine("[BC][block] SelectItem slot=%d lock=%d weapon=%p target=%p\n",
                           slot, static_cast<int>(lt), weapon, targetWeapon);
             }
             return 0;
@@ -313,7 +307,7 @@ namespace BotController
 
             char dbg[384];
             std::snprintf(dbg, sizeof(dbg),
-                          "[BotWeaponLock] hooks installed: EquipBestWeapon=%p EquipPistol=%p SelectItem=%p GetSlot=%p\n",
+                          "[BC] hooks installed: EquipBestWeapon=%p EquipPistol=%p SelectItem=%p GetSlot=%p\n",
                           g_addrEquipBestWeapon, g_addrEquipPistol,
                           g_addrSelectItem, g_addrGetSlot);
             DebugOut(dbg);
@@ -502,7 +496,7 @@ namespace BotController
             g_origSelectItem(ws, target, 0);
             if (!quiet)
             {
-                DebugLine("[BL][switch] slot=%d lock=%d ws=%p target=%p\n",
+                DebugLine("[BC][switch] slot=%d lock=%d ws=%p target=%p\n",
                           slot, static_cast<int>(lt), ws, target);
             }
             return 0;

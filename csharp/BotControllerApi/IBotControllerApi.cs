@@ -67,6 +67,9 @@ namespace BotControllerApi
         // Def index of the bot's current active weapon. <0 if unresolved.
         int BotActiveWeaponDef(int slot);
 
+        // Queues one usercmd button press followed by its release
+        bool PulseUsercmdButton(int slot, ulong buttonMask);
+
         // ---- profile ----
 
         // Read the BotProfile of the bot on this slot. False if the slot has no
