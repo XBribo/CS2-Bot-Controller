@@ -12,7 +12,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 so CMake/MSBuild Chinese output renders correctly
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -129,7 +128,6 @@ function Build-Dist([string]$nativePkg, [string]$destRoot) {
 function Build-CSharp {
     Write-Step "C# (shared API + provider plugin)"
     $impl = Join-Path $Root "csharp/BotControllerImpl"
-    # Building the provider also builds the referenced shared API project.
     dotnet build $impl -c $Config | Out-Host
     if ($LASTEXITCODE) { throw "dotnet build (csharp) failed" }
     $sharedDll = Join-Path $Root "csharp/BotControllerApi/bin/$Config/BotControllerApi.dll"
@@ -170,7 +168,6 @@ function Build-CSharpSW2 {
     return @{ BuildDir = $buildDir; Dlls = $dlls }
 }
 
-# Deploy SwiftlyS2 managed DLLs into a dist tree's swiftlys2 layout.
 function Deploy-CSharpSW2([hashtable]$sw2Out, [string]$destRoot) {
     if (-not $sw2Out) { return }
     Reset-DistRoot $destRoot

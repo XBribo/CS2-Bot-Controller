@@ -94,8 +94,6 @@ Typical flow:
 
 ## CounterStrikeSharp Integration
 
-The CounterStrikeSharp provider plugin targets `net10.0`.
-
 ### Recommended: Shared Capability
 
 Reference the deployed shared contract:
@@ -133,14 +131,6 @@ if (!BotController.IsCompatible()) return;
 ------------------------------------------------------------------------
 
 ## SwiftlyS2 Integration
-
-The SwiftlyS2 provider plugin targets `net10.0` and is implemented in
-`csharp/BotControllerImplSW2/BotControllerImplSW2Plugin.cs`.
-
-It reuses the same native wrapper source as the CounterStrikeSharp provider via a
-linked compile item, so the P/Invoke surface is maintained in one place:
-
-- `csharp/BotControllerImpl/BotController.NativeApi.cs`
 
 ### Shared Interface
 
