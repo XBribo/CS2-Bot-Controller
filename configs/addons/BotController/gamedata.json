@@ -3,7 +3,7 @@
     "signatures": {
       "library": "server",
       "windows": "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B F9 84 D2",
-      "linux": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC ? 40 84 F6 75 ? F3 0F 10 87 68 5C 00 00"
+      "linux": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC ? 40 84 F6 75 ? F3 0F 10 8F ? ? ? ?"
     },
     "comment": "bot picks and equips its best weapon."
   },
@@ -11,7 +11,7 @@
     "signatures": {
       "library": "server",
       "windows": "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B D9 84 D2",
-      "linux": "55 48 89 E5 53 48 89 FB 48 83 EC ? 40 84 F6 75 ? F3 0F 10 87 68 5C 00 00"
+      "linux": "55 48 89 E5 53 48 89 FB 48 83 EC ? 40 84 F6 75 ? F3 0F 10 8F ? ? ? ? 66 0F EF C0 0F 2F C8"
     },
     "comment": "bot switches to its pistol secondary"
   },
@@ -35,7 +35,7 @@
     "signatures": {
       "library": "server",
       "windows": "40 55 56 57 41 54 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8D 05 ? ? ? ? C6 81 ? ? ? ? 00",
-      "linux": ""
+      "linux": "55 48 8D 05 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 E5 41 57 41 56 41 55 4C 8D AD ? ? ? ? 41 54 4C 89 EA 53 48 89 FB 48 81 EC"
     },
     "comment": "Per-tick decision entry; PathFollower + look-around + reaction + weapon"
   },
@@ -43,7 +43,7 @@
     "signatures": {
       "library": "server",
       "windows": "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 56 48 83 EC ? 4C 8B F1 33 ED 48 8B 49 ? 48 39 A9 ? ? ? ?",
-      "linux": ""
+      "linux": "55 48 8D 05 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 E5 41 55 41 54 48 8D 55 ? 53"
     },
     "comment": "Per-frame view mBotntenance; UpdateLookAround + jitter + UpdateLookAngles"
   },
@@ -51,7 +51,7 @@
     "signatures": {
       "library": "server",
       "windows": "48 89 5C 24 ? 57 48 83 EC ? 48 8B D9 0F B6 FA 48 8B 49 ? 48 8B 91",
-      "linux": "55 48 89 E5 53 48 89 FB 48 83 EC ? 48 8B 47 18 48 8B B0 60 0C 00 00 8B B8 58 0C 00 00 E8 ? ? ? ? 31 D2"
+      "linux": "55 48 89 E5 53 48 89 FB 48 83 EC ? 48 8B 47 ? 48 8B B0 ? ? ? ? 8B B8 ? ? ? ? E8 ? ? ? ? 31 D2"
     },
     "comment": "Bot requests a jump"
   },
@@ -105,7 +105,7 @@
     "signatures": {
       "library": "server",
       "windows": "40 55 53 56 57 41 55 41 56 48 8D AC 24 08 F9 FF FF",
-      "linux": ""
+      "linux": "55 48 8D 05 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 8D 3D"
     },
     "comment": "Per-tick controller usercmd simulation boundary,replay commits cursor after original"
   },
