@@ -172,6 +172,13 @@
     },
     "comment": "m_cost"
   },
+  "BotProfile::Difficulty": {
+    "offsets": {
+      "windows": 80,
+      "linux": 80
+    },
+    "comment": "m_difficultyFlags"
+  },
   "BotProfile::ReactionTime": {
     "offsets": {
       "windows": 88,
