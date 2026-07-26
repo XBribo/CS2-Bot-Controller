@@ -172,13 +172,6 @@
     },
     "comment": "m_cost"
   },
-  "BotProfile::Difficulty": {
-    "offsets": {
-      "windows": 80,
-      "linux": 80
-    },
-    "comment": "m_difficultyFlags"
-  },
   "BotProfile::ReactionTime": {
     "offsets": {
       "windows": 88,
@@ -259,14 +252,14 @@
   "CBaseEntity::BodyComponent": {
     "offsets": {
       "windows": 48,
-      "linux": 0
+      "linux": 48
     },
     "comment": "m_CBodyComponent"
   },
   "CBodyComponent::SceneNode": {
     "offsets": {
       "windows": 8,
-      "linux": 0
+      "linux": 8
     },
     "comment": "m_pSceneNode"
   },
@@ -280,56 +273,56 @@
   "CCSPlayerPawn::WeaponServices": {
     "offsets": {
       "windows": 2608,
-      "linux": 3296
+      "linux": 3344
     },
     "comment": "m_pWeaponServices"
   },
   "CBasePlayerPawn::MovementServices": {
     "offsets": {
       "windows": 2672,
-      "linux": 0
+      "linux": 3408
     },
     "comment": "m_pMovementServices"
   },
   "CCSPlayerPawn::Controller": {
     "offsets": {
       "windows": 2992,
-      "linux": 3680
+      "linux": 3728
     },
     "comment": "m_hController"
   },
   "CCSPlayerPawn::OriginalController": {
     "offsets": {
       "windows": 3364,
-      "linux": 4044
+      "linux": 4092
     },
     "comment": "m_hOriginalController"
   },
   "CCSPlayerPawn::ViewAngle": {
     "offsets": {
       "windows": 2792,
-      "linux": 3480
+      "linux": 3528
     },
     "comment": "v_angle"
   },
   "CCSPlayerPawn::ViewAnglePrevious": {
     "offsets": {
       "windows": 2804,
-      "linux": 0
+      "linux": 3540
     },
     "comment": "v_anglePrevious"
   },
   "CCSPlayerPawn::ServerViewAngleChanges": {
     "offsets": {
       "windows": 2688,
-      "linux": 0
+      "linux": 3424
     },
     "comment": "m_ServerViewAngleChanges"
   },
   "CCSPlayerPawn::EyeAngles": {
     "offsets": {
       "windows": 4968,
-      "linux": 5648
+      "linux": 5688
     },
     "comment": "m_angEyeAngles"
   },
@@ -343,7 +336,7 @@
   "CBasePlayerWeapon::ItemDefIndex": {
     "offsets": {
       "windows": 2560,
-      "linux": 3264
+      "linux": 3296
     },
     "comment": "m_iItemDefinitionIndex"
   },
@@ -434,14 +427,14 @@
   "vtidx::PlayerRunCommand": {
     "offsets": {
       "windows": 25,
-      "linux": 23
+      "linux": 26
     },
     "comment": "CCSPlayer_MovementServices vtable index."
   },
   "vtidx::FinishMove": {
     "offsets": {
       "windows": 38,
-      "linux": 36
+      "linux": 40
     },
     "comment": "CCSPlayer_MovementServices vtable index."
   }
