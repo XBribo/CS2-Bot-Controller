@@ -127,7 +127,7 @@ namespace BotController
         // Registers a readable pawn whose current owner matches the requested slot.
         bool SetReplayPawn(int slot, void *pawn)
         {
-            if (!ValidSlotIndex(slot))
+            if (!ValidSlotIndex(slot) || MotionRecorder::IsReplaying(slot))
                 return false;
             g_slotPawns[slot].store(nullptr, std::memory_order_release);
             if (!pawn)
@@ -250,11 +250,13 @@ namespace BotController
         int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
         {
             if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 ||
-                !g_subtickActive)
+                !g_subtickActive || MotionRecorder::IsReplaying(slot))
                 return -1;
 
             int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
             std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+            if (MotionRecorder::IsReplaying(slot))
+                return -1;
             g_usercmdInjections[slot].push_back({
                 id,
                 buttonMask,
@@ -284,6 +286,17 @@ namespace BotController
                 return true;
             }
             return false;
+        }
+
+        // Removes every injection so replay starts without deferred input
+        void ClearUsercmdInjections(int slot)
+        {
+            if (!ValidSlotIndex(slot))
+                return;
+
+            std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+            g_usercmdInjections[slot].clear();
+            g_injectedHeldMasks[slot] = 0;
         }
 
         // Reports whether a slot has injections waiting for command processing
@@ -561,7 +574,7 @@ namespace BotController
                     }
                 }
 
-                if (hasUsercmdInjection)
+                if (hasUsercmdInjection && !replaying)
                     ApplyUsercmdInjections(slot, pc, base);
             }
 

@@ -4,6 +4,7 @@
 #include "WeaponLockerState.h"
 #include "WeaponLocker.h"
 #include "BotControllerState.h"
+#include "MotionRecorder.h"
 
 #include <eiface.h>
 #include <playerslot.h>
@@ -18,6 +19,9 @@ namespace BotController
         // Set lock; Weapon also triggers a one-shot switch.
         int Lock(int slot, LockKind kind, int arg, bool quiet)
         {
+            if (MotionRecorder::IsReplaying(slot))
+                return -3;
+
             switch (kind)
             {
             case LockKind::All:

@@ -19,7 +19,7 @@ namespace BotControllerImplSW2;
 
 [PluginMetadata(
     Id = "botcontroller.sw2",
-    Version = "0.5.4",
+    Version = "0.5.5",
     Name = "BotController",
     Author = "XBribo & nicedayzhu",
     Description = "Record a player's movement and replay it on a bot."

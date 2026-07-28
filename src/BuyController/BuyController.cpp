@@ -2,6 +2,7 @@
 
 #include "BuyController.h"
 #include "BuyControllerState.h"
+#include "MotionRecorder.h"
 #include "ccsbot_slot.h"
 #include "version_targets.h"
 #include "dispatch.h"
@@ -71,6 +72,8 @@ namespace BotController
         static void BC_FASTCALL HookedOnUpdate(void *self, void *me)
         {
             int slot = CCSBotToSlot(me);
+            if (slot >= 0 && slot < 64 && MotionRecorder::IsReplaying(slot))
+                return;
             if (slot < 0 || slot >= 64 || !BuyControllerState::HasPlan(slot))
                 return g_origOnUpdate(self, me);
 

@@ -139,6 +139,8 @@ namespace BotController
             auto sr = ResolveSlot(bot);
             if (sr.slot >= 0)
                 RememberWsForBot(bot, sr.slot);
+            if (sr.slot >= 0 && MotionRecorder::IsReplaying(sr.slot))
+                return;
             LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
             MaybeLogEdge("EquipBestWeapon", bot, sr, lt);
             if (lt != LockTarget::None)
@@ -151,6 +153,8 @@ namespace BotController
             auto sr = ResolveSlot(bot);
             if (sr.slot >= 0)
                 RememberWsForBot(bot, sr.slot);
+            if (sr.slot >= 0 && MotionRecorder::IsReplaying(sr.slot))
+                return;
             LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
             MaybeLogEdge("EquipPistol", bot, sr, lt);
             if (lt != LockTarget::None)
@@ -184,6 +188,9 @@ namespace BotController
             // we cached; don't block player's weapon switches.
             int curSlot = ControllerSlotForPawn(bind.pawn);
             if (curSlot != bind.slot)
+                return g_origSelectItem(ws, weapon, flag);
+
+            if (MotionRecorder::IsReplaying(bind.slot))
                 return g_origSelectItem(ws, weapon, flag);
 
             LockTarget lt = WeaponLockerState::Get(bind.slot);
@@ -471,6 +478,8 @@ namespace BotController
                 return 3;
             if (slot < 0 || slot >= 64)
                 return 3;
+            if (MotionRecorder::IsReplaying(slot))
+                return 4;
 
             LockTarget lt = WeaponLockerState::Get(slot);
             if (lt == LockTarget::None)

@@ -42,6 +42,9 @@ namespace BotController
         // Cancels one usercmd injection by its token
         bool CancelUsercmdInjection(int slot, int64_t injectionId);
 
+        // Clears every pending and active usercmd injection for one slot
+        void ClearUsercmdInjections(int slot);
+
         // Diagnostics
         uint64_t HookCallCount();
         int LastResolvedSlot();

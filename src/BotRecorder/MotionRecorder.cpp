@@ -462,6 +462,7 @@ namespace BotController
             p.lastAppliedDef.store(-1, std::memory_order_relaxed);
             p.loop.store(loop, std::memory_order_relaxed);
             p.playing.store(true, std::memory_order_release);
+            InputInjector::ClearUsercmdInjections(slot);
             return true;
         }
 
@@ -584,7 +585,7 @@ namespace BotController
 
         bool SwitchBotWeaponByDef(int slot, int defIndex)
         {
-            if (!ValidSlot(slot) || defIndex < 0)
+            if (!ValidSlot(slot) || defIndex < 0 || IsReplaying(slot))
                 return false;
             if (!WeaponLockerHooks::WeaponHooksReady())
                 return false;
