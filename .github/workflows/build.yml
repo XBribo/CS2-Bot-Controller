@@ -1,0 +1,298 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which package to build"
+        type: choice
+        default: all
+        options:
+          - all
+          - mm-windows
+          - mm-linux
+          - css
+          - sw2
+      release:
+        description: "Create tag + GitHub release (requires target=all)"
+        type: boolean
+        default: false
+
+env:
+  # Native SDK sources. Pin refs to exact commits if your local checkouts
+  # diverge from upstream HEAD (recommended for reproducible builds).
+  HL2SDK_REPO: alliedmodders/hl2sdk
+  HL2SDK_REF: cs2
+  MMSOURCE_REPO: alliedmodders/metamod-source
+  MMSOURCE_REF: master
+  # CSGO_PROTO source — must contain the CS2 network protos
+  # (source2_steam_stats.proto, valveextensions.proto, ...).
+  PROTOBUFS_REPO: SteamDatabase/Protobufs
+  PROTOBUFS_REF: master
+  PROTOBUFS_SUBDIR: csgo
+
+jobs:
+  # ------------------------------------------------------------------- Guard
+  # Extracts the three version strings. On release runs it additionally
+  # enforces: target=all, all versions identical, tag not already published.
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mm_version: ${{ steps.ver.outputs.mm }}
+      css_version: ${{ steps.ver.outputs.css }}
+      sw2_version: ${{ steps.ver.outputs.sw2 }}
+      version: ${{ steps.ver.outputs.unified }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract versions
+        id: ver
+        run: |
+          mm=$(sed -nE 's/.*GetVersion\(\) override \{ return "([^"]+)".*/\1/p' src/plugin.cpp | head -1)
+          css=$(sed -nE 's/.*ModuleVersion => "([^"]+)".*/\1/p' csharp/BotControllerImpl/BotControllerImplPlugin.cs | head -1)
+          sw2=$(sed -nE 's/.*Version = "([^"]+)".*/\1/p' csharp/BotControllerImplSW2/BotControllerImplSW2Plugin.cs | head -1)
+          echo "MM=$mm CSS=$css SW2=$sw2"
+          for v in "$mm" "$css" "$sw2"; do
+            test -n "$v" || { echo "::error::failed to extract a version string"; exit 1; }
+          done
+          {
+            echo "mm=$mm"
+            echo "css=$css"
+            echo "sw2=$sw2"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$mm" = "$css" ] && [ "$css" = "$sw2" ]; then
+            echo "unified=$mm" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::version mismatch: MM=$mm CSS=$css SW2=$sw2"
+            echo "unified=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release preconditions
+        if: inputs.release
+        env:
+          MM: ${{ steps.ver.outputs.mm }}
+          CSS: ${{ steps.ver.outputs.css }}
+          SW2: ${{ steps.ver.outputs.sw2 }}
+        run: |
+          if [ "${{ inputs.target }}" != "all" ]; then
+            echo "::error::release requires target=all (got '${{ inputs.target }}')"
+            exit 1
+          fi
+          if [ "$MM" != "$CSS" ] || [ "$CSS" != "$SW2" ]; then
+            echo "::error::version mismatch, refusing to release: MM=$MM CSS=$CSS SW2=$SW2"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/v$MM" | grep -q .; then
+            echo "::error::tag v$MM already exists — bump the version strings first"
+            exit 1
+          fi
+          echo "releasing v$MM"
+
+  # ----------------------------------------------------------------- MM win64
+  mm-windows:
+    if: inputs.target == 'all' || inputs.target == 'mm-windows'
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout hl2sdk-cs2
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HL2SDK_REPO }}
+          ref: ${{ env.HL2SDK_REF }}
+          path: deps/hl2sdk-cs2
+
+      - name: Checkout metamod-source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MMSOURCE_REPO }}
+          ref: ${{ env.MMSOURCE_REF }}
+          path: deps/metamod-source
+
+      - name: Checkout protobufs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOBUFS_REPO }}
+          ref: ${{ env.PROTOBUFS_REF }}
+          path: deps/protobufs
+
+      - name: Install protoc 3.21.12
+        shell: bash
+        run: |
+          curl -fsSL -o protoc.zip \
+            https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-win64.zip
+          mkdir -p "$RUNNER_TEMP/protoc"
+          unzip -q protoc.zip -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc.exe" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc.exe" --version
+
+      - name: Configure + build
+        env:
+          HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
+          MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
+          CSGO_PROTO: ${{ github.workspace }}/deps/protobufs/${{ env.PROTOBUFS_SUBDIR }}
+        run: |
+          cmake -B build -A x64 -S .
+          cmake --build build --config Release
+
+      - name: Verify output
+        shell: bash
+        run: test -f build/package/addons/BotController/bin/win64/BotController.dll
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotController-MM-windows-${{ needs.guard.outputs.mm_version }}
+          path: build/package/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- MM linux
+  mm-linux:
+    if: inputs.target == 'all' || inputs.target == 'mm-linux'
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout hl2sdk-cs2
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HL2SDK_REPO }}
+          ref: ${{ env.HL2SDK_REF }}
+          path: deps/hl2sdk-cs2
+
+      - name: Checkout metamod-source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MMSOURCE_REPO }}
+          ref: ${{ env.MMSOURCE_REF }}
+          path: deps/metamod-source
+
+      - name: Checkout protobufs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROTOBUFS_REPO }}
+          ref: ${{ env.PROTOBUFS_REF }}
+          path: deps/protobufs
+
+      - name: Install protoc 3.21.x
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          protoc --version | grep -q 'libprotoc 3\.21\.'
+
+      - name: Configure + build
+        env:
+          HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
+          MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
+          CSGO_PROTO: ${{ github.workspace }}/deps/protobufs/${{ env.PROTOBUFS_SUBDIR }}
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+
+      - name: Verify output
+        run: test -f build/package/addons/BotController/bin/linuxsteamrt64/BotController.so
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotController-MM-linux-${{ needs.guard.outputs.mm_version }}
+          path: build/package/
+          if-no-files-found: error
+
+  # -------------------------------------------------------- CounterStrikeSharp
+  css:
+    if: inputs.target == 'all' || inputs.target == 'css'
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build csharp/BotControllerImpl -c Release
+
+      - name: Stage package
+        run: |
+          css=dist/CounterStrikeSharp/addons/counterstrikesharp
+          mkdir -p "$css/shared/BotControllerApi" "$css/plugins/BotControllerImpl"
+          cp csharp/BotControllerApi/bin/Release/BotControllerApi.dll "$css/shared/BotControllerApi/"
+          cp csharp/BotControllerImpl/bin/Release/BotControllerImpl.dll "$css/plugins/BotControllerImpl/"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotController-CSS-API-${{ needs.guard.outputs.css_version }}
+          path: dist/CounterStrikeSharp/
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ SwiftlyS2
+  sw2:
+    if: inputs.target == 'all' || inputs.target == 'sw2'
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build csharp/BotControllerImplSW2 -c Release
+
+      - name: Stage package
+        run: |
+          sw2=dist/SwiftlyS2/addons/swiftlys2/plugins/BotControllerImplSW2
+          mkdir -p "$sw2"
+          cp -r csharp/BotControllerImplSW2/build/. "$sw2/"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotController-SW2-API-${{ needs.guard.outputs.sw2_version }}
+          path: dist/SwiftlyS2/
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------- Release
+  # Creates tag v<version> at the built commit and publishes the four zips.
+  release:
+    if: inputs.release
+    needs: [guard, mm-windows, mm-linux, css, sw2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip packages
+        run: |
+          cd artifacts
+          for d in */; do
+            d="${d%/}"
+            (cd "$d" && zip -qr "../$d.zip" .)
+            echo "packed $d.zip"
+          done
+          ls -l ./*.zip
+
+      - name: Create tag + release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.guard.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: artifacts/*.zip
+          generate_release_notes: true
+          draft: false
