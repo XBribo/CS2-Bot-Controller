@@ -18,6 +18,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 env:
   # Native SDK sources. Pin refs to exact commits if your local checkouts
   # diverge from upstream HEAD (recommended for reproducible builds).
