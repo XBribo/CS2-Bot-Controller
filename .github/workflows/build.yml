@@ -44,7 +44,7 @@ jobs:
       sw2_version: ${{ steps.ver.outputs.sw2 }}
       version: ${{ steps.ver.outputs.unified }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Extract versions
         id: ver
@@ -96,24 +96,24 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Checkout hl2sdk-cs2
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.HL2SDK_REPO }}
           ref: ${{ env.HL2SDK_REF }}
           path: deps/hl2sdk-cs2
 
       - name: Checkout metamod-source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.MMSOURCE_REPO }}
           ref: ${{ env.MMSOURCE_REF }}
           path: deps/metamod-source
 
       - name: Checkout protobufs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.PROTOBUFS_REPO }}
           ref: ${{ env.PROTOBUFS_REF }}
@@ -143,7 +143,7 @@ jobs:
         run: test -f build/package/addons/BotController/bin/win64/BotController.dll
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BotController-MM-windows-${{ needs.guard.outputs.mm_version }}
           path: build/package/
@@ -156,24 +156,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Checkout hl2sdk-cs2
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.HL2SDK_REPO }}
           ref: ${{ env.HL2SDK_REF }}
           path: deps/hl2sdk-cs2
 
       - name: Checkout metamod-source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.MMSOURCE_REPO }}
           ref: ${{ env.MMSOURCE_REF }}
           path: deps/metamod-source
 
       - name: Checkout protobufs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.PROTOBUFS_REPO }}
           ref: ${{ env.PROTOBUFS_REF }}
@@ -198,7 +198,7 @@ jobs:
         run: test -f build/package/addons/BotController/bin/linuxsteamrt64/BotController.so
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BotController-MM-linux-${{ needs.guard.outputs.mm_version }}
           path: build/package/
@@ -211,9 +211,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -228,7 +228,7 @@ jobs:
           cp csharp/BotControllerImpl/bin/Release/BotControllerImpl.dll "$css/plugins/BotControllerImpl/"
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BotController-CSS-API-${{ needs.guard.outputs.css_version }}
           path: dist/CounterStrikeSharp/
@@ -241,9 +241,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -257,7 +257,7 @@ jobs:
           cp -r csharp/BotControllerImplSW2/build/. "$sw2/"
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BotController-SW2-API-${{ needs.guard.outputs.sw2_version }}
           path: dist/SwiftlyS2/
@@ -274,7 +274,7 @@ jobs:
       contents: write
     steps:
       - name: Download all packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -289,7 +289,7 @@ jobs:
           ls -l ./*.zip
 
       - name: Create tag + release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.guard.outputs.version }}
           target_commitish: ${{ github.sha }}
