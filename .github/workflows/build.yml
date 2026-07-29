@@ -154,6 +154,8 @@ jobs:
     if: inputs.target == 'all' || inputs.target == 'mm-linux'
     needs: guard
     runs-on: ubuntu-24.04
+    container:
+      image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -179,11 +181,14 @@ jobs:
           ref: ${{ env.PROTOBUFS_REF }}
           path: deps/protobufs
 
-      - name: Install protoc 3.21.x
+      - name: Install protoc 3.21.12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-          protoc --version | grep -q 'libprotoc 3\.21\.'
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
+            https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+          mkdir -p "$RUNNER_TEMP/protoc"
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/protoc/bin/protoc" --version | grep -q 'libprotoc 3\.21\.12'
 
       - name: Configure + build
         env:
@@ -195,7 +200,19 @@ jobs:
           cmake --build build -j"$(nproc)"
 
       - name: Verify output
-        run: test -f build/package/addons/BotController/bin/linuxsteamrt64/BotController.so
+        run: |
+          binary=build/package/addons/BotController/bin/linuxsteamrt64/BotController.so
+          test -f "$binary"
+          max_glibc=$(readelf --version-info "$binary" \
+            | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' \
+            | sort -Vu \
+            | tail -1)
+          test -n "$max_glibc"
+          if [ "$(printf '%s\n' GLIBC_2.31 "$max_glibc" | sort -V | tail -1)" != "GLIBC_2.31" ]; then
+            echo "::error::$binary requires $max_glibc, newer than SteamRT3's GLIBC_2.31"
+            exit 1
+          fi
+          echo "$binary requires at most $max_glibc"
 
       - name: Upload package
         uses: actions/upload-artifact@v7
