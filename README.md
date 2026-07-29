@@ -39,7 +39,7 @@ or `BotController-SW2-API.zip (SwiftlyS2)` from the [Releases page](https://gith
 ## Console Commands
 
 | Command | Description |
-|---------|-------------|
+| --------- | ------------- |
 | `bc_lock <all\|aim\|jump\|weapon> <slot> [slot1..slot5]` | Apply a lock to a bot slot |
 | `bc_unlock <all\|aim\|jump\|weapon> <slot>` | Remove a lock from a bot slot |
 | `bc_unlock_all <all\|aim\|jump\|weapon>` | Remove one lock kind from all bot slots |
@@ -76,9 +76,9 @@ bc_status
 ## Special thanks
 
 - [cs2kz-metamod](https://github.com/KZGlobalTeam/cs2kz-metamod) for helping determine the replay framework.
-- [Misaka17032](https://github.com/Misaka17032) for adding Linux support to the plugin.
+- [御坂17032号](https://github.com/Misaka17032) and [Miksen](https://github.com/mrc4tt) for adding Linux support to the plugin.
 - [nicedayzhu](https://github.com/nicedayzhu) for adding swiftlys2 api support to the plugin.
-- [unicbm](https://github.com/unicbm) for the voice framework and signature updates.
+- [un1](https://github.com/unicbm) for the voice framework and signature updates.
 
 ------------------------------------------------------------------------
 
