@@ -25,7 +25,13 @@
 namespace tg = BotController::targets;
 
 using ProcessMovement_t = void(BC_FASTCALL*)(void* services, void* moveData);
+// On Linux this slot is (services, moveData); Windows adds a cmd argument.
+// Declaring that extra argument on Linux reads a stale register and crashes.
+#if defined(_WIN32)
 using FinishMove_t = void(BC_FASTCALL*)(void* services, void* cmd, void* moveData);
+#else
+using FinishMove_t = void(BC_FASTCALL*)(void* services, void* moveData);
+#endif
 using PlayerRunCommand_t = void(BC_FASTCALL*)(void* services, void* cmd);
 using PhysicsSimulate_t = void(BC_FASTCALL*)(void* controller);
 
@@ -360,7 +366,11 @@ static void BC_FASTCALL HookedProcessMovement(void* services, void* moveData)
 
 // ---- FinishMove: replay post-write + commit ----
 
+#if defined(_WIN32)
 static void BC_FASTCALL HookedFinishMove(void* services, void* cmd, void* moveData)
+#else
+static void BC_FASTCALL HookedFinishMove(void* services, void* moveData)
+#endif
 {
     g_finishMoveCalls.fetch_add(1, std::memory_order_relaxed);
     int slot = ServicesToSlot(services);
@@ -369,7 +379,11 @@ static void BC_FASTCALL HookedFinishMove(void* services, void* cmd, void* moveDa
     // Before original: write post snapshot into MoveData.
     if (replaying) MotionRecorder::OnReplayFinishMove(slot, services, moveData);
 
+#if defined(_WIN32)
     g_origFinishMove(services, cmd, moveData);
+#else
+    g_origFinishMove(services, moveData);
+#endif
 
     // After original: commit moveType/flags + advance the replay cursor
     if (replaying && !g_physicsActive)

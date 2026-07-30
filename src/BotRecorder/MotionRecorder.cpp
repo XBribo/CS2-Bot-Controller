@@ -558,9 +558,13 @@ static void WriteVelocityToPawn(int slot, void* services, const MovementSnapshot
     WriteVector3(pawn, tg::kEnt_AbsVelocity, s.velX, s.velY, s.velZ);
 }
 
-// Writes replay origin through the current body-component scene node.
+// Writes the replay origin to the scene node (Windows only). On Linux
+// the movement pipeline already networks the position; a raw write here
+// would set only the local origin, not the networked one, and desync
+// the bot on clients.
 static void WriteSceneNodeOrigin(int slot, void* services, const MovementSnapshot& s, float zBias = 0.0f)
 {
+#if defined(_WIN32)
     void* pawn = InputInjector::ResolveReplayPawn(slot, services);
     if (!pawn) return;
 
@@ -568,6 +572,12 @@ static void WriteSceneNodeOrigin(int slot, void* services, const MovementSnapsho
     if (!node) return;
 
     WriteVector3(node, tg::kNode_AbsOrigin, s.originX, s.originY, s.originZ + zBias);
+#else
+    (void)slot;
+    (void)services;
+    (void)s;
+    (void)zBias;
+#endif
 }
 
 // Write origin + velocity into CMoveData.

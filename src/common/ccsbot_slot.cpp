@@ -18,6 +18,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <sys/uio.h>
+#include <unistd.h>
 #endif
 
 namespace tg = BotController::targets;
@@ -59,10 +62,14 @@ bool TryReadMemory(const void* base, int offset, void* out, size_t size)
     {
         return false;
     }
-#else
-    std::memcpy(out, reinterpret_cast<const void*>(address), size);
-#endif
     return true;
+#else
+    // Linux has no SEH: a bad pointer would SIGSEGV and take down the
+    // server. process_vm_readv lets the kernel reject it with EFAULT.
+    struct iovec local{ out, size };
+    struct iovec remote{ reinterpret_cast<void*>(address), size };
+    return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+#endif
 }
 
 // Writes an engine field and converts access violations into a failed update.
@@ -83,10 +90,13 @@ bool TryWriteMemory(void* base, int offset, const void* value, size_t size)
     {
         return false;
     }
-#else
-    std::memcpy(reinterpret_cast<void*>(address), value, size);
-#endif
     return true;
+#else
+    // See TryReadMemory: EFAULT instead of SIGSEGV for bad pointers.
+    struct iovec local{ const_cast<void*>(value), size };
+    struct iovec remote{ reinterpret_cast<void*>(address), size };
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+#endif
 }
 
 PawnControllerHandles ReadPawnControllerHandles(void* pawn)
