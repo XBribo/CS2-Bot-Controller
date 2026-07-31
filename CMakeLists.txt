@@ -12,8 +12,9 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 set(HL2SDK $ENV{HL2SDKCS2})
-set(MMS    $ENV{MMSOURCE_DEV})
+set(MMS $ENV{MMSOURCE_DEV})
 set(PROTO_DIR $ENV{CSGO_PROTO})
+
 foreach(v HL2SDK MMS PROTO_DIR)
     if(NOT ${v} OR NOT EXISTS "${${v}}")
         message(FATAL_ERROR "${v} env var not set or path missing: '${${v}}'")
@@ -27,10 +28,16 @@ if(DEFINED ENV{PROTOC} AND EXISTS "$ENV{PROTOC}")
 else()
     find_program(PROTOC_EXE protoc REQUIRED)
 endif()
-execute_process(COMMAND "${PROTOC_EXE}" --version OUTPUT_VARIABLE PROTOC_VER OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(
+    COMMAND "${PROTOC_EXE}" --version
+    OUTPUT_VARIABLE PROTOC_VER
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 if(NOT PROTOC_VER MATCHES "libprotoc 3\\.21\\.")
     message(FATAL_ERROR "protoc must be 3.21.x (got '${PROTOC_VER}')")
 endif()
+
 message(STATUS "protoc: ${PROTOC_EXE} (${PROTOC_VER})")
 
 set(PROTO_FILES
@@ -40,9 +47,12 @@ set(PROTO_FILES
     netmessages.proto
     valveextensions.proto
     usercmd.proto
-    cs_usercmd.proto)
+    cs_usercmd.proto
+)
+
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${GENERATED_DIR}")
+
 set(PROTO_PATHS
     "${PROTO_DIR}"
     "${HL2SDK}/common"
@@ -50,16 +60,18 @@ set(PROTO_PATHS
     "${HL2SDK}/game/shared/cs"
     "${HL2SDK}/thirdparty/protobuf-3.21.8/src"
 )
+
 set(PROTOC_PATH_ARGS "")
 foreach(proto_path ${PROTO_PATHS})
     list(APPEND PROTOC_PATH_ARGS "--proto_path=${proto_path}")
 endforeach()
+
 set(PROTO_SRCS "")
 set(PROTO_INPUTS "")
 foreach(p ${PROTO_FILES})
     string(REGEX REPLACE "\\.proto$" ".pb.cc" cc ${p})
-    string(REGEX REPLACE "\\.proto$" ".pb.h"  hh ${p})
-    list(APPEND PROTO_SRCS   "${GENERATED_DIR}/${cc}" "${GENERATED_DIR}/${hh}")
+    string(REGEX REPLACE "\\.proto$" ".pb.h" hh ${p})
+    list(APPEND PROTO_SRCS "${GENERATED_DIR}/${cc}" "${GENERATED_DIR}/${hh}")
     set(proto_input "")
     foreach(proto_path ${PROTO_PATHS})
         if(EXISTS "${proto_path}/${p}")
@@ -72,15 +84,19 @@ foreach(p ${PROTO_FILES})
     endif()
     list(APPEND PROTO_INPUTS "${proto_input}")
 endforeach()
+
 if(WIN32)
     set(STRIP_PROTO_FINAL_COMMAND
         powershell -NoProfile -Command
-        "Get-ChildItem '${GENERATED_DIR}/*.pb.h' | ForEach-Object { (Get-Content -Raw $_) -replace ' final :',' :' | Set-Content -NoNewline $_ }")
+        "Get-ChildItem '${GENERATED_DIR}/*.pb.h' | ForEach-Object { (Get-Content -Raw $_) -replace ' final :',' :' | Set-Content -NoNewline $_ }"
+    )
 else()
     set(STRIP_PROTO_FINAL_COMMAND
         /bin/sh -c
-        "perl -0pi -e 's/ final :/ :/g' '${GENERATED_DIR}'/*.pb.h")
+        "perl -0pi -e 's/ final :/ :/g' '${GENERATED_DIR}'/*.pb.h"
+    )
 endif()
+
 add_custom_command(
     OUTPUT ${PROTO_SRCS}
     COMMAND "${PROTOC_EXE}" --cpp_out=${GENERATED_DIR} ${PROTOC_PATH_ARGS} ${PROTO_FILES}
@@ -95,15 +111,22 @@ add_custom_command(
 )
 
 include(FetchContent)
+
 set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+
 if(DEFINED ENV{FUNCHOOK_SOURCE} AND EXISTS "$ENV{FUNCHOOK_SOURCE}/CMakeLists.txt")
     set(FETCHCONTENT_SOURCE_DIR_FUNCHOOK "$ENV{FUNCHOOK_SOURCE}" CACHE PATH "")
 endif()
-FetchContent_Declare(funchook
+
+FetchContent_Declare(
+    funchook
     GIT_REPOSITORY https://github.com/kubo/funchook.git
-    GIT_TAG v1.1.3 GIT_SHALLOW TRUE
-    UPDATE_DISCONNECTED TRUE)
+    GIT_TAG v1.1.3
+    GIT_SHALLOW TRUE
+    UPDATE_DISCONNECTED TRUE
+)
+
 FetchContent_MakeAvailable(funchook)
 
 set(SDK_SOURCES
@@ -117,7 +140,8 @@ set(SDK_SOURCES
     ${MMS}/core/sourcehook/sourcehook_impl_cproto.cpp
 )
 
-add_library(BotController SHARED
+add_library(
+    BotController SHARED
     src/plugin.cpp
     src/WeaponLocker/WeaponLocker.cpp
     src/WeaponLocker/WeaponLockerState.cpp
@@ -140,7 +164,9 @@ add_library(BotController SHARED
     ${SDK_SOURCES}
 )
 
-target_include_directories(BotController PRIVATE
+target_include_directories(
+    BotController
+    PRIVATE
     src
     src/common
     src/WeaponLocker
@@ -152,7 +178,9 @@ target_include_directories(BotController PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party
     ${GENERATED_DIR}
     ${HL2SDK}/thirdparty/protobuf-3.21.8/src
-    ${MMS}/core ${MMS}/core/sourcehook ${MMS}/core/sourcemm
+    ${MMS}/core
+    ${MMS}/core/sourcehook
+    ${MMS}/core/sourcemm
     ${HL2SDK}/public
     ${HL2SDK}/public/engine
     ${HL2SDK}/public/game/server
@@ -166,8 +194,14 @@ target_include_directories(BotController PRIVATE
 
 target_link_libraries(BotController PRIVATE funchook-static)
 
-target_compile_definitions(BotController PRIVATE
-    META_IS_SOURCE2 PLATFORM_64BITS X64BITS GOOGLE_PROTOBUF_NO_RTTI)
+target_compile_definitions(
+    BotController
+    PRIVATE
+    META_IS_SOURCE2
+    PLATFORM_64BITS
+    X64BITS
+    GOOGLE_PROTOBUF_NO_RTTI
+)
 
 if(WIN32)
     set(BC_PLATFORM_DIR win64)
@@ -175,7 +209,9 @@ if(WIN32)
     set(HL2SDK_LIBDIR ${HL2SDK}/lib/public/win64)
     # MSVC has no <byteswap.h> clash, so tier1 goes on the normal include path
     target_include_directories(BotController PRIVATE ${HL2SDK}/public/tier1)
-    target_link_libraries(BotController PRIVATE
+    target_link_libraries(
+        BotController
+        PRIVATE
         psapi
         ${HL2SDK_LIBDIR}/tier0.lib
         ${HL2SDK_LIBDIR}/mathlib.lib
@@ -183,17 +219,25 @@ if(WIN32)
         ${HL2SDK_LIBDIR}/2015/libprotobuf.lib
     )
     target_link_options(BotController PRIVATE /NODEFAULTLIB:LIBCMTD)
-    target_compile_definitions(BotController PRIVATE
+    target_compile_definitions(
+        BotController
+        PRIVATE
         _CRT_SECURE_NO_WARNINGS
-        WIN32 _WIN32 _WINDOWS
-        COMPILER_MSVC COMPILER_MSVC64
-        NOMINMAX _ALLOW_KEYWORD_MACROS
+        WIN32
+        _WIN32
+        _WINDOWS
+        COMPILER_MSVC
+        COMPILER_MSVC64
+        NOMINMAX
+        _ALLOW_KEYWORD_MACROS
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(BC_PLATFORM_DIR linuxsteamrt64)
     set(BC_SUFFIX ".so")
     set(HL2SDK_LIBDIR ${HL2SDK}/lib/linux64)
-    target_link_libraries(BotController PRIVATE
+    target_link_libraries(
+        BotController
+        PRIVATE
         ${HL2SDK_LIBDIR}/libtier0.so
         ${HL2SDK_LIBDIR}/mathlib.a
         ${HL2SDK_LIBDIR}/interfaces.a
@@ -201,8 +245,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pthread
         dl
     )
-    target_compile_definitions(BotController PRIVATE
-        POSIX _LINUX LINUX
+    target_compile_definitions(
+        BotController
+        PRIVATE
+        POSIX
+        _LINUX
+        LINUX
         COMPILER_GCC
         _GLIBCXX_USE_CXX11_ABI=0
         stricmp=strcasecmp
@@ -214,7 +262,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         _alloca=alloca
         strcmpi=strcasecmp
     )
-    target_compile_options(BotController PRIVATE
+    target_compile_options(
+        BotController
+        PRIVATE
         -fPIC
         -fno-rtti
         -fvisibility=hidden
@@ -226,7 +276,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         -Wno-narrowing
         -Wno-deprecated-copy
     )
-    set_target_properties(BotController PROPERTIES
+    set_target_properties(
+        BotController
+        PROPERTIES
         SKIP_BUILD_RPATH TRUE
         BUILD_RPATH ""
         INSTALL_RPATH ""
@@ -234,15 +286,19 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()
+
 set(BC_PACKAGE_BIN_DIR "${CMAKE_BINARY_DIR}/package/addons/BotController/bin/${BC_PLATFORM_DIR}")
 set(BC_VDF_FILE "addons/BotController/bin/${BC_PLATFORM_DIR}/BotController")
+
 configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/BotController.vdf.in"
     "${CMAKE_BINARY_DIR}/BotController.vdf"
     @ONLY
 )
 
-set_target_properties(BotController PROPERTIES
+set_target_properties(
+    BotController
+    PROPERTIES
     OUTPUT_NAME "BotController"
     PREFIX ""
     SUFFIX "${BC_SUFFIX}"
@@ -255,7 +311,9 @@ set_target_properties(BotController PROPERTIES
 )
 
 # Stage vdf into addons/metamod + gamedata.json into addons/BotController
-add_custom_command(TARGET BotController POST_BUILD
+add_custom_command(
+    TARGET BotController
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "${CMAKE_BINARY_DIR}/package/addons/metamod"
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -269,6 +327,17 @@ add_custom_command(TARGET BotController POST_BUILD
 )
 
 if(MSVC)
-    target_compile_options(BotController PRIVATE
-        /utf-8 /W3 /permissive- /wd4819 /wd4267 /wd4244 /wd4146 /wd4996 /wd4661)
+    target_compile_options(
+        BotController
+        PRIVATE
+        /utf-8
+        /W3
+        /permissive-
+        /wd4819
+        /wd4267
+        /wd4244
+        /wd4146
+        /wd4996
+        /wd4661
+    )
 endif()

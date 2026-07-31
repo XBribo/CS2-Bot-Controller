@@ -7,31 +7,29 @@
 class IVEngineServer2;
 class ISource2GameClients;
 
-namespace BotController
+namespace BotController {
+// Mirror BotControllerApi.LockKind on the C# side.
+enum class LockKind : int
 {
-    // Mirror BotControllerApi.LockKind on the C# side.
-    enum class LockKind : int
-    {
-        All = 0,
-        Aim = 1,
-        Weapon = 2,
-        Jump = 3,
-    };
+    All = 0,
+    Aim = 1,
+    Weapon = 2,
+    Jump = 3,
+};
 
-    namespace Dispatch
-    {
-        extern IVEngineServer2 *g_pEngine;
-        // Server-side console command executor; runs "buy" for a bot slot.
-        extern ISource2GameClients *g_pGameClients;
+namespace Dispatch {
+extern IVEngineServer2* g_pEngine;
+// Server-side console command executor; runs "buy" for a bot slot.
+extern ISource2GameClients* g_pGameClients;
 
-        // arg = LockTarget int for Weapon kind. quiet skips DebugLine.
-        int Lock(int slot, LockKind kind, int arg, bool quiet = false);
+// arg = LockTarget int for Weapon kind. quiet skips DebugLine.
+int Lock(int slot, LockKind kind, int arg, bool quiet = false);
 
-        int Unlock(int slot, LockKind kind, bool quiet = false);
+int Unlock(int slot, LockKind kind, bool quiet = false);
 
-        int UnlockAll(LockKind kind, bool quiet = false);
+int UnlockAll(LockKind kind, bool quiet = false);
 
-        // 1 if All/Aim/Jump locked; Weapon returns LockTarget int.
-        int IsLocked(int slot, LockKind kind);
-    }
-}
+// 1 if All/Aim/Jump locked; Weapon returns LockTarget int.
+int IsLocked(int slot, LockKind kind);
+} // namespace Dispatch
+} // namespace BotController

@@ -7,29 +7,26 @@
 #include <nlohmann/json.hpp>
 #include "sig_scan.h"
 
-namespace BotController
-{
-    namespace BotControllerHooks
-    {
-        // Resolve sigs and install detours.
-        bool Install(const nlohmann::json &gd, const Sig::ModuleInfo &serverModule,
-                     char *errorOut, size_t errorOutLen);
+namespace BotController {
+namespace BotControllerHooks {
+// Resolve sigs and install detours.
+bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
 
-        // Disable + remove detours.
-        void Remove();
+// Disable + remove detours.
+void Remove();
 
-        const char *Status();
+const char* Status();
 
-        void *UpdateAddress();
-        void *UpkeepAddress();
-        void *JumpAddress();
-        void *UpdateLookAnglesAddress();
+void* UpdateAddress();
+void* UpkeepAddress();
+void* JumpAddress();
+void* UpdateLookAnglesAddress();
 
-        // Publishes replay-owned eye angles through the current engine path.
-        bool ApplyReplayEyeAngles(void *pawn, float pitch, float yaw);
+// Publishes replay-owned eye angles through the current engine path.
+bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw);
 
-        // Last CCSBot* seen in Update for this slot, or nullptr. Used to read
-        // the bot's BotProfile by slot.
-        void *BotForSlot(int slot);
-    }
-}
+// Last CCSBot* seen in Update for this slot, or nullptr. Used to read
+// the bot's BotProfile by slot.
+void* BotForSlot(int slot);
+} // namespace BotControllerHooks
+} // namespace BotController

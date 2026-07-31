@@ -7,50 +7,47 @@
 #include <nlohmann/json.hpp>
 #include "sig_scan.h"
 
-namespace BotController
-{
-    namespace WeaponLockerHooks
-    {
-        // Sentinel def index meaning any knife
-        constexpr int kKnifeDef = 9001;
+namespace BotController {
+namespace WeaponLockerHooks {
+// Sentinel def index meaning any knife
+constexpr int kKnifeDef = 9001;
 
-        bool Install(const nlohmann::json &gd, const Sig::ModuleInfo &serverModule,
-                     char *errorOut, size_t errorOutLen);
+bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
 
-        void Remove();
+void Remove();
 
-        const char *Status();
+const char* Status();
 
-        void *EquipBestWeaponAddress();
-        void *EquipPistolAddress();
-        void *SelectItemAddress();
-        void *GetSlotAddress();
+void* EquipBestWeaponAddress();
+void* EquipPistolAddress();
+void* SelectItemAddress();
+void* GetSlotAddress();
 
-        // Force bot at `slot` to its locked weapon
-        // Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed
-        int SwitchToLockTarget(int slot, bool quiet = false);
+// Force bot at `slot` to its locked weapon
+// Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed
+int SwitchToLockTarget(int slot, bool quiet = false);
 
-        // ---- helpers for MotionRecorder ----
+// ---- helpers for MotionRecorder ----
 
-        // True once GetSlot + SelectItem are resolved and hooks installed
-        bool WeaponHooksReady();
+// True once GetSlot + SelectItem are resolved and hooks installed
+bool WeaponHooksReady();
 
-        // Read a weapon's item-definition index (weapon+0x9E0). -1 if null
-        int ReadDefIndex(void *weapon);
+// Read a weapon's item-definition index (weapon+0x9E0). -1 if null
+int ReadDefIndex(void* weapon);
 
-        // Entity index of a weapon (identity ehandle low bits). -1 if null
-        int WeaponEntIndex(void *weapon);
+// Entity index of a weapon (identity ehandle low bits). -1 if null
+int WeaponEntIndex(void* weapon);
 
-        // Active weapon's def index for a WeaponServices*. -1 if none/unresolved
-        int ActiveWeaponDef(void *ws);
+// Active weapon's def index for a WeaponServices*. -1 if none/unresolved
+int ActiveWeaponDef(void* ws);
 
-        // First weapon in slots 0..4 whose def index == def
-        void *FindWeaponByDef(void *ws, int def);
+// First weapon in slots 0..4 whose def index == def
+void* FindWeaponByDef(void* ws, int def);
 
-        // Switch via the original SelectItem
-        bool SelectWeaponRaw(void *ws, void *weapon);
+// Switch via the original SelectItem
+bool SelectWeaponRaw(void* ws, void* weapon);
 
-        // Cached WeaponServices* for a bot slot
-        void *WsForSlot(int slot);
-    }
-}
+// Cached WeaponServices* for a bot slot
+void* WsForSlot(int slot);
+} // namespace WeaponLockerHooks
+} // namespace BotController

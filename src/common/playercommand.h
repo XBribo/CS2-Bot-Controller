@@ -10,20 +10,20 @@ class CInButtonState
 {
     virtual void Schema_DynamicBinding_Unused() {} // keep vtable slot, do not call
 
-public:
+  public:
     uint64_t m_pButtonStates[3];
 };
 
 // Leading host block: vptr + cmdNum + pad
 class CUserCmdBase
 {
-public:
+  public:
     int cmdNum;
     uint8_t unk[4];
 
     virtual ~CUserCmdBase();
 
-private:
+  private:
     virtual void unk0();
     virtual void unk1();
     virtual void unk2();
@@ -34,8 +34,7 @@ private:
 };
 
 // Brings the protobuf message in as a base, not a member.
-template <typename T>
-class CUserCmdBaseHost : public CUserCmdBase, public T
+template <typename T> class CUserCmdBaseHost : public CUserCmdBase, public T
 {
 };
 
@@ -45,17 +44,17 @@ class CUserCmd : public CUserCmdBaseHost<CSGOUserCmdPB>
 
 class CUserCmdExtended : public CUserCmd
 {
-public:
+  public:
     CInButtonState buttonstates;
     uint32_t unknown; // not part of the player message
 };
 
 class PlayerCommand : public CUserCmdExtended
 {
-public:
+  public:
     uint32_t flags;
-    PlayerCommand *unknowncmd;
-    PlayerCommand *parentcmd;
+    PlayerCommand* unknowncmd;
+    PlayerCommand* parentcmd;
 };
 
 #ifndef _WIN32

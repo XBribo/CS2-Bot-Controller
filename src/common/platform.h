@@ -4,10 +4,9 @@
 
 #include <string>
 
-namespace BotController
-{
-    // Windows: OutputDebugStringA; Linux: no-op
-    void DebugOut(const char *msg);
-    // Absolute path of this shared library on disk; empty on failure
-    std::string SelfModulePath();
-}
+namespace BotController {
+// Windows: OutputDebugStringA; Linux: no-op
+void DebugOut(const char* msg);
+// Absolute path of this shared library on disk; empty on failure
+std::string SelfModulePath();
+} // namespace BotController
