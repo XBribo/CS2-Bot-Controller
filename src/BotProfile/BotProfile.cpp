@@ -20,7 +20,7 @@ bool ReadProfile(int slot, BotProfileData& out)
     if (CCSBotToSlot(bot) != slot) return false;
 
     void* prof = nullptr;
-    if (!SafeRead(bot, tg::kBot_Profile, prof)) return false;
+    if (!GuardedRead(bot, tg::kBot_Profile, prof)) return false;
     if (!prof) return false;
 
     std::memset(&out, 0, sizeof(out));

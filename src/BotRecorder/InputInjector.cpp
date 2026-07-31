@@ -103,7 +103,7 @@ static bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
 static void* ServicesToPawnField(void* services)
 {
     void* pawn = nullptr;
-    return SafeRead(services, tg::kServices_Pawn, pawn) ? pawn : nullptr;
+    return GuardedRead(services, tg::kServices_Pawn, pawn) ? pawn : nullptr;
 }
 
 // Verifies that a pawn currently owns the supplied movement services.
@@ -111,7 +111,7 @@ static bool PawnOwnsServices(void* pawn, void* services)
 {
     if (!pawn || !services) return false;
     void* liveServices = nullptr;
-    return SafeRead(pawn, tg::kPawn_MovementServices, liveServices) && liveServices == services;
+    return GuardedRead(pawn, tg::kPawn_MovementServices, liveServices) && liveServices == services;
 }
 
 // Registers a readable pawn whose current owner matches the requested slot.
@@ -123,7 +123,8 @@ bool SetReplayPawn(int slot, void* pawn)
 
     void* identity = nullptr;
     uint32_t handle = 0;
-    if (!SafeRead(pawn, tg::kEnt_Identity, identity) || !identity || !SafeRead(identity, tg::kEntIdentity_EHandle, handle) ||
+    if (!GuardedRead(pawn, tg::kEnt_Identity, identity) || !identity ||
+        !GuardedRead(identity, tg::kEntIdentity_EHandle, handle) ||
         handle == 0u || handle == 0xFFFFFFFFu)
         return false;
 
@@ -203,7 +204,7 @@ static void* ServicesToWeaponServices(int slot, void* services)
     void* pawn = ResolveReplayPawn(slot, services);
     if (!pawn) return nullptr;
     void* weaponServices = nullptr;
-    return SafeRead(pawn, tg::kPawn_WeaponServices, weaponServices) ? weaponServices : nullptr;
+    return GuardedRead(pawn, tg::kPawn_WeaponServices, weaponServices) ? weaponServices : nullptr;
 }
 
 static float NormalizeDeg(float a)
@@ -543,15 +544,15 @@ static void EnsureVtableHooks(void* services)
     if (g_vtHooksTried.exchange(true, std::memory_order_acq_rel)) return;
     if (!services) return;
     void** vt = nullptr;
-    if (!SafeRead(services, 0, vt) || !vt) return;
+    if (!GuardedRead(services, 0, vt) || !vt) return;
 
-    if (!SafeRead(vt, tg::kVtIdx_FinishMove * static_cast<int>(sizeof(void*)), g_addrFinishMove)) g_addrFinishMove = nullptr;
+    if (!GuardedRead(vt, tg::kVtIdx_FinishMove * static_cast<int>(sizeof(void*)), g_addrFinishMove)) g_addrFinishMove = nullptr;
     if (g_addrFinishMove &&
         g_hookFinishMove.Create(g_addrFinishMove, reinterpret_cast<void*>(&HookedFinishMove), reinterpret_cast<void**>(&g_origFinishMove)))
         g_hookFinishMove.Enable();
 
     // PlayerRunCommand (subtick record/re-inject)
-    if (!SafeRead(vt, tg::kVtIdx_PlayerRunCommand * static_cast<int>(sizeof(void*)), g_addrPlayerRunCommand))
+    if (!GuardedRead(vt, tg::kVtIdx_PlayerRunCommand * static_cast<int>(sizeof(void*)), g_addrPlayerRunCommand))
         g_addrPlayerRunCommand = nullptr;
     if (g_addrPlayerRunCommand &&
         g_hookPlayerRunCommand.Create(g_addrPlayerRunCommand, reinterpret_cast<void*>(&HookedPlayerRunCommand),

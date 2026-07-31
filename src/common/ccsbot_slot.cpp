@@ -18,6 +18,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <unistd.h>
 #endif
 
 namespace tg = BotController::targets;
@@ -41,7 +45,7 @@ static int SlotFromEntityIndex(int idx)
     return idx - 1;
 }
 
-// Reads an engine field and converts access violations into a failed lookup.
+// Reads an engine field and converts Windows access violations into failure
 bool TryReadMemory(const void* base, int offset, void* out, size_t size)
 {
     if (!base || !out || offset < 0 || size == 0) return false;
@@ -65,7 +69,7 @@ bool TryReadMemory(const void* base, int offset, void* out, size_t size)
     return true;
 }
 
-// Writes an engine field and converts access violations into a failed update.
+// Writes an engine field and converts Windows access violations into failure
 bool TryWriteMemory(void* base, int offset, const void* value, size_t size)
 {
     if (!base || !value || offset < 0 || size == 0) return false;
@@ -89,6 +93,42 @@ bool TryWriteMemory(void* base, int offset, const void* value, size_t size)
     return true;
 }
 
+// Reads untrusted memory without allowing an invalid page to terminate the server
+bool TryReadMemoryGuarded(const void* base, int offset, void* out, size_t size)
+{
+#if defined(_WIN32)
+    return TryReadMemory(base, offset, out, size);
+#else
+    if (!base || !out || offset < 0 || size == 0) return false;
+
+    const auto baseAddress = reinterpret_cast<uintptr_t>(base);
+    const auto address = baseAddress + static_cast<uintptr_t>(offset);
+    if (address < 0x10000u || address < baseAddress || address + size < address) return false;
+
+    struct iovec local{ out, size };
+    struct iovec remote{ reinterpret_cast<void*>(address), size };
+    return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+#endif
+}
+
+// Writes untrusted memory without allowing an invalid page to terminate the server
+bool TryWriteMemoryGuarded(void* base, int offset, const void* value, size_t size)
+{
+#if defined(_WIN32)
+    return TryWriteMemory(base, offset, value, size);
+#else
+    if (!base || !value || offset < 0 || size == 0) return false;
+
+    const auto baseAddress = reinterpret_cast<uintptr_t>(base);
+    const auto address = baseAddress + static_cast<uintptr_t>(offset);
+    if (address < 0x10000u || address < baseAddress || address + size < address) return false;
+
+    struct iovec local{ const_cast<void*>(value), size };
+    struct iovec remote{ reinterpret_cast<void*>(address), size };
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(size);
+#endif
+}
+
 PawnControllerHandles ReadPawnControllerHandles(void* pawn)
 {
     PawnControllerHandles out{};
@@ -99,8 +139,8 @@ PawnControllerHandles ReadPawnControllerHandles(void* pawn)
 
     if (!pawn) return out;
 
-    if (!SafeRead(pawn, tg::kPawn_Controller, out.controllerHandle) ||
-        !SafeRead(pawn, tg::kPawn_OriginalController, out.originalControllerHandle))
+    if (!GuardedRead(pawn, tg::kPawn_Controller, out.controllerHandle) ||
+        !GuardedRead(pawn, tg::kPawn_OriginalController, out.originalControllerHandle))
         return out;
     out.controllerIndex = EntIndexFromHandle(out.controllerHandle);
     out.originalControllerIndex = EntIndexFromHandle(out.originalControllerHandle);
@@ -116,7 +156,7 @@ static void ScanPawnForControllerHandle(void* pawn)
     for (int off = 0x8; off < 0x1000; off += 4)
     {
         uint32_t v = 0;
-        if (!SafeRead(pawn, off, v)) continue;
+        if (!GuardedRead(pawn, off, v)) continue;
         if (v == 0u || v == 0xFFFFFFFFu) continue;
         int idx = static_cast<int>(v & 0x7FFFu);
         uint32_t serial = (v >> 15);
@@ -130,16 +170,16 @@ SlotResolution ResolveSlot(void* bot)
     if (!bot) return out;
 
     void* pawn = nullptr;
-    if (!SafeRead(bot, tg::kBot_Pawn, pawn)) return out;
+    if (!GuardedRead(bot, tg::kBot_Pawn, pawn)) return out;
     if (!pawn) return out;
     out.pawn = pawn;
 
     void* identity = nullptr;
-    if (!SafeRead(pawn, tg::kEnt_Identity, identity)) return out;
+    if (!GuardedRead(pawn, tg::kEnt_Identity, identity)) return out;
     if (!identity) return out;
 
     uint32_t handle = 0;
-    if (!SafeRead(identity, tg::kEntIdentity_EHandle, handle)) return out;
+    if (!GuardedRead(identity, tg::kEntIdentity_EHandle, handle)) return out;
     out.pawnEntIndex = EntIndexFromHandle(handle);
     if (out.pawnEntIndex <= 0) return out;
 
@@ -163,7 +203,7 @@ SlotResolution ResolveSlotFromBotOrContext(void* botOrContext)
     if (direct.slot >= 0) return direct;
 
     void* bot = nullptr;
-    if (!SafeRead(botOrContext, 0x10, bot)) return direct;
+    if (!GuardedRead(botOrContext, 0x10, bot)) return direct;
 
     SlotResolution viaContext = ResolveSlot(bot);
     return viaContext.slot >= 0 ? viaContext : direct;
@@ -184,10 +224,10 @@ int ControllerToSlot(void* controller)
 {
     if (!controller) return -1;
     void* identity = nullptr;
-    if (!SafeRead(controller, tg::kEnt_Identity, identity)) return -1;
+    if (!GuardedRead(controller, tg::kEnt_Identity, identity)) return -1;
     if (!identity) return -1;
     uint32_t h = 0;
-    if (!SafeRead(identity, tg::kEntIdentity_EHandle, h)) return -1;
+    if (!GuardedRead(identity, tg::kEntIdentity_EHandle, h)) return -1;
     int idx = EntIndexFromHandle(h);
     if (idx < 1 || idx > 64) return -1;
     return idx - 1;

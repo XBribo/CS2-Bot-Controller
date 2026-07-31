@@ -94,10 +94,10 @@ static bool WriteVector3(void* base, int offset, float x, float y, float z)
 static void* ResolveSceneNode(void* entity)
 {
     void* body = nullptr;
-    if (!SafeRead(entity, tg::kEnt_BodyComponent, body) || !body) return nullptr;
+    if (!GuardedRead(entity, tg::kEnt_BodyComponent, body) || !body) return nullptr;
 
     void* node = nullptr;
-    return SafeRead(body, tg::kBody_SceneNode, node) ? node : nullptr;
+    return GuardedRead(body, tg::kBody_SceneNode, node) ? node : nullptr;
 }
 
 // Read a MovementSnapshot from live engine state (services -> pawn).
@@ -567,7 +567,8 @@ static void WriteSceneNodeOrigin(int slot, void* services, const MovementSnapsho
     void* node = ResolveSceneNode(pawn);
     if (!node) return;
 
-    WriteVector3(node, tg::kNode_AbsOrigin, s.originX, s.originY, s.originZ + zBias);
+    const float values[3] = { s.originX, s.originY, s.originZ + zBias };
+    TryWriteMemoryGuarded(node, tg::kNode_AbsOrigin, values, sizeof(values));
 }
 
 // Write origin + velocity into CMoveData.

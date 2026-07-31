@@ -39,11 +39,17 @@ SlotResolution ResolveSlotFromBotOrContext(void* botOrContext);
 // Returns a player slot from a CCSBot pointer or helper context.
 int CCSBotContextToSlot(void* botOrContext);
 
-// Reads engine memory without allowing an invalid pointer to crash Windows.
+// Reads engine memory with Windows SEH and a direct Linux fast path
 bool TryReadMemory(const void* base, int offset, void* out, size_t size);
 
-// Writes engine memory without allowing an invalid pointer to crash Windows.
+// Writes engine memory with Windows SEH and a direct Linux fast path
 bool TryWriteMemory(void* base, int offset, const void* value, size_t size);
+
+// Reads an untrusted engine address through platform fault protection
+bool TryReadMemoryGuarded(const void* base, int offset, void* out, size_t size);
+
+// Writes an untrusted engine address through platform fault protection
+bool TryWriteMemoryGuarded(void* base, int offset, const void* value, size_t size);
 
 // Reads a field into a temporary and publishes it only after full success
 template <typename T> bool SafeRead(const void* base, int offset, T& out)
@@ -51,6 +57,16 @@ template <typename T> bool SafeRead(const void* base, int offset, T& out)
     static_assert(std::is_trivially_copyable_v<T>);
     alignas(T) std::byte value[sizeof(T)]{};
     if (!TryReadMemory(base, offset, value, sizeof(T))) return false;
+    std::memcpy(&out, value, sizeof(T));
+    return true;
+}
+
+// Reads an untrusted field and publishes it only after full success
+template <typename T> bool GuardedRead(const void* base, int offset, T& out)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    alignas(T) std::byte value[sizeof(T)]{};
+    if (!TryReadMemoryGuarded(base, offset, value, sizeof(T))) return false;
     std::memcpy(&out, value, sizeof(T));
     return true;
 }

@@ -248,6 +248,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
         BotController
         PRIVATE
+        _GNU_SOURCE
         POSIX
         _LINUX
         LINUX

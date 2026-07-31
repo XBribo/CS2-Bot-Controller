@@ -69,10 +69,10 @@ static void RememberWsForBot(void* bot, int slot)
 {
     if (!bot || slot < 0 || slot >= 64) return;
     void* pawn = nullptr;
-    if (!SafeRead(bot, tg::kBot_Pawn, pawn)) return;
+    if (!GuardedRead(bot, tg::kBot_Pawn, pawn)) return;
     if (!pawn) return;
     void* ws = nullptr;
-    if (!SafeRead(pawn, tg::kPawn_WeaponServices, ws)) return;
+    if (!GuardedRead(pawn, tg::kPawn_WeaponServices, ws)) return;
     if (!ws) return;
     std::lock_guard<std::mutex> lk(g_wsToSlotMu);
     g_wsToBinding[ws] = { slot, pawn };
@@ -317,7 +317,7 @@ static int EntIndexOf(void* entity)
 {
     if (!entity) return -1;
     void* identity = nullptr;
-    if (!SafeRead(entity, tg::kEnt_Identity, identity)) return -1;
+    if (!GuardedRead(entity, tg::kEnt_Identity, identity)) return -1;
     if (!identity) return -1;
     uint32_t h = 0;
     if (!SafeRead(identity, tg::kEntIdentity_EHandle, h)) return -1;

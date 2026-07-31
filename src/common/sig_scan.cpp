@@ -250,7 +250,7 @@ ModuleInfo ModuleFromInterfacePtr(void* interfacePtr)
 {
     if (!interfacePtr) return {};
     void* vtable = nullptr;
-    if (!SafeRead(interfacePtr, 0, vtable) || !vtable) return {};
+    if (!GuardedRead(interfacePtr, 0, vtable) || !vtable) return {};
 
 #if defined(_WIN32)
     MEMORY_BASIC_INFORMATION mbi{};
