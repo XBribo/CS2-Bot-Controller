@@ -441,7 +441,7 @@
   "vtidx::FinishMove": {
     "offsets": {
       "windows": 38,
-      "linux": 40
+      "linux": 39
     },
     "comment": "CCSPlayer_MovementServices vtable index."
   }

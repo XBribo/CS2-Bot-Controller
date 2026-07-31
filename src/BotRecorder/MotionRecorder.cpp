@@ -633,11 +633,7 @@ void OnReplayFinishMove(int slot, void* services, void* moveData)
         t = p.ticks[cur];
     }
     WriteMoveData(moveData, t.post);
-#if defined(_WIN32)
     WriteSceneNodeOrigin(slot, services, t.post, 1000.0f);
-#else
-    WriteSceneNodeOrigin(slot, services, t.post);
-#endif
 }
 
 void OnReplayCommit(int slot, void* services)
