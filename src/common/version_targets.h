@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 #include <nlohmann/json.hpp>
 
 namespace BotController::targets {
@@ -117,5 +119,8 @@ inline int kVtIdx_PlayerRunCommand = 25;
 inline int kVtIdx_FinishMove = 38;
 
 void LoadFromGamedata(const nlohmann::json& gd);
+
+// Resolves every required Schema-backed target or reports the first failure
+bool LoadFromSchema(char* errorOut, size_t errorOutLen);
 
 } // namespace BotController::targets

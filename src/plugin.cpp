@@ -26,6 +26,7 @@
 #include "BotControllerState.h"
 #include "commands.h"
 #include "sig_scan.h"
+#include "schema_resolver.h"
 #include "platform.h"
 #include "version_targets.h"
 
@@ -74,6 +75,19 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     if (!g_pCVar)
     {
         std::snprintf(error, maxlen, "Failed to get ICvar (%s) via engine factory", CVAR_INTERFACE_VERSION);
+        return false;
+    }
+
+    char schemaError[256] = { 0 };
+    if (!BotController::Schema::Init(schemaError, sizeof(schemaError)))
+    {
+        std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
+        return false;
+    }
+    if (!BotController::targets::LoadFromSchema(schemaError, sizeof(schemaError)))
+    {
+        BotController::Schema::Reset();
+        std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
         return false;
     }
     ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL);
@@ -134,7 +148,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         return false;
     }
 
-    // offsets first (hooks/detours read tg::k* at runtime)
+    // Resolve non-Schema offsets before installing hooks that read targets
     BotController::targets::LoadFromGamedata(gd);
 
     if (!BotController::WeaponLockerHooks::Install(gd, serverModule, error, maxlen)) return false;
@@ -189,6 +203,7 @@ bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     BotController::Dispatch::g_pGameClients = nullptr;
     BotController::VoiceSender::SetInterfaces(nullptr, nullptr);
     BotController::Commands::g_pEngine = nullptr;
+    BotController::Schema::Reset();
     ConVar_Unregister();
     g_pCVar = nullptr;
     BotController::DebugOut("[BotController] plugin unloaded\n");
