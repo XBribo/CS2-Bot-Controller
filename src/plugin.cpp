@@ -46,7 +46,7 @@ class BotControllerPlugin : public ISmmPlugin
     const char* GetDescription() override { return "Record & Replay and Lock CS2 bots."; }
     const char* GetURL() override { return ""; }
     const char* GetLicense() override { return "AGPL-3.0"; }
-    const char* GetVersion() override { return "0.5.6"; }
+    const char* GetVersion() override { return "0.6.0"; }
     const char* GetDate() override { return __DATE__; }
     const char* GetLogTag() override { return "BC"; }
 };
@@ -187,7 +187,6 @@ bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     BotController::WeaponLockerState::ClearAll();
     BotController::BotControllerState::ClearAllAll();
     BotController::BotControllerState::ClearAllAim();
-    BotController::BotControllerState::ClearAllJump();
     BotController::Dispatch::g_pEngine = nullptr;
     BotController::Dispatch::g_pGameClients = nullptr;
     BotController::VoiceSender::SetInterfaces(nullptr, nullptr);

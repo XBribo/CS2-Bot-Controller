@@ -2,7 +2,7 @@
 
 ## Technical Overview
 
-Current ABI: `16`
+Current ABI: `17`
 
 ------------------------------------------------------------------------
 
@@ -41,7 +41,6 @@ Current `dist/` layout:
 
 - `Weapon` — pin a bot to one weapon slot; AI weapon switching is blocked
 - `Aim` — freeze `CCSBot::Upkeep`; the bot can still move and decide
-- `Jump` — block `CCSBot::Jump` only
 - `All` — freeze both `CCSBot::Update` and `CCSBot::Upkeep`
 
 ------------------------------------------------------------------------

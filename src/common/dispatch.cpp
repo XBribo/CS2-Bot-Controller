@@ -15,7 +15,7 @@ IVEngineServer2* g_pEngine = nullptr;
 ISource2GameClients* g_pGameClients = nullptr;
 
 // Set lock; Weapon also triggers a one-shot switch.
-int Lock(int slot, LockKind kind, int arg, bool quiet)
+int Lock(int slot, LockKind kind, int arg)
 {
     if (MotionRecorder::IsReplaying(slot)) return -3;
 
@@ -37,20 +37,15 @@ int Lock(int slot, LockKind kind, int arg, bool quiet)
             const auto tgt = static_cast<LockTarget>(arg);
             if (tgt == LockTarget::None) return -2;
             WeaponLockerState::Set(slot, tgt);
-            (void)WeaponLockerHooks::SwitchToLockTarget(slot, quiet);
+            (void)WeaponLockerHooks::SwitchToLockTarget(slot);
             return 0;
         }
-
-        case LockKind::Jump:
-            if (slot < 0 || slot >= BotControllerState::kMaxSlots) return -2;
-            BotControllerState::SetJump(slot, true);
-            return 0;
     }
     return -2;
 }
 
 // Clear the per-kind lock for this slot.
-int Unlock(int slot, LockKind kind, bool /*quiet*/)
+int Unlock(int slot, LockKind kind)
 {
     switch (kind)
     {
@@ -68,17 +63,12 @@ int Unlock(int slot, LockKind kind, bool /*quiet*/)
             if (slot < 0 || slot >= WeaponLockerState::kMaxSlots) return -2;
             WeaponLockerState::Clear(slot);
             return 0;
-
-        case LockKind::Jump:
-            if (slot < 0 || slot >= BotControllerState::kMaxSlots) return -2;
-            BotControllerState::SetJump(slot, false);
-            return 0;
     }
     return -2;
 }
 
 // Clear every slot under kind.
-int UnlockAll(LockKind kind, bool /*quiet*/)
+int UnlockAll(LockKind kind)
 {
     switch (kind)
     {
@@ -90,9 +80,6 @@ int UnlockAll(LockKind kind, bool /*quiet*/)
             return 0;
         case LockKind::Weapon:
             WeaponLockerState::ClearAll();
-            return 0;
-        case LockKind::Jump:
-            BotControllerState::ClearAllJump();
             return 0;
     }
     return -2;
@@ -109,8 +96,6 @@ int IsLocked(int slot, LockKind kind)
             return BotControllerState::GetAim(slot) ? 1 : 0;
         case LockKind::Weapon:
             return static_cast<int>(WeaponLockerState::Get(slot));
-        case LockKind::Jump:
-            return BotControllerState::GetJump(slot) ? 1 : 0;
     }
     return 0;
 }

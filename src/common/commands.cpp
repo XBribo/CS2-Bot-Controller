@@ -60,11 +60,6 @@ static bool ParseKind(const char* s, LockKind& out)
         out = LockKind::Weapon;
         return true;
     }
-    if (std::strcmp(s, "jump") == 0)
-    {
-        out = LockKind::Jump;
-        return true;
-    }
     return false;
 }
 
@@ -109,8 +104,6 @@ static const char* KindName(LockKind k)
             return "aim";
         case LockKind::Weapon:
             return "weapon";
-        case LockKind::Jump:
-            return "jump";
     }
     return "?";
 }
@@ -118,7 +111,7 @@ static const char* KindName(LockKind k)
 } // namespace BotController
 
 CON_COMMAND_F(bc_lock,
-              "bc_lock <all|aim|jump|weapon> <slot> [slot1..slot5]  "
+              "bc_lock <all|aim|weapon> <slot> [slot1..slot5]  "
               "Lock a bot. weapon mode requires the weapon slot.",
               FCVAR_NONE)
 {
@@ -126,14 +119,14 @@ CON_COMMAND_F(bc_lock,
 
     if (args.ArgC() < 3)
     {
-        Commands::PrintToCaller(context, "usage: bc_lock <all|aim|jump|weapon> <slot> [slot1..slot5]\n");
+        Commands::PrintToCaller(context, "usage: bc_lock <all|aim|weapon> <slot> [slot1..slot5]\n");
         return;
     }
 
     LockKind kind;
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
-        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|jump|weapon\n");
+        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|weapon\n");
         return;
     }
 
@@ -171,20 +164,20 @@ CON_COMMAND_F(bc_lock,
     }
 }
 
-CON_COMMAND_F(bc_unlock, "bc_unlock <all|aim|jump|weapon> <slot>  Release one lock on a bot.", FCVAR_NONE)
+CON_COMMAND_F(bc_unlock, "bc_unlock <all|aim|weapon> <slot>  Release one lock on a bot.", FCVAR_NONE)
 {
     using namespace BotController;
 
     if (args.ArgC() < 3)
     {
-        Commands::PrintToCaller(context, "usage: bc_unlock <all|aim|jump|weapon> <slot>\n");
+        Commands::PrintToCaller(context, "usage: bc_unlock <all|aim|weapon> <slot>\n");
         return;
     }
 
     LockKind kind;
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
-        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|jump|weapon\n");
+        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|weapon\n");
         return;
     }
 
@@ -195,20 +188,20 @@ CON_COMMAND_F(bc_unlock, "bc_unlock <all|aim|jump|weapon> <slot>  Release one lo
         Commands::PrintToCaller(context, "[BC] error: unlock failed (rc=%d)\n", rc);
 }
 
-CON_COMMAND_F(bc_unlock_all, "bc_unlock_all <all|aim|jump|weapon>  Release every lock of that kind.", FCVAR_NONE)
+CON_COMMAND_F(bc_unlock_all, "bc_unlock_all <all|aim|weapon>  Release every lock of that kind.", FCVAR_NONE)
 {
     using namespace BotController;
 
     if (args.ArgC() < 2)
     {
-        Commands::PrintToCaller(context, "usage: bc_unlock_all <all|aim|jump|weapon>\n");
+        Commands::PrintToCaller(context, "usage: bc_unlock_all <all|aim|weapon>\n");
         return;
     }
 
     LockKind kind;
     if (!Commands::ParseKind(args.Arg(1), kind))
     {
-        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|jump|weapon\n");
+        Commands::PrintToCaller(context, "[BC] error: kind must be all|aim|weapon\n");
         return;
     }
 
@@ -228,8 +221,8 @@ CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock."
                             WeaponLockerHooks::EquipPistolAddress(), WeaponLockerHooks::SelectItemAddress(),
                             WeaponLockerHooks::GetSlotAddress());
 
-    Commands::PrintToCaller(context, "[BC] bot hooks:    %s | Update=%p Upkeep=%p Jump=%p\n", BotControllerHooks::Status(),
-                            BotControllerHooks::UpdateAddress(), BotControllerHooks::UpkeepAddress(), BotControllerHooks::JumpAddress());
+    Commands::PrintToCaller(context, "[BC] bot hooks:    %s | Update=%p Upkeep=%p\n", BotControllerHooks::Status(),
+                            BotControllerHooks::UpdateAddress(), BotControllerHooks::UpkeepAddress());
 
     Commands::PrintToCaller(context, "[BC] input inject: %s | ProcessUsercmd=%p\n", InputInjector::Status(),
                             InputInjector::ProcessUsercmdAddress());
@@ -283,15 +276,6 @@ CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock."
     {
         for (int s = 0; s < BotControllerState::kMaxSlots; ++s)
             if (BotControllerState::GetAim(s)) Commands::PrintToCaller(context, "[BC]   aim   slot %2d\n", s);
-    }
-
-    // Jump lock
-    int nJump = BotControllerState::CountJump();
-    Commands::PrintToCaller(context, "[BC] jump-locked count:   %d\n", nJump);
-    if (nJump > 0)
-    {
-        for (int s = 0; s < BotControllerState::kMaxSlots; ++s)
-            if (BotControllerState::GetJump(s)) Commands::PrintToCaller(context, "[BC]   jump  slot %2d\n", s);
     }
 
     // Weapon lock

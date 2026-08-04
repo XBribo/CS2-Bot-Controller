@@ -14,7 +14,6 @@ enum class LockKind : int
     All = 0,
     Aim = 1,
     Weapon = 2,
-    Jump = 3,
 };
 
 namespace Dispatch {
@@ -22,14 +21,14 @@ extern IVEngineServer2* g_pEngine;
 // Server-side console command executor; runs "buy" for a bot slot.
 extern ISource2GameClients* g_pGameClients;
 
-// arg = LockTarget int for Weapon kind. quiet is retained for API compatibility
-int Lock(int slot, LockKind kind, int arg, bool quiet = false);
+// arg = LockTarget int for Weapon kind
+int Lock(int slot, LockKind kind, int arg);
 
-int Unlock(int slot, LockKind kind, bool quiet = false);
+int Unlock(int slot, LockKind kind);
 
-int UnlockAll(LockKind kind, bool quiet = false);
+int UnlockAll(LockKind kind);
 
-// 1 if All/Aim/Jump locked; Weapon returns LockTarget int.
+// 1 if All/Aim locked; Weapon returns LockTarget int.
 int IsLocked(int slot, LockKind kind);
 } // namespace Dispatch
 } // namespace BotController

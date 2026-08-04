@@ -17,11 +17,5 @@ bool GetAim(int slot);
 void SetAim(int slot, bool locked);
 void ClearAllAim();
 int CountAim();
-
-// Jump lock: Jump only.
-bool GetJump(int slot);
-void SetJump(int slot, bool locked);
-void ClearAllJump();
-int CountJump();
 } // namespace BotControllerState
 } // namespace BotController

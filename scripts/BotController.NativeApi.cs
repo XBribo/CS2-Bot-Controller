@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 16), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 17), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -9,13 +9,11 @@ namespace BotControllerApi
     //   All    - freezes both CCSBot::Update and CCSBot::Upkeep
     //   Aim    - freezes CCSBot::Upkeep only
     //   Weapon - locks the bot's weapon to a specific engine slot
-    //   Jump   - blocks CCSBot::Jump only
     public enum LockKind
     {
         All = 0,
         Aim = 1,
         Weapon = 2,
-        Jump = 3,
     }
 
     // Engine weapon slots, mirrors BotController::LockTarget.
@@ -139,7 +137,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 16;
+        private const int ExpectedAbiVersion = 17;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -282,7 +280,7 @@ namespace BotControllerApi
 
         // ---- locks ----
 
-        // All / Aim / Jump
+        // All / Aim
         public static bool Lock(int slot, LockKind kind)
             => BotController_Lock(slot, (int)kind, 0) == 0;
 
@@ -296,7 +294,7 @@ namespace BotControllerApi
         public static bool UnlockAll(LockKind kind)
             => BotController_UnlockAll((int)kind) == 0;
 
-        // For All/Aim/Jump returns true if locked; for Weapon use GetWeaponLock.
+        // For All/Aim returns true if locked; for Weapon use GetWeaponLock.
         public static bool IsLocked(int slot, LockKind kind)
             => BotController_IsLocked(slot, (int)kind) != 0;
 

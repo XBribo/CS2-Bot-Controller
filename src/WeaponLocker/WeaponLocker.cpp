@@ -339,9 +339,7 @@ void* WsForSlot(int slot)
     return g_slotToWs[slot];
 }
 
-int SwitchToLockTarget(int slot) { return SwitchToLockTarget(slot, false); }
-
-int SwitchToLockTarget(int slot, bool /*quiet*/)
+int SwitchToLockTarget(int slot)
 {
     if (!g_installed || !g_origSelectItem || !g_pGetSlot) return 3;
     if (slot < 0 || slot >= 64) return 3;

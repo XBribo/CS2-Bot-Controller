@@ -1,4 +1,4 @@
-// CCSBot Update/Upkeep/Jump detours
+// CCSBot Update/Upkeep detours
 
 #include "BotController.h"
 #include "BotControllerState.h"
@@ -21,7 +21,6 @@ namespace tg = BotController::targets;
 
 using Update_t = void(BC_FASTCALL*)(void* bot);
 using Upkeep_t = void(BC_FASTCALL*)(void* bot);
-using Jump_t = char(BC_FASTCALL*)(void* bot, char mustJump);
 using UpdateLookAngles_t = void(BC_FASTCALL*)(void* bot);
 using SetEyeAngles_t = void(BC_FASTCALL*)(void* pawn, float* angle);
 
@@ -31,8 +30,6 @@ static Update_t g_origUpdate = nullptr;
 static void* g_addrUpdate = nullptr;
 static Upkeep_t g_origUpkeep = nullptr;
 static void* g_addrUpkeep = nullptr;
-static Jump_t g_origJump = nullptr;
-static void* g_addrJump = nullptr;
 static UpdateLookAngles_t g_origUpdateLookAngles = nullptr;
 static void* g_addrUpdateLookAngles = nullptr;
 static SetEyeAngles_t g_origSetEyeAngles = nullptr;
@@ -49,7 +46,6 @@ static std::mutex g_slotToBotMu;
 
 static Hook g_hookUpdate;
 static Hook g_hookUpkeep;
-static Hook g_hookJump;
 static Hook g_hookUpdateLookAngles;
 static Hook g_hookSetEyeAngles;
 
@@ -182,14 +178,6 @@ static void BC_FASTCALL HookedSetEyeAngles(void* pawn, float* angle)
     g_origSetEyeAngles(pawn, angle);
 }
 
-// Skip Jump under Jump lock; return 0 mimics its own gate-fail.
-static char BC_FASTCALL HookedJump(void* bot, char mustJump)
-{
-    int slot = CCSBotToSlot(bot);
-    if (slot >= 0 && BotControllerState::GetJump(slot)) return 0;
-    return g_origJump(bot, mustJump);
-}
-
 // Resolve a sig from gamedata against the loaded server.dll.
 bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
@@ -205,14 +193,6 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
     {
         g_status = "failed: Upkeep sig";
         return false;
-    }
-
-    // Jump is optional; failure leaves all/aim working, only jump dies.
-    char jumpErr[256] = { 0 };
-    g_addrJump = Sig::ResolveSig(gd, serverModule, "CCSBot::Jump", jumpErr, sizeof(jumpErr));
-    if (!g_addrJump)
-    {
-        Warning("[BotController] CCSBot::Jump sig not resolved (%s); jump-lock disabled\n", jumpErr);
     }
 
     // UpdateLookAngles is optional
@@ -262,19 +242,6 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
         return false;
     }
 
-    // optional: Jump
-    if (g_addrJump)
-    {
-        if (!g_hookJump.Create(g_addrJump, reinterpret_cast<void*>(&HookedJump), reinterpret_cast<void**>(&g_origJump)) ||
-            !g_hookJump.Enable())
-        {
-            Warning("[BotController] hook CCSBot::Jump failed; jump-lock disabled\n");
-            g_hookJump.Remove();
-            g_origJump = nullptr;
-            g_addrJump = nullptr;
-        }
-    }
-
     // optional: UpdateLookAngles
     if (g_addrUpdateLookAngles)
     {
@@ -318,8 +285,6 @@ void Remove()
 #endif
     g_hookUpdateLookAngles.Remove();
     g_origUpdateLookAngles = nullptr;
-    g_hookJump.Remove();
-    g_origJump = nullptr;
     g_hookUpkeep.Remove();
     g_origUpkeep = nullptr;
     g_hookUpdate.Remove();
@@ -336,7 +301,6 @@ void Remove()
 const char* Status() { return g_status.c_str(); }
 void* UpdateAddress() { return g_addrUpdate; }
 void* UpkeepAddress() { return g_addrUpkeep; }
-void* JumpAddress() { return g_addrJump; }
 void* UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
 
 // Publishes a replay angle without depending on the bot upkeep path.

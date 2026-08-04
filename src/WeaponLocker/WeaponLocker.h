@@ -25,7 +25,7 @@ void* GetSlotAddress();
 
 // Force bot at `slot` to its locked weapon
 // Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed
-int SwitchToLockTarget(int slot, bool quiet = false);
+int SwitchToLockTarget(int slot);
 
 // ---- helpers for MotionRecorder ----
 

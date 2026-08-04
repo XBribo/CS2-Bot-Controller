@@ -1,4 +1,4 @@
-// MinHook install/remove for CCSBot Update/Upkeep/Jump.
+// MinHook install/remove for CCSBot Update/Upkeep.
 
 #pragma once
 
@@ -19,7 +19,6 @@ const char* Status();
 
 void* UpdateAddress();
 void* UpkeepAddress();
-void* JumpAddress();
 void* UpdateLookAnglesAddress();
 
 // Publishes replay-owned eye angles through the current engine path.

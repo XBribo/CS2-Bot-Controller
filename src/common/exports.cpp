@@ -1,4 +1,4 @@
-// C-ABI exports for CounterStrikeSharp P/Invoke. quiet=true on all entries.
+// C-ABI exports for CounterStrikeSharp P/Invoke.
 
 #include "dispatch.h"
 #include "MotionRecorder.h"
@@ -19,17 +19,17 @@
 
 extern "C" BC_EXPORT int BotController_Lock(int slot, int kind, int arg)
 {
-    return BotController::Dispatch::Lock(slot, static_cast<BotController::LockKind>(kind), arg, /*quiet=*/true);
+    return BotController::Dispatch::Lock(slot, static_cast<BotController::LockKind>(kind), arg);
 }
 
 extern "C" BC_EXPORT int BotController_Unlock(int slot, int kind)
 {
-    return BotController::Dispatch::Unlock(slot, static_cast<BotController::LockKind>(kind), /*quiet=*/true);
+    return BotController::Dispatch::Unlock(slot, static_cast<BotController::LockKind>(kind));
 }
 
 extern "C" BC_EXPORT int BotController_UnlockAll(int kind)
 {
-    return BotController::Dispatch::UnlockAll(static_cast<BotController::LockKind>(kind), /*quiet=*/true);
+    return BotController::Dispatch::UnlockAll(static_cast<BotController::LockKind>(kind));
 }
 
 extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
@@ -37,7 +37,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return BotController::Dispatch::IsLocked(slot, static_cast<BotController::LockKind>(kind));
 }
 
-extern "C" BC_EXPORT int BotController_GetVersion() { return 16; }
+extern "C" BC_EXPORT int BotController_GetVersion() { return 17; }
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
