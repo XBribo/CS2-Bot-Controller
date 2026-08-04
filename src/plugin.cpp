@@ -11,6 +11,7 @@
 #include <convar.h>
 #include <interfaces/interfaces.h>
 #include <networksystem/inetworkmessages.h>
+#include <tier0/dbg.h>
 
 #include <nlohmann/json.hpp>
 
@@ -123,8 +124,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     BotController::VoiceSender::SetInterfaces(BotController::Dispatch::g_pEngine, networkMessages);
     if (!networkMessages)
     {
-        BotController::DebugOut("[BotController] WARN: network messages interface unavailable; "
-                                "voice send disabled\n");
+        Warning("[BotController] network messages interface unavailable; voice send disabled\n");
     }
 
     std::string gamedataPath = ComputeGamedataPath();
@@ -163,27 +163,16 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     char buyErr[256] = { 0 };
     if (!BotController::BuyControllerHooks::Install(gd, serverModule, buyErr, sizeof(buyErr)))
     {
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg),
-                      "[BotController] WARN: BuyController::Install failed (%s); "
-                      "bot buy control disabled\n",
-                      buyErr);
-        BotController::DebugOut(dbg);
+        Warning("[BotController] BuyController::Install failed (%s); bot buy control disabled\n", buyErr);
     }
 
     // movement hooks for record/replay
     char injErr[256] = { 0 };
     if (!BotController::InputInjector::Install(gd, serverModule, injErr, sizeof(injErr)))
     {
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg),
-                      "[BotController] WARN: InputInjector::Install failed (%s); "
-                      "record/replay movement will be a no-op\n",
-                      injErr);
-        BotController::DebugOut(dbg);
+        Warning("[BotController] InputInjector::Install failed (%s); record/replay movement will be a no-op\n", injErr);
     }
 
-    BotController::DebugOut("[BotController] plugin loaded successfully\n");
     return true;
 }
 
@@ -206,6 +195,5 @@ bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     BotController::Schema::Reset();
     ConVar_Unregister();
     g_pCVar = nullptr;
-    BotController::DebugOut("[BotController] plugin unloaded\n");
     return true;
 }

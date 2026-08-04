@@ -5,10 +5,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <mutex>
-#include <unordered_set>
-
-#include <tier0/dbg.h>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -27,12 +23,6 @@
 namespace tg = BotController::targets;
 
 namespace BotController {
-// Compile-time switch to turn the once-per-bot diagnostic scan back on.
-static constexpr bool kEnableHandleScan = false;
-
-static std::unordered_set<void*> g_scanned;
-static std::mutex g_scannedMu;
-
 static int EntIndexFromHandle(uint32_t h)
 {
     if (h == 0u || h == 0xFFFFFFFFu) return -1;
@@ -149,21 +139,6 @@ PawnControllerHandles ReadPawnControllerHandles(void* pawn)
     return out;
 }
 
-static void ScanPawnForControllerHandle(void* pawn)
-{
-    if (!pawn) return;
-    Msg("[BWL][scan] pawn=%p candidate handles idx 1..64, 0x008..0x1000:\n", pawn);
-    for (int off = 0x8; off < 0x1000; off += 4)
-    {
-        uint32_t v = 0;
-        if (!GuardedRead(pawn, off, v)) continue;
-        if (v == 0u || v == 0xFFFFFFFFu) continue;
-        int idx = static_cast<int>(v & 0x7FFFu);
-        uint32_t serial = (v >> 15);
-        if (idx >= 1 && idx <= 64) Msg("[BWL][scan]   +0x%03X = 0x%08X  idx=%d  serial=%u\n", off, v, idx, serial);
-    }
-}
-
 SlotResolution ResolveSlot(void* bot)
 {
     SlotResolution out{ nullptr, -1, -1 };
@@ -184,13 +159,6 @@ SlotResolution ResolveSlot(void* bot)
     if (out.pawnEntIndex <= 0) return out;
 
     out.slot = ReadPawnControllerHandles(pawn).ownerSlot;
-
-    if (kEnableHandleScan)
-    {
-        std::lock_guard<std::mutex> lk(g_scannedMu);
-        if (g_scanned.insert(bot).second) ScanPawnForControllerHandle(pawn);
-    }
-
     return out;
 }
 

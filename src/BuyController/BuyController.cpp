@@ -7,9 +7,7 @@
 #include "version_targets.h"
 #include "dispatch.h"
 #include "hook.h"
-#include "platform.h"
 
-#include <tier0/dbg.h>
 #include <eiface.h>
 #include <playerslot.h>
 #include <convar.h>
@@ -57,10 +55,6 @@ static void ApplyPlan(void* self, int slot)
     // Tell vanilla buying is finished so it stops here and exits state
     const uint8_t done = 1;
     WriteField(self, tg::kBuy_DoneBuying, done);
-
-    char dbg[128];
-    std::snprintf(dbg, sizeof(dbg), "[BC][buy] slot=%d skip=%d items=%d\n", slot, plan.skip ? 1 : 0, static_cast<int>(plan.items.size()));
-    DebugOut(dbg);
 }
 
 static void BC_FASTCALL HookedOnUpdate(void* self, void* me)
@@ -99,10 +93,6 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
 
     g_installed = true;
     g_status = "ok";
-
-    char dbg[160];
-    std::snprintf(dbg, sizeof(dbg), "[BuyController] OnUpdate@%p\n", g_addrOnUpdate);
-    DebugOut(dbg);
     return true;
 }
 

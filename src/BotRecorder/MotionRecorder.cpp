@@ -6,13 +6,9 @@
 #include "WeaponLocker.h"
 #include "ccsbot_slot.h"
 #include "version_targets.h"
-#include "platform.h"
 
 #include <array>
 #include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdio>
 #include <mutex>
 #include <vector>
 
@@ -52,25 +48,7 @@ struct ReplayState
 static std::array<RecordState, kMaxSlots> g_rec;
 static std::array<ReplayState, kMaxSlots> g_rep;
 
-/* ! Replay-rate probe */
-static int64_t g_lastCommitQpc[kMaxSlots] = { 0 };
-/* ? Velocity-vs-displacement probe */
-static float g_lastPostX[kMaxSlots] = { 0 };
-static float g_lastPostY[kMaxSlots] = { 0 };
-static bool g_haveLastPost[kMaxSlots] = { false };
-/* ? Record-side probe */
-static int64_t g_recLastQpc[kMaxSlots] = { 0 };
-static float g_recLastNodeX[kMaxSlots] = { 0 };
-static float g_recLastNodeY[kMaxSlots] = { 0 };
-static bool g_recHaveLast[kMaxSlots] = { false };
-
 static bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
-
-static int64_t NowMicros()
-{
-    using clock = std::chrono::steady_clock;
-    return std::chrono::duration_cast<std::chrono::microseconds>(clock::now().time_since_epoch()).count();
-}
 
 // Reads a three-float engine vector through one guarded memory operation.
 static bool ReadVector3(void* base, int offset, float& x, float& y, float& z)
@@ -201,18 +179,6 @@ void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
     r.pendingSubs.clear();
     for (int i = 0; i < count; ++i)
         r.pendingSubs.push_back(moves[i]);
-
-    /* ? Record-side subtick diagnostic */
-    for (int i = 0; i < count; ++i)
-    {
-        if (moves[i].button & 1u)
-        {
-            char dbg[160];
-            std::snprintf(dbg, sizeof(dbg), "[BL][recSt] slot=%d i=%d btn=%u pressed=%.2f when=%.3f\n", slot, i, moves[i].button,
-                          moves[i].pressed, moves[i].when);
-            DebugOut(dbg);
-        }
-    }
 }
 
 void OnCapturePost(int slot, void* services, void* cmd)
@@ -235,7 +201,6 @@ void OnCapturePost(int slot, void* services, void* cmd)
     int def = WeaponLockerHooks::ActiveWeaponDef(ws);
     if (def < 0) def = r.currentDef.load(std::memory_order_relaxed);
 
-    int tickIdx;
     uint32_t nSub;
     {
         std::lock_guard<std::mutex> lk(r.mu);
@@ -250,38 +215,7 @@ void OnCapturePost(int slot, void* services, void* cmd)
         r.ticks.push_back(t);
         r.pendingSubs.clear();
         r.havePre = false;
-        tickIdx = static_cast<int>(r.ticks.size()) - 1;
     }
-
-    /* ? Record-side diagnostics */
-    int64_t now = NowMicros();
-    long long dtUs = g_recHaveLast[slot] ? (now - g_recLastQpc[slot]) : -1;
-    float velR = std::sqrt(post.velX * post.velX + post.velY * post.velY);
-    float nodeD = -1.0f;
-    if (g_recHaveLast[slot])
-    {
-        float dx = post.originX - g_recLastNodeX[slot];
-        float dy = post.originY - g_recLastNodeY[slot];
-        nodeD = std::sqrt(dx * dx + dy * dy) * 64.0f;
-    }
-    // MoveData origin this tick (cmd == moveData)
-    float mvX = 0, mvY = 0;
-    if (cmd)
-    {
-        float mvZ = 0.0f;
-        ReadVector3(cmd, tg::kMove_AbsOrigin, mvX, mvY, mvZ);
-    }
-    g_recLastQpc[slot] = now;
-    g_recLastNodeX[slot] = post.originX;
-    g_recLastNodeY[slot] = post.originY;
-    g_recHaveLast[slot] = true;
-
-    char dbg[256];
-    std::snprintf(dbg, sizeof(dbg),
-                  "[BL][rec] t=%d dt_us=%lld mt=%u nSub=%u def=%d velR=%.1f nodeD=%.1f "
-                  "node=(%.1f,%.1f) mv=(%.1f,%.1f)\n",
-                  tickIdx, dtUs, (unsigned)post.moveType, nSub, def, velR, nodeD, post.originX, post.originY, mvX, mvY);
-    DebugOut(dbg);
 }
 
 int CopyTicks(int slot, ReplayTick* out, int maxTicks)
@@ -685,33 +619,6 @@ void OnReplayCommit(int slot, void* services)
     WriteMovementServiceState(services, t.post);
 
     p.cursor.store(cur + 1, std::memory_order_relaxed);
-
-    /* ! Rate probe */
-    int64_t now = NowMicros();
-    int64_t prev = g_lastCommitQpc[slot];
-    g_lastCommitQpc[slot] = now;
-    long long dtUs = prev ? (now - prev) : -1;
-
-    /* ? Speed probe */
-    float velR = std::sqrt(t.post.velX * t.post.velX + t.post.velY * t.post.velY);
-    float velD = -1.0f;
-    if (g_haveLastPost[slot])
-    {
-        float dx = t.post.originX - g_lastPostX[slot];
-        float dy = t.post.originY - g_lastPostY[slot];
-        velD = std::sqrt(dx * dx + dy * dy) * 64.0f;
-    }
-    g_lastPostX[slot] = t.post.originX;
-    g_lastPostY[slot] = t.post.originY;
-    g_haveLastPost[slot] = true;
-
-    char dbg[256];
-    std::snprintf(dbg, sizeof(dbg),
-                  "[BL][replay] t=%d/%d dt_us=%lld mt=%u grnd=%d velR=%.1f velD=%.1f "
-                  "post=(%.1f,%.1f,%.1f)\n",
-                  cur, total, dtUs, (unsigned)t.post.moveType, (int)(t.post.entityFlags & 1), velR, velD, t.post.originX, t.post.originY,
-                  t.post.originZ);
-    DebugOut(dbg);
 }
 
 void ClearAll()

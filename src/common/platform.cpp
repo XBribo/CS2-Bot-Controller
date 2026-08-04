@@ -1,4 +1,4 @@
-// Cross-platform debug output + self-module path
+// Cross-platform self-module path
 
 #include "platform.h"
 
@@ -9,16 +9,6 @@
 #endif
 
 namespace BotController {
-// Route a line to the platform debug sink. Linux: no-op (no debug output)
-void DebugOut(const char* msg)
-{
-#if defined(_WIN32)
-    OutputDebugStringA(msg);
-#else
-    (void)msg;
-#endif
-}
-
 // Resolve the on-disk path of the module containing this function
 std::string SelfModulePath()
 {

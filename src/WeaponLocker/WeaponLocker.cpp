@@ -8,11 +8,8 @@
 #include "MotionRecorder.h"
 #include "version_targets.h"
 #include "hook.h"
-#include "platform.h"
 
-#include <tier0/dbg.h>
 #include <cstdio>
-#include <cstdarg>
 #include <vector>
 #include <mutex>
 #include <unordered_map>
@@ -54,17 +51,6 @@ static std::unordered_map<void*, WsBinding> g_wsToBinding;
 static void* g_slotToWs[64] = { nullptr };
 static std::mutex g_wsToSlotMu;
 
-// Writes one weapon-lock debug line to the server console
-static void DebugLine(const char* fmt, ...)
-{
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    Msg("%s", buf);
-}
-
 static void RememberWsForBot(void* bot, int slot)
 {
     if (!bot || slot < 0 || slot >= 64) return;
@@ -97,25 +83,6 @@ static int LockTargetToEngineSlot(LockTarget t)
 
 static bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 
-// ---- edge-triggered logging ----
-
-static int g_lastLoggedLock[64] = { 0 };
-
-static void MaybeLogEdge(const char* which, void* bot, const SlotResolution& sr, LockTarget lt)
-{
-    if (sr.slot < 0 || sr.slot >= 64) return;
-    int curr = static_cast<int>(lt);
-    if (g_lastLoggedLock[sr.slot] == curr) return;
-    g_lastLoggedLock[sr.slot] = curr;
-    DebugLine("[BC][hook] %s slot=%d lock=%d bot=%p\n", which, sr.slot, curr, bot);
-}
-
-void ResetLogEdgeForSlot(int slot)
-{
-    if (slot < 0 || slot >= 64) return;
-    g_lastLoggedLock[slot] = -1;
-}
-
 // ---- detours ----
 
 static void BC_FASTCALL HookedEquipBestWeapon(void* bot, char mustEquip)
@@ -124,7 +91,6 @@ static void BC_FASTCALL HookedEquipBestWeapon(void* bot, char mustEquip)
     if (sr.slot >= 0) RememberWsForBot(bot, sr.slot);
     if (sr.slot >= 0 && MotionRecorder::IsReplaying(sr.slot)) return;
     LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
-    MaybeLogEdge("EquipBestWeapon", bot, sr, lt);
     if (lt != LockTarget::None) return;
     g_origEquipBestWeapon(bot, mustEquip);
 }
@@ -135,13 +101,9 @@ static void BC_FASTCALL HookedEquipPistol(void* bot, char mustEquip)
     if (sr.slot >= 0) RememberWsForBot(bot, sr.slot);
     if (sr.slot >= 0 && MotionRecorder::IsReplaying(sr.slot)) return;
     LockTarget lt = (sr.slot >= 0) ? WeaponLockerState::Get(sr.slot) : LockTarget::None;
-    MaybeLogEdge("EquipPistol", bot, sr, lt);
     if (lt != LockTarget::None) return;
     g_origEquipPistol(bot, mustEquip);
 }
-
-// Block-log dedup
-static void* g_lastBlockedWeapon[64] = { nullptr };
 
 static char BC_FASTCALL HookedSelectItem(void* ws, void* weapon, int flag)
 {
@@ -182,12 +144,6 @@ static char BC_FASTCALL HookedSelectItem(void* ws, void* weapon, int flag)
     if (weapon == targetWeapon) return g_origSelectItem(ws, weapon, flag);
 
     // Switch is to something else -> block.
-    int slot = bind.slot;
-    if (slot >= 0 && slot < 64 && g_lastBlockedWeapon[slot] != weapon)
-    {
-        g_lastBlockedWeapon[slot] = weapon;
-        DebugLine("[BC][block] SelectItem slot=%d lock=%d weapon=%p target=%p\n", slot, static_cast<int>(lt), weapon, targetWeapon);
-    }
     return 0;
 }
 
@@ -263,11 +219,6 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
 
     g_installed = true;
     g_status = "ok";
-
-    char dbg[384];
-    std::snprintf(dbg, sizeof(dbg), "[BC] hooks installed: EquipBestWeapon=%p EquipPistol=%p SelectItem=%p GetSlot=%p\n",
-                  g_addrEquipBestWeapon, g_addrEquipPistol, g_addrSelectItem, g_addrGetSlot);
-    DebugOut(dbg);
     return true;
 }
 
@@ -287,11 +238,6 @@ void Remove()
         g_wsToBinding.clear();
         for (int i = 0; i < 64; ++i)
             g_slotToWs[i] = nullptr;
-    }
-    for (int i = 0; i < 64; ++i)
-    {
-        g_lastLoggedLock[i] = 0;
-        g_lastBlockedWeapon[i] = nullptr;
     }
 }
 
@@ -395,7 +341,7 @@ void* WsForSlot(int slot)
 
 int SwitchToLockTarget(int slot) { return SwitchToLockTarget(slot, false); }
 
-int SwitchToLockTarget(int slot, bool quiet)
+int SwitchToLockTarget(int slot, bool /*quiet*/)
 {
     if (!g_installed || !g_origSelectItem || !g_pGetSlot) return 3;
     if (slot < 0 || slot >= 64) return 3;
@@ -419,10 +365,6 @@ int SwitchToLockTarget(int slot, bool quiet)
     // Route through the original (un-hooked) function so we don't
     // ping-pong through HookedSelectItem.
     g_origSelectItem(ws, target, 0);
-    if (!quiet)
-    {
-        DebugLine("[BC][switch] slot=%d lock=%d ws=%p target=%p\n", slot, static_cast<int>(lt), ws, target);
-    }
     return 0;
 }
 } // namespace WeaponLockerHooks

@@ -168,11 +168,9 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     }
 
     // Loads the plugin and hooks replay ticking when the native ABI is ready.
-    public override void Load(bool hotReload)
+    public override void Load(bool _)
     {
         if (!EnsureNativeApiAvailability()) return;
-
-        Logger.LogInformation("[BotController] Loaded. hotReload={HotReload}", hotReload);
 
         Directory.CreateDirectory(RecordingsDir);
 
@@ -185,7 +183,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         if (_nativeApiAvailable)
             Core.Event.OnTick -= _driver.Tick;
-        Logger.LogInformation("[BotController] Unloaded.");
     }
 
     // ---- Helpers ----

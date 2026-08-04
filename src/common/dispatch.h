@@ -22,7 +22,7 @@ extern IVEngineServer2* g_pEngine;
 // Server-side console command executor; runs "buy" for a bot slot.
 extern ISource2GameClients* g_pGameClients;
 
-// arg = LockTarget int for Weapon kind. quiet skips DebugLine.
+// arg = LockTarget int for Weapon kind. quiet is retained for API compatibility
 int Lock(int slot, LockKind kind, int arg, bool quiet = false);
 
 int Unlock(int slot, LockKind kind, bool quiet = false);

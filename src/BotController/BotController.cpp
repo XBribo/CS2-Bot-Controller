@@ -7,7 +7,6 @@
 #include "MotionRecorder.h"
 #include "version_targets.h"
 #include "hook.h"
-#include "platform.h"
 
 #include <tier0/dbg.h>
 
@@ -213,9 +212,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
     g_addrJump = Sig::ResolveSig(gd, serverModule, "CCSBot::Jump", jumpErr, sizeof(jumpErr));
     if (!g_addrJump)
     {
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg), "[BotController] WARN: CCSBot::Jump sig not resolved (%s); jump-lock disabled\n", jumpErr);
-        DebugOut(dbg);
+        Warning("[BotController] CCSBot::Jump sig not resolved (%s); jump-lock disabled\n", jumpErr);
     }
 
     // UpdateLookAngles is optional
@@ -223,10 +220,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
     g_addrUpdateLookAngles = Sig::ResolveSig(gd, serverModule, "CCSBot::UpdateLookAngles", ulaErr, sizeof(ulaErr));
     if (!g_addrUpdateLookAngles)
     {
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg),
-                      "[BotController] WARN: CCSBot::UpdateLookAngles sig not resolved (%s); replay view-drive disabled\n", ulaErr);
-        DebugOut(dbg);
+        Warning("[BotController] CCSBot::UpdateLookAngles sig not resolved (%s); replay view-drive disabled\n", ulaErr);
     }
 
     // SetEyeAngles is optional; without it replay view falls back to
@@ -235,10 +229,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
     g_addrSetEyeAngles = Sig::ResolveSig(gd, serverModule, "CCSPlayerPawn::SetEyeAngles", seaErr, sizeof(seaErr));
     if (!g_addrSetEyeAngles)
     {
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg),
-                      "[BotController] WARN: CCSPlayerPawn::SetEyeAngles sig not resolved (%s); replay 1:1 view disabled\n", seaErr);
-        DebugOut(dbg);
+        Warning("[BotController] CCSPlayerPawn::SetEyeAngles sig not resolved (%s); replay 1:1 view disabled\n", seaErr);
     }
 #if defined(_WIN32)
     else
@@ -277,7 +268,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
         if (!g_hookJump.Create(g_addrJump, reinterpret_cast<void*>(&HookedJump), reinterpret_cast<void**>(&g_origJump)) ||
             !g_hookJump.Enable())
         {
-            DebugOut("[BotController] WARN: hook CCSBot::Jump failed; jump-lock disabled\n");
+            Warning("[BotController] hook CCSBot::Jump failed; jump-lock disabled\n");
             g_hookJump.Remove();
             g_origJump = nullptr;
             g_addrJump = nullptr;
@@ -291,7 +282,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
                                            reinterpret_cast<void**>(&g_origUpdateLookAngles)) ||
             !g_hookUpdateLookAngles.Enable())
         {
-            DebugOut("[BotController] WARN: hook UpdateLookAngles failed; replay view-drive disabled\n");
+            Warning("[BotController] hook UpdateLookAngles failed; replay view-drive disabled\n");
             g_hookUpdateLookAngles.Remove();
             g_origUpdateLookAngles = nullptr;
             g_addrUpdateLookAngles = nullptr;
@@ -305,7 +296,7 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
                                        reinterpret_cast<void**>(&g_origSetEyeAngles)) ||
             !g_hookSetEyeAngles.Enable())
         {
-            DebugOut("[BotController] WARN: hook SetEyeAngles failed; replay 1:1 view disabled\n");
+            Warning("[BotController] hook SetEyeAngles failed; replay 1:1 view disabled\n");
             g_hookSetEyeAngles.Remove();
             g_origSetEyeAngles = nullptr;
             g_addrSetEyeAngles = nullptr;
@@ -314,11 +305,6 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
 
     g_installed = true;
     g_status = "ok";
-
-    char dbg[400];
-    std::snprintf(dbg, sizeof(dbg), "[BotController] Update@%p Upkeep@%p Jump@%p ULA@%p SEA@%p\n", g_addrUpdate, g_addrUpkeep, g_addrJump,
-                  g_addrUpdateLookAngles, g_addrSetEyeAngles);
-    DebugOut(dbg);
     return true;
 }
 

@@ -11,7 +11,6 @@
 #include "MotionRecorder.h"
 #include "version_targets.h"
 #include "hook.h"
-#include "platform.h"
 
 #include <array>
 #include <atomic>
@@ -21,6 +20,8 @@
 #include <cstdio>
 #include <mutex>
 #include <vector>
+
+#include <tier0/dbg.h>
 
 namespace tg = BotController::targets;
 
@@ -461,9 +462,6 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
             SubtickMove out[MotionRecorder::kMaxSubtickPerTick];
             int n = MotionRecorder::CurrentReplaySubticks(slot, out, MotionRecorder::kMaxSubtickPerTick);
             base->clear_subtick_moves();
-            /* ? Throw-window diagnostic */
-            int dbgStBtn = -1;
-            float dbgStPressed = -1.0f, dbgStWhen = -1.0f;
             for (int i = 0; i < n; ++i)
             {
                 uint32_t button = out[i].button;
@@ -483,24 +481,6 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
                 if (out[i].yawDelta != 0.0f) m->set_yaw_delta(out[i].yawDelta);
                 if (out[i].analogForward != 0.0f) m->set_analog_forward_delta(out[i].analogForward);
                 if (out[i].analogLeft != 0.0f) m->set_analog_left_delta(out[i].analogLeft);
-                if (button & kInAttack) // IN_ATTACK subtick
-                {
-                    dbgStBtn = static_cast<int>(button);
-                    dbgStPressed = pressed;
-                    dbgStWhen = out[i].when;
-                }
-            }
-
-            /* ? Throw-window diagnostic */
-            if (((b0 | b1 | b2) & kInAttack) || wsel >= 0 || dbgStBtn >= 0)
-            {
-                char dbg[256];
-                std::snprintf(dbg, sizeof(dbg),
-                              "[BL][rep] c=%d held=%llX prs=%llX rel=%llX "
-                              "wsel=%d actDef=%d nSt=%d stBtn=%d stPr=%.2f stWhen=%.2f\n",
-                              MotionRecorder::ReplayCursor(slot), (unsigned long long)b0, (unsigned long long)b1, (unsigned long long)b2,
-                              wsel, MotionRecorder::BotActiveWeaponDef(slot), n, dbgStBtn, dbgStPressed, dbgStWhen);
-                DebugOut(dbg);
             }
         }
 
@@ -568,12 +548,6 @@ static void EnsureVtableHooks(void* services)
         g_origPlayerRunCommand = nullptr;
     }
 
-    char dbg[200];
-    std::snprintf(dbg, sizeof(dbg),
-                  "[BotController] vtable hooks: FinishMove @ %p, "
-                  "PlayerRunCommand @ %p (subtick=%d)\n",
-                  g_addrFinishMove, g_addrPlayerRunCommand, g_subtickActive ? 1 : 0);
-    DebugOut(dbg);
 }
 
 bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
@@ -613,20 +587,13 @@ bool Install(const nlohmann::json& gd, const Sig::ModuleInfo& serverModule, char
             g_addrPhysicsSimulate = nullptr;
         }
         g_origPhysicsSimulate = nullptr;
-        char dbg[320];
-        std::snprintf(dbg, sizeof(dbg),
-                      "[BotController] WARN: PhysicsSimulate hook unavailable (%s); "
-                      "replay falls back to per-subtick boundary (may stutter)\n",
-                      psErr[0] ? psErr : "funchook failed");
-        DebugOut(dbg);
+        Warning("[BotController] PhysicsSimulate hook unavailable (%s); replay falls back to per-subtick boundary (may stutter)\n",
+                psErr[0] ? psErr : "funchook failed");
     }
 
     // FinishMove is hooked lazily from the live vtable on the first ProcessMovement tick.
     g_installed = true;
     g_status = "ok";
-    char dbg[160];
-    std::snprintf(dbg, sizeof(dbg), "[BotController] ProcessMovement @ %p\n", g_addrProcessMovement);
-    DebugOut(dbg);
     return true;
 }
 
