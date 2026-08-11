@@ -19,10 +19,10 @@ namespace BotControllerImpl;
 public class BotControllerPlugin : BasePlugin
 {
     public override string ModuleName => "BotControllerImpl";
-    public override string ModuleVersion => "0.6.0";
+    public override string ModuleVersion => "0.6.1";
     public override string ModuleAuthor => "XBribo";
     public override string ModuleDescription =>
-        "Record a player's movement and replay it on a bot.";
+        "Record & Replay and Control CS2 bots.";
 
     // Record and replay must share a tickrate; adjust if your server differs.
     private const int Tickrate = 64;

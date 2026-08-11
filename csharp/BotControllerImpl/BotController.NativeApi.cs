@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 17), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 18), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 17;
+        private const int ExpectedAbiVersion = 18;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -37,6 +37,11 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CancelUsercmdInjection(
             int slot, long injectionId);
+
+        // Imports the native usercmd suppression export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SuppressUsercmd(
+            int slot, ulong buttonMask, int durationMs);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartRecord(int slot);
@@ -148,6 +153,10 @@ namespace BotControllerApi
         // Cancels one native usercmd injection by its token
         public static bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController_CancelUsercmdInjection(slot, injectionId) == 0;
+
+        // Suppresses selected usercmd buttons for a fixed duration
+        public static bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
+            => BotController_SuppressUsercmd(slot, buttonMask, durationMs) == 0;
 
         // ---- locks ----
 

@@ -73,7 +73,15 @@ struct UsercmdInjection
     UsercmdInjectionPhase phase;
 };
 
+struct UsercmdSuppression
+{
+    uint64_t buttonMask;
+    int64_t expiresAtMs;
+    bool releasePending;
+};
+
 static std::array<std::vector<UsercmdInjection>, kMaxSlots> g_usercmdInjections{};
+static std::array<std::vector<UsercmdSuppression>, kMaxSlots> g_usercmdSuppressions{};
 static std::array<uint64_t, kMaxSlots> g_injectedHeldMasks{};
 static std::mutex g_usercmdInjectionMutex;
 static std::atomic<int64_t> g_nextUsercmdInjectionId{ 1 };
@@ -252,13 +260,28 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
     return false;
 }
 
-// Removes every injection so replay starts without deferred input
+// Suppresses selected usercmd buttons until the requested duration expires
+bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
+{
+    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 ||
+        !g_subtickActive || MotionRecorder::IsReplaying(slot))
+        return false;
+
+    int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    if (MotionRecorder::IsReplaying(slot)) return false;
+    g_usercmdSuppressions[slot].push_back({ buttonMask, expiresAtMs, true });
+    return true;
+}
+
+// Removes every injection and suppression so replay starts without deferred input
 void ClearUsercmdInjections(int slot)
 {
     if (!ValidSlotIndex(slot)) return;
 
     std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
     g_usercmdInjections[slot].clear();
+    g_usercmdSuppressions[slot].clear();
     g_injectedHeldMasks[slot] = 0;
 }
 
@@ -269,6 +292,15 @@ static bool HasUsercmdInjection(int slot)
 
     std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
     return !g_usercmdInjections[slot].empty();
+}
+
+// Reports whether a slot has button suppressions waiting for command processing
+static bool HasUsercmdSuppression(int slot)
+{
+    if (!ValidSlotIndex(slot)) return false;
+
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    return !g_usercmdSuppressions[slot].empty();
 }
 
 // Merges active injections and emits aggregate press and release edges
@@ -321,6 +353,59 @@ static bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* 
     pc->buttonstates.m_pButtonStates[0] = held;
     pc->buttonstates.m_pButtonStates[1] = pressed;
     pc->buttonstates.m_pButtonStates[2] = released;
+    return true;
+}
+
+// Removes suppressed buttons after Bot AI has produced the final command
+static bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
+{
+    if (!ValidSlotIndex(slot) || !pc || !base) return false;
+
+    uint64_t suppressedMask = 0;
+    uint64_t releasedMask = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+        auto& suppressions = g_usercmdSuppressions[slot];
+        int64_t nowMs = MonotonicMilliseconds();
+        for (auto it = suppressions.begin(); it != suppressions.end();)
+        {
+            if (nowMs >= it->expiresAtMs)
+            {
+                it = suppressions.erase(it);
+                continue;
+            }
+
+            suppressedMask |= it->buttonMask;
+            if (it->releasePending)
+            {
+                releasedMask |= it->buttonMask;
+                it->releasePending = false;
+            }
+            ++it;
+        }
+    }
+
+    if (suppressedMask == 0) return false;
+
+    uint64_t held = pc->buttonstates.m_pButtonStates[0] & ~suppressedMask;
+    uint64_t pressed = pc->buttonstates.m_pButtonStates[1] & ~suppressedMask;
+    uint64_t released = pc->buttonstates.m_pButtonStates[2] | releasedMask;
+
+    CInButtonStatePB* buttons = base->mutable_buttons_pb();
+    buttons->set_buttonstate1(held);
+    buttons->set_buttonstate2(pressed);
+    buttons->set_buttonstate3(released);
+    pc->buttonstates.m_pButtonStates[0] = held;
+    pc->buttonstates.m_pButtonStates[1] = pressed;
+    pc->buttonstates.m_pButtonStates[2] = released;
+
+    for (int i = 0; i < base->subtick_moves_size(); ++i)
+    {
+        CSubtickMoveStep* move = base->mutable_subtick_moves(i);
+        uint64_t buttonsMask = static_cast<uint64_t>(move->button()) & ~suppressedMask;
+        move->set_button(buttonsMask);
+        if (buttonsMask == 0) move->set_pressed(false);
+    }
     return true;
 }
 
@@ -390,8 +475,9 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
     bool recording = slot >= 0 && slot < kMaxSlots && MotionRecorder::IsRecording(slot);
     bool replaying = slot >= 0 && slot < kMaxSlots && MotionRecorder::IsReplaying(slot);
     bool hasUsercmdInjection = HasUsercmdInjection(slot);
+    bool hasUsercmdSuppression = HasUsercmdSuppression(slot);
 
-    if (cmd && (recording || replaying || hasUsercmdInjection))
+    if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression))
     {
         // Compiler computes the multiple-inheritance adjust here.
         auto* pc = reinterpret_cast<PlayerCommand*>(cmd);
@@ -485,6 +571,7 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
         }
 
         if (hasUsercmdInjection && !replaying) ApplyUsercmdInjections(slot, pc, base);
+        if (hasUsercmdSuppression && !replaying) ApplyUsercmdSuppressions(slot, pc, base);
     }
 
     g_origPlayerRunCommand(services, cmd);
@@ -623,6 +710,8 @@ void Remove()
         std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
         for (auto& injections : g_usercmdInjections)
             injections.clear();
+        for (auto& suppressions : g_usercmdSuppressions)
+            suppressions.clear();
         g_injectedHeldMasks.fill(0);
     }
     g_installed = false;

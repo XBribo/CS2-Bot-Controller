@@ -19,10 +19,10 @@ namespace BotControllerImplSW2;
 
 [PluginMetadata(
     Id = "botcontroller.sw2",
-    Version = "0.6.0",
+    Version = "0.6.1",
     Name = "BotController",
     Author = "XBribo & nicedayzhu",
-    Description = "Record a player's movement and replay it on a bot."
+    Description = "Record & Replay and Control CS2 bots."
 )]
 public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(core)
 {
@@ -100,6 +100,9 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Cancels one native usercmd injection by its token
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController.CancelUsercmdInjection(slot, injectionId);
+        // Suppresses selected usercmd buttons for a fixed duration
+        public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
+            => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
 
         // Returns the live profile data for a bot slot.
         public bool GetBotProfile(int slot, out BotProfileData profile)

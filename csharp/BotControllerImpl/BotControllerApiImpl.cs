@@ -46,6 +46,9 @@ namespace BotControllerApi
         // Cancels one native usercmd injection by its token
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController.CancelUsercmdInjection(slot, injectionId);
+        // Suppresses selected usercmd buttons for a fixed duration
+        public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
+            => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
 
         // ---- profile ----
         public bool GetBotProfile(int slot, out BotProfileData profile)

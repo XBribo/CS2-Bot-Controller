@@ -39,6 +39,9 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs);
 // Cancels one usercmd injection by its token
 bool CancelUsercmdInjection(int slot, int64_t injectionId);
 
+// Suppresses selected usercmd buttons for a fixed duration
+bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs);
+
 // Clears every pending and active usercmd injection for one slot
 void ClearUsercmdInjections(int slot);
 

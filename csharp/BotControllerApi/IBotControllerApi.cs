@@ -73,6 +73,9 @@ namespace BotControllerApi
         // Cancels one usercmd injection by its token
         bool CancelUsercmdInjection(int slot, long injectionId);
 
+        // Suppresses selected usercmd buttons for a fixed duration
+        bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs);
+
         // ---- profile ----
 
         // Read the BotProfile of the bot on this slot. False if the slot has no
