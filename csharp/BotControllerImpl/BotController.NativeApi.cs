@@ -33,6 +33,21 @@ namespace BotControllerApi
         private static extern long BotController_InjectUsercmd(
             int slot, ulong buttonMask, int durationMs);
 
+        // Imports the persistent native analog movement export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern long BotController_StartUsercmdMovement(
+            int slot, float forwardMove, float leftMove);
+
+        // Imports the persistent native analog movement update export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_UpdateUsercmdMovement(
+            int slot, long movementId, float forwardMove, float leftMove);
+
+        // Imports the persistent native analog movement cancellation export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CancelUsercmdMovement(
+            int slot, long movementId);
+
         // Imports the native usercmd injection cancellation export
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CancelUsercmdInjection(
@@ -42,6 +57,16 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SuppressUsercmd(
             int slot, ulong buttonMask, int durationMs);
+
+        // Imports the persistent native usercmd suppression export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern long BotController_StartUsercmdSuppression(
+            int slot, ulong buttonMask);
+
+        // Imports the persistent native usercmd suppression cancellation export
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CancelUsercmdSuppression(
+            int slot, long suppressionId);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartRecord(int slot);
@@ -154,9 +179,37 @@ namespace BotControllerApi
         public static bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController_CancelUsercmdInjection(slot, injectionId) == 0;
 
+        // Creates an independently cancellable persistent analog movement override
+        public static long StartUsercmdMovement(
+            int slot,
+            float forwardMove,
+            float leftMove)
+            => BotController_StartUsercmdMovement(slot, forwardMove, leftMove);
+
+        // Updates one persistent analog movement override
+        public static bool UpdateUsercmdMovement(
+            int slot,
+            long movementId,
+            float forwardMove,
+            float leftMove)
+            => BotController_UpdateUsercmdMovement(
+                slot, movementId, forwardMove, leftMove) == 0;
+
+        // Cancels one persistent analog movement override
+        public static bool CancelUsercmdMovement(int slot, long movementId)
+            => BotController_CancelUsercmdMovement(slot, movementId) == 0;
+
         // Suppresses selected usercmd buttons for a fixed duration
         public static bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
             => BotController_SuppressUsercmd(slot, buttonMask, durationMs) == 0;
+
+        // Creates an independently cancellable persistent native usercmd suppression
+        public static long StartUsercmdSuppression(int slot, ulong buttonMask)
+            => BotController_StartUsercmdSuppression(slot, buttonMask);
+
+        // Cancels one persistent native usercmd suppression by its token
+        public static bool CancelUsercmdSuppression(int slot, long suppressionId)
+            => BotController_CancelUsercmdSuppression(slot, suppressionId) == 0;
 
         // ---- locks ----
 

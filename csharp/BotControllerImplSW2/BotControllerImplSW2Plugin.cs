@@ -19,7 +19,7 @@ namespace BotControllerImplSW2;
 
 [PluginMetadata(
     Id = "botcontroller.sw2",
-    Version = "0.6.1",
+    Version = "0.6.2",
     Name = "BotController",
     Author = "XBribo & nicedayzhu",
     Description = "Record & Replay and Control CS2 bots."
@@ -100,9 +100,29 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Cancels one native usercmd injection by its token
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController.CancelUsercmdInjection(slot, injectionId);
+        // Creates an independently cancellable persistent analog movement override
+        public long StartUsercmdMovement(int slot, float forwardMove, float leftMove)
+            => BotController.StartUsercmdMovement(slot, forwardMove, leftMove);
+        // Updates one persistent analog movement override
+        public bool UpdateUsercmdMovement(
+            int slot,
+            long movementId,
+            float forwardMove,
+            float leftMove)
+            => BotController.UpdateUsercmdMovement(
+                slot, movementId, forwardMove, leftMove);
+        // Cancels one persistent analog movement override
+        public bool CancelUsercmdMovement(int slot, long movementId)
+            => BotController.CancelUsercmdMovement(slot, movementId);
         // Suppresses selected usercmd buttons for a fixed duration
         public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
             => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
+        // Creates an independently cancellable persistent native usercmd suppression
+        public long StartUsercmdSuppression(int slot, ulong buttonMask)
+            => BotController.StartUsercmdSuppression(slot, buttonMask);
+        // Cancels one persistent native usercmd suppression by its token
+        public bool CancelUsercmdSuppression(int slot, long suppressionId)
+            => BotController.CancelUsercmdSuppression(slot, suppressionId);
 
         // Returns the live profile data for a bot slot.
         public bool GetBotProfile(int slot, out BotProfileData profile)

@@ -45,6 +45,25 @@ extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t butt
     return BotController::InputInjector::InjectUsercmd(slot, buttonMask, durationMs);
 }
 
+// Create an independently cancellable persistent analog movement override
+extern "C" BC_EXPORT int64_t BotController_StartUsercmdMovement(int slot, float forwardMove, float leftMove)
+{
+    return BotController::InputInjector::StartUsercmdMovement(slot, forwardMove, leftMove);
+}
+
+// Update one persistent analog movement override
+extern "C" BC_EXPORT int BotController_UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
+{
+    return BotController::InputInjector::UpdateUsercmdMovement(
+        slot, movementId, forwardMove, leftMove) ? 0 : -1;
+}
+
+// Cancel one persistent analog movement override
+extern "C" BC_EXPORT int BotController_CancelUsercmdMovement(int slot, int64_t movementId)
+{
+    return BotController::InputInjector::CancelUsercmdMovement(slot, movementId) ? 0 : -1;
+}
+
 // Cancel one usercmd injection by its token
 extern "C" BC_EXPORT int BotController_CancelUsercmdInjection(int slot, int64_t injectionId)
 {
@@ -55,6 +74,18 @@ extern "C" BC_EXPORT int BotController_CancelUsercmdInjection(int slot, int64_t 
 extern "C" BC_EXPORT int BotController_SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
     return BotController::InputInjector::SuppressUsercmd(slot, buttonMask, durationMs) ? 0 : -1;
+}
+
+// Create an independently cancellable persistent usercmd suppression
+extern "C" BC_EXPORT int64_t BotController_StartUsercmdSuppression(int slot, uint64_t buttonMask)
+{
+    return BotController::InputInjector::StartUsercmdSuppression(slot, buttonMask);
+}
+
+// Cancel one persistent usercmd suppression by its token
+extern "C" BC_EXPORT int BotController_CancelUsercmdSuppression(int slot, int64_t suppressionId)
+{
+    return BotController::InputInjector::CancelUsercmdSuppression(slot, suppressionId) ? 0 : -1;
 }
 
 // Return 1 when the plugin can allocate and send voice net messages.

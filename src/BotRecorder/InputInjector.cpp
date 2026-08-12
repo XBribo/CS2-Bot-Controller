@@ -12,6 +12,7 @@
 #include "version_targets.h"
 #include "hook.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -32,6 +33,14 @@ using PhysicsSimulate_t = void(BC_FASTCALL*)(void* controller);
 
 namespace BotController {
 namespace InputInjector {
+constexpr float kUsercmdKeyboardMoveScale = 450.0f;
+constexpr uint64_t kInForward = 1ull << 3;
+constexpr uint64_t kInBack = 1ull << 4;
+constexpr uint64_t kInMoveLeft = 1ull << 9;
+constexpr uint64_t kInMoveRight = 1ull << 10;
+constexpr uint64_t kMovementButtonMask =
+    kInForward | kInBack | kInMoveLeft | kInMoveRight;
+
 static ProcessMovement_t g_origProcessMovement = nullptr;
 static FinishMove_t g_origFinishMove = nullptr;
 static PlayerRunCommand_t g_origPlayerRunCommand = nullptr;
@@ -73,23 +82,40 @@ struct UsercmdInjection
     UsercmdInjectionPhase phase;
 };
 
+struct UsercmdMovement
+{
+    int64_t id;
+    float forwardMove;
+    float leftMove;
+};
+
 struct UsercmdSuppression
 {
+    int64_t id;
     uint64_t buttonMask;
     int64_t expiresAtMs;
+    bool persistent;
     bool releasePending;
 };
 
 static std::array<std::vector<UsercmdInjection>, kMaxSlots> g_usercmdInjections{};
 static std::array<std::vector<UsercmdSuppression>, kMaxSlots> g_usercmdSuppressions{};
+static std::array<std::vector<UsercmdMovement>, kMaxSlots> g_usercmdMovements{};
 static std::array<uint64_t, kMaxSlots> g_injectedHeldMasks{};
+static std::array<uint64_t, kMaxSlots> g_movementHeldMasks{};
 static std::mutex g_usercmdInjectionMutex;
 static std::atomic<int64_t> g_nextUsercmdInjectionId{ 1 };
+static std::atomic<int64_t> g_nextUsercmdSuppressionId{ 1 };
+static std::atomic<int64_t> g_nextUsercmdMovementId{ 1 };
 
 static std::atomic<uint64_t> g_hookCalls{ 0 };
 static std::atomic<int> g_lastSlot{ -1 };
 static std::atomic<uint64_t> g_finishMoveCalls{ 0 };
 static std::atomic<uint64_t> g_playerRunCommandCalls{ 0 };
+static std::atomic<uint64_t> g_usercmdMovementApplyCalls{ 0 };
+static std::atomic<int> g_lastUsercmdMovementSlot{ -1 };
+static std::atomic<int> g_lastUsercmdForwardMove{ 0 };
+static std::atomic<int> g_lastUsercmdLeftMove{ 0 };
 static std::atomic<uint64_t> g_physicsSimulateCalls{ 0 };
 static std::atomic<int> g_lastPhysicsSlot{ -1 };
 static std::atomic<uint64_t> g_replayCommitCalls{ 0 };
@@ -237,8 +263,65 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
     int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
     if (MotionRecorder::IsReplaying(slot)) return -1;
-    g_usercmdInjections[slot].push_back({ id, buttonMask, 0, durationMs, UsercmdInjectionPhase::PendingPress });
+    g_usercmdInjections[slot].push_back({
+        id, buttonMask, 0, durationMs, UsercmdInjectionPhase::PendingPress });
     return id;
+}
+
+// Creates an independently cancellable persistent analog movement override
+int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
+{
+    if (!ValidSlotIndex(slot) || !std::isfinite(forwardMove) ||
+        !std::isfinite(leftMove) ||
+        !g_subtickActive || MotionRecorder::IsReplaying(slot))
+        return -1;
+
+    int64_t id = g_nextUsercmdMovementId.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    if (MotionRecorder::IsReplaying(slot)) return -1;
+    g_usercmdMovements[slot].push_back({
+        id,
+        std::clamp(forwardMove, -1.0f, 1.0f),
+        std::clamp(leftMove, -1.0f, 1.0f) });
+    return id;
+}
+
+// Updates one persistent analog movement override
+bool UpdateUsercmdMovement(
+    int slot,
+    int64_t movementId,
+    float forwardMove,
+    float leftMove)
+{
+    if (!ValidSlotIndex(slot) || movementId <= 0 ||
+        !std::isfinite(forwardMove) || !std::isfinite(leftMove))
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    for (UsercmdMovement &movement : g_usercmdMovements[slot])
+    {
+        if (movement.id != movementId) continue;
+        movement.forwardMove = std::clamp(forwardMove, -1.0f, 1.0f);
+        movement.leftMove = std::clamp(leftMove, -1.0f, 1.0f);
+        return true;
+    }
+    return false;
+}
+
+// Cancels one persistent analog movement override
+bool CancelUsercmdMovement(int slot, int64_t movementId)
+{
+    if (!ValidSlotIndex(slot) || movementId <= 0) return false;
+
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    auto &movements = g_usercmdMovements[slot];
+    for (auto it = movements.begin(); it != movements.end(); ++it)
+    {
+        if (it->id != movementId) continue;
+        movements.erase(it);
+        return true;
+    }
+    return false;
 }
 
 // Cancels one injection without affecting other active tokens
@@ -270,8 +353,38 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
     int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
     std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
     if (MotionRecorder::IsReplaying(slot)) return false;
-    g_usercmdSuppressions[slot].push_back({ buttonMask, expiresAtMs, true });
+    g_usercmdSuppressions[slot].push_back({ 0, buttonMask, expiresAtMs, false, true });
     return true;
+}
+
+// Creates an independently cancellable persistent usercmd suppression
+int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
+{
+    if (!ValidSlotIndex(slot) || buttonMask == 0 ||
+        !g_subtickActive || MotionRecorder::IsReplaying(slot))
+        return -1;
+
+    int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    if (MotionRecorder::IsReplaying(slot)) return -1;
+    g_usercmdSuppressions[slot].push_back({ id, buttonMask, 0, true, true });
+    return id;
+}
+
+// Cancels one persistent usercmd suppression by its token
+bool CancelUsercmdSuppression(int slot, int64_t suppressionId)
+{
+    if (!ValidSlotIndex(slot) || suppressionId <= 0) return false;
+
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    auto& suppressions = g_usercmdSuppressions[slot];
+    for (auto it = suppressions.begin(); it != suppressions.end(); ++it)
+    {
+        if (it->id != suppressionId) continue;
+        suppressions.erase(it);
+        return true;
+    }
+    return false;
 }
 
 // Removes every injection and suppression so replay starts without deferred input
@@ -282,7 +395,9 @@ void ClearUsercmdInjections(int slot)
     std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
     g_usercmdInjections[slot].clear();
     g_usercmdSuppressions[slot].clear();
+    g_usercmdMovements[slot].clear();
     g_injectedHeldMasks[slot] = 0;
+    g_movementHeldMasks[slot] = 0;
 }
 
 // Reports whether a slot has injections waiting for command processing
@@ -303,6 +418,90 @@ static bool HasUsercmdSuppression(int slot)
     return !g_usercmdSuppressions[slot].empty();
 }
 
+// Reports whether a slot has an active analog movement override
+static bool HasUsercmdMovement(int slot)
+{
+    if (!ValidSlotIndex(slot)) return false;
+
+    std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+    return !g_usercmdMovements[slot].empty();
+}
+
+// Replaces Bot AI analog movement after the final command is generated
+static bool ApplyUsercmdMovement(
+    int slot,
+    PlayerCommand *pc,
+    CBaseUserCmdPB *base)
+{
+    if (!ValidSlotIndex(slot) || pc == nullptr || base == nullptr) return false;
+
+    UsercmdMovement movement{};
+    uint64_t previousMask = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+        const auto &movements = g_usercmdMovements[slot];
+        if (movements.empty()) return false;
+        movement = movements.back();
+        previousMask = g_movementHeldMasks[slot];
+    }
+
+    uint64_t movementMask = 0;
+    if (movement.forwardMove > 0.0f)
+        movementMask |= kInForward;
+    else if (movement.forwardMove < 0.0f)
+        movementMask |= kInBack;
+    if (movement.leftMove > 0.0f)
+        movementMask |= kInMoveLeft;
+    else if (movement.leftMove < 0.0f)
+        movementMask |= kInMoveRight;
+
+    {
+        std::lock_guard<std::mutex> lock(g_usercmdInjectionMutex);
+        g_movementHeldMasks[slot] = movementMask;
+    }
+
+    uint64_t pressedMask = movementMask & ~previousMask;
+    uint64_t releasedMask = previousMask & ~movementMask;
+    uint64_t held =
+        (pc->buttonstates.m_pButtonStates[0] & ~kMovementButtonMask) |
+        movementMask;
+    uint64_t pressed =
+        (pc->buttonstates.m_pButtonStates[1] & ~kMovementButtonMask) |
+        pressedMask;
+    uint64_t released =
+        (pc->buttonstates.m_pButtonStates[2] & ~movementMask) |
+        releasedMask;
+
+    CInButtonStatePB *buttons = base->mutable_buttons_pb();
+    buttons->set_buttonstate1(held);
+    buttons->set_buttonstate2(pressed);
+    buttons->set_buttonstate3(released);
+    pc->buttonstates.m_pButtonStates[0] = held;
+    pc->buttonstates.m_pButtonStates[1] = pressed;
+    pc->buttonstates.m_pButtonStates[2] = released;
+
+    base->set_forwardmove(
+        movement.forwardMove * kUsercmdKeyboardMoveScale);
+    base->set_leftmove(movement.leftMove * kUsercmdKeyboardMoveScale);
+    g_usercmdMovementApplyCalls.fetch_add(1, std::memory_order_relaxed);
+    g_lastUsercmdMovementSlot.store(slot, std::memory_order_relaxed);
+    g_lastUsercmdForwardMove.store(
+        static_cast<int>(std::lround(
+            movement.forwardMove * kUsercmdKeyboardMoveScale)),
+        std::memory_order_relaxed);
+    g_lastUsercmdLeftMove.store(
+        static_cast<int>(std::lround(
+            movement.leftMove * kUsercmdKeyboardMoveScale)),
+        std::memory_order_relaxed);
+    for (int index = 0; index < base->subtick_moves_size(); ++index)
+    {
+        CSubtickMoveStep *step = base->mutable_subtick_moves(index);
+        step->set_analog_forward_delta(0.0f);
+        step->set_analog_left_delta(0.0f);
+    }
+    return true;
+}
+
 // Merges active injections and emits aggregate press and release edges
 static bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
@@ -317,7 +516,9 @@ static bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* 
         for (auto it = injections.begin(); it != injections.end();)
         {
             UsercmdInjectionPhase phase = it->phase;
-            if (phase == UsercmdInjectionPhase::PendingRelease || (phase == UsercmdInjectionPhase::Holding && nowMs >= it->expiresAtMs))
+            if (phase == UsercmdInjectionPhase::PendingRelease ||
+                (phase == UsercmdInjectionPhase::Holding &&
+                 nowMs >= it->expiresAtMs))
             {
                 it = injections.erase(it);
                 continue;
@@ -327,7 +528,9 @@ static bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* 
             if (phase == UsercmdInjectionPhase::PendingPress)
             {
                 if (it->durationMs > 0) it->expiresAtMs = nowMs + it->durationMs;
-                it->phase = it->durationMs == 0 ? UsercmdInjectionPhase::PendingRelease : UsercmdInjectionPhase::Holding;
+                it->phase = it->durationMs == 0
+                    ? UsercmdInjectionPhase::PendingRelease
+                    : UsercmdInjectionPhase::Holding;
             }
             ++it;
         }
@@ -369,7 +572,7 @@ static bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB
         int64_t nowMs = MonotonicMilliseconds();
         for (auto it = suppressions.begin(); it != suppressions.end();)
         {
-            if (nowMs >= it->expiresAtMs)
+            if (!it->persistent && nowMs >= it->expiresAtMs)
             {
                 it = suppressions.erase(it);
                 continue;
@@ -476,8 +679,10 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
     bool replaying = slot >= 0 && slot < kMaxSlots && MotionRecorder::IsReplaying(slot);
     bool hasUsercmdInjection = HasUsercmdInjection(slot);
     bool hasUsercmdSuppression = HasUsercmdSuppression(slot);
+    bool hasUsercmdMovement = HasUsercmdMovement(slot);
 
-    if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression))
+    if (cmd && (recording || replaying || hasUsercmdInjection ||
+                hasUsercmdSuppression || hasUsercmdMovement))
     {
         // Compiler computes the multiple-inheritance adjust here.
         auto* pc = reinterpret_cast<PlayerCommand*>(cmd);
@@ -570,8 +775,10 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
             }
         }
 
-        if (hasUsercmdInjection && !replaying) ApplyUsercmdInjections(slot, pc, base);
         if (hasUsercmdSuppression && !replaying) ApplyUsercmdSuppressions(slot, pc, base);
+        if (hasUsercmdInjection && !replaying) ApplyUsercmdInjections(slot, pc, base);
+        if (hasUsercmdMovement && !replaying)
+            ApplyUsercmdMovement(slot, pc, base);
     }
 
     g_origPlayerRunCommand(services, cmd);
@@ -712,7 +919,10 @@ void Remove()
             injections.clear();
         for (auto& suppressions : g_usercmdSuppressions)
             suppressions.clear();
+        for (auto& movements : g_usercmdMovements)
+            movements.clear();
         g_injectedHeldMasks.fill(0);
+        g_movementHeldMasks.fill(0);
     }
     g_installed = false;
     g_status = "not_attempted";
@@ -726,6 +936,14 @@ uint64_t HookCallCount() { return g_hookCalls.load(std::memory_order_relaxed); }
 int LastResolvedSlot() { return g_lastSlot.load(std::memory_order_relaxed); }
 uint64_t FinishMoveCallCount() { return g_finishMoveCalls.load(std::memory_order_relaxed); }
 uint64_t PlayerRunCommandCallCount() { return g_playerRunCommandCalls.load(std::memory_order_relaxed); }
+// Reports how many final bot commands received a movement override
+uint64_t UsercmdMovementApplyCount() { return g_usercmdMovementApplyCalls.load(std::memory_order_relaxed); }
+// Reports the last slot whose final bot command was overridden
+int LastUsercmdMovementSlot() { return g_lastUsercmdMovementSlot.load(std::memory_order_relaxed); }
+// Reports the last forward command magnitude written by the override
+int LastUsercmdForwardMove() { return g_lastUsercmdForwardMove.load(std::memory_order_relaxed); }
+// Reports the last left command magnitude written by the override
+int LastUsercmdLeftMove() { return g_lastUsercmdLeftMove.load(std::memory_order_relaxed); }
 uint64_t PhysicsSimulateCallCount() { return g_physicsSimulateCalls.load(std::memory_order_relaxed); }
 int LastPhysicsSlot() { return g_lastPhysicsSlot.load(std::memory_order_relaxed); }
 uint64_t ReplayCommitCount() { return g_replayCommitCalls.load(std::memory_order_relaxed); }

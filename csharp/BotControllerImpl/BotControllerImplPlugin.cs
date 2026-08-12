@@ -19,7 +19,7 @@ namespace BotControllerImpl;
 public class BotControllerPlugin : BasePlugin
 {
     public override string ModuleName => "BotControllerImpl";
-    public override string ModuleVersion => "0.6.1";
+    public override string ModuleVersion => "0.6.2";
     public override string ModuleAuthor => "XBribo";
     public override string ModuleDescription =>
         "Record & Replay and Control CS2 bots.";

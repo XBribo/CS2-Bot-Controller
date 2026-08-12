@@ -234,7 +234,15 @@ CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock."
                             (unsigned long long)InputInjector::FinishMoveCallCount(),
                             (unsigned long long)InputInjector::PlayerRunCommandCallCount(),
                             (unsigned long long)InputInjector::PhysicsSimulateCallCount(), InputInjector::LastPhysicsSlot(),
-                            (unsigned long long)InputInjector::ReplayCommitCount());
+                             (unsigned long long)InputInjector::ReplayCommitCount());
+
+    Commands::PrintToCaller(
+        context,
+        "[BC] movement override: applies=%llu lastSlot=%d forward=%d left=%d\n",
+        (unsigned long long)InputInjector::UsercmdMovementApplyCount(),
+        InputInjector::LastUsercmdMovementSlot(),
+        InputInjector::LastUsercmdForwardMove(),
+        InputInjector::LastUsercmdLeftMove());
 
     Commands::PrintToCaller(
         context,

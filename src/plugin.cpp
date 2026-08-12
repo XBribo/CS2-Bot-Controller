@@ -46,7 +46,7 @@ class BotControllerPlugin : public ISmmPlugin
     const char* GetDescription() override { return "Record & Replay and Control CS2 bots."; }
     const char* GetURL() override { return ""; }
     const char* GetLicense() override { return "AGPL-3.0"; }
-    const char* GetVersion() override { return "0.6.1"; }
+    const char* GetVersion() override { return "0.6.2"; }
     const char* GetDate() override { return __DATE__; }
     const char* GetLogTag() override { return "BC"; }
 };
