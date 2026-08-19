@@ -740,7 +740,8 @@ static void BC_FASTCALL HookedPlayerRunCommand(void* services, void* cmd)
             if (wsel >= 0) base->set_weaponselect(wsel);
 
             bool suppressUnsafeUtilityAttack =
-                IsThrowableUtilityDef(recordedDef) && wsel < 0 && MotionRecorder::BotActiveWeaponDef(slot) != recordedDef;
+                IsThrowableUtilityDef(recordedDef) && wsel < 0 &&
+                !MotionRecorder::ReplayWeaponDefsMatch(MotionRecorder::BotActiveWeaponDef(slot), recordedDef);
 
             if (haveButtons)
             {

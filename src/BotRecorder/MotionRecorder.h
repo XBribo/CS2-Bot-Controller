@@ -188,6 +188,9 @@ bool SwitchBotWeaponByDef(int slot, int defIndex);
 // -1 if no ws / no active weapon. For C# to reconcile replay weapon.
 int BotActiveWeaponDef(int slot);
 
+// Treats CT and T fire grenades as the same replay weapon type
+bool ReplayWeaponDefsMatch(int firstDef, int secondDef);
+
 // Entity index to write into cmd.weaponselect this replay tick
 int CurrentReplayWeaponSelect(int slot);
 int CurrentReplayWeaponDef(int slot);

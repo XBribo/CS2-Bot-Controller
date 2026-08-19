@@ -98,8 +98,26 @@ static std::atomic<bool> g_dropHookTried{ false };
 static std::atomic<bool> g_dropHookReady{ false };
 static thread_local int g_activeReplayDropSlot = -1;
 static thread_local const ReplayDropEvent* g_activeReplayDropEvent = nullptr;
+constexpr int kMolotovDef = 46;
+constexpr int kIncendiaryDef = 48;
 
 static bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
+
+// Returns whether an item definition is either faction's fire grenade
+static bool IsFireGrenadeDef(int defIndex)
+{
+    return defIndex == kMolotovDef || defIndex == kIncendiaryDef;
+}
+
+// Prefers the recorded fire grenade and falls back to the other faction's variant
+static void* FindReplayWeaponByDef(void* ws, int recordedDef)
+{
+    void* weapon = WeaponLockerHooks::FindWeaponByDef(ws, recordedDef);
+    if (weapon || !IsFireGrenadeDef(recordedDef)) return weapon;
+
+    const int alternateDef = recordedDef == kMolotovDef ? kIncendiaryDef : kMolotovDef;
+    return WeaponLockerHooks::FindWeaponByDef(ws, alternateDef);
+}
 
 // Copies an optional engine Vector into stable recording storage
 static bool ReadDropVector(void* vector, float out[3])
@@ -690,6 +708,12 @@ int BotActiveWeaponDef(int slot)
     return WeaponLockerHooks::ActiveWeaponDef(ws);
 }
 
+// Treats CT and T fire grenades as the same replay weapon type
+bool ReplayWeaponDefsMatch(int firstDef, int secondDef)
+{
+    return firstDef == secondDef || (IsFireGrenadeDef(firstDef) && IsFireGrenadeDef(secondDef));
+}
+
 // Entity index for cmd.weaponselect this replay tick
 int CurrentReplayWeaponDef(int slot)
 {
@@ -715,13 +739,13 @@ int CurrentReplayWeaponSelect(int slot)
     if (!ws) return -1;
 
     // Already holding the recorded weapon -> no switch
-    if (WeaponLockerHooks::ActiveWeaponDef(ws) == recordedDef)
+    if (ReplayWeaponDefsMatch(WeaponLockerHooks::ActiveWeaponDef(ws), recordedDef))
     {
         g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
         return -1;
     }
 
-    void* weapon = WeaponLockerHooks::FindWeaponByDef(ws, recordedDef);
+    void* weapon = FindReplayWeaponByDef(ws, recordedDef);
     if (!weapon) return -1;
     WeaponLockerHooks::SelectWeaponRaw(ws, weapon);
     g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
