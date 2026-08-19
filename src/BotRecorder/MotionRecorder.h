@@ -38,6 +38,36 @@ struct ReplayTick
     MovementSnapshot post;
     int32_t weaponDefIndex; // active weapon item-def index, -1 = none
     uint32_t numSubtick; // subtick moves for this tick, 0..36
+    uint32_t eventFlags; // ReplayEventFlags bitmask
+    int32_t eventWeaponDefIndex; // active item captured for the event, -1 = none
+    uint32_t eventDropVectorFlags; // ReplayDropVectorFlags bitmask
+    float eventDropTargetX;
+    float eventDropTargetY;
+    float eventDropTargetZ;
+    float eventDropVelocityX;
+    float eventDropVelocityY;
+    float eventDropVelocityZ;
+};
+
+enum ReplayEventFlags : uint32_t
+{
+    ReplayEvent_None = 0,
+    ReplayEvent_Drop = 1u << 0,
+};
+
+enum ReplayDropVectorFlags : uint32_t
+{
+    ReplayDropVector_None = 0,
+    ReplayDropVector_Target = 1u << 0,
+    ReplayDropVector_Velocity = 1u << 1,
+};
+
+struct ReplayDropEvent
+{
+    int weaponDefIndex;
+    uint32_t vectorFlags;
+    float target[3];
+    float velocity[3];
 };
 
 struct SubtickMove
@@ -91,6 +121,7 @@ struct ReplayMovementExtra
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
 static_assert(sizeof(ReplayMovementExtra) == 48);
+static_assert(sizeof(ReplayTick) == 228);
 
 namespace MotionRecorder {
 constexpr int kMaxSlots = 64;
@@ -109,7 +140,6 @@ void OnCapturePre(int slot, void* services, void* cmd);
 void OnCapturePost(int slot, void* services, void* cmd);
 // PlayerRunCommand hook: stash this tick's subtick moves (pending).
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
-
 // Track which WeaponServices* maps to this recording slot
 void SetLiveWs(int slot, void* ws);
 void* LiveWs(int slot);
@@ -161,6 +191,35 @@ int BotActiveWeaponDef(int slot);
 // Entity index to write into cmd.weaponselect this replay tick
 int CurrentReplayWeaponSelect(int slot);
 int CurrentReplayWeaponDef(int slot);
+// Consumes the current tick's drop event once
+bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event);
+// Drops the recorded item through the bot pawn's native weapon service
+bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event);
+
+// Drop-event diagnostics exposed through bc_status
+uint64_t DropHookCallCount();
+uint64_t DropHookRecordingCallCount();
+uint64_t DropHookPhysicalDropCount();
+uint64_t DropHookInvalidDefCount();
+uint64_t DropCaptureCount();
+uint64_t DropReplayAttemptCount();
+uint64_t DropReplayHookCallCount();
+uint64_t DropReplayVectorOverrideCount();
+uint64_t DropReplayDetachedCount();
+uint64_t DropReplayNativeCallCount();
+bool DropHookReady();
+void* DropHookAddress();
+int LastDropCaptureSlot();
+uint32_t LastDropCaptureVectorFlags();
+int LastDropHookSlot();
+int LastDropHookWeaponDef();
+bool LastDropHookWasRecording();
+void* LastDropHookPawn();
+void* LastDropHookTarget();
+void* LastDropHookVelocity();
+int LastDropReplaySlot();
+int LastDropReplayWeaponDef();
+uint32_t LastDropReplayVectorFlags();
 
 // ---- replay write hooks ----
 // ProcessMovement (pre): write pre snapshot into CMoveData + pawn velocity + entity moveType

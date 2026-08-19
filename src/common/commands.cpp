@@ -252,6 +252,27 @@ CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock."
         InputInjector::LastOwnerSlot(), InputInjector::LastControllerHandle(), InputInjector::LastControllerIndex(),
         InputInjector::LastOriginalControllerHandle(), InputInjector::LastOriginalControllerIndex());
 
+    Commands::PrintToCaller(
+        context,
+        "[BC] replay drop: source=native replay=clientcmd hook=%s address=%p hookCalls=%llu recordingCalls=%llu physicalDrops=%llu invalidDef=%llu "
+        "lastHookSlot=%d hookDef=%d target=%p velocity=%p recording=%s pawn=%p captured=%llu lastCaptureSlot=%d captureVec=0x%X "
+        "attempts=%llu replayHookCalls=%llu overrides=%llu detached=%llu nativeCalls=%llu lastReplaySlot=%d def=%d replayVec=0x%X\n",
+        MotionRecorder::DropHookReady() ? "yes" : "no", MotionRecorder::DropHookAddress(),
+        (unsigned long long)MotionRecorder::DropHookCallCount(),
+        (unsigned long long)MotionRecorder::DropHookRecordingCallCount(),
+        (unsigned long long)MotionRecorder::DropHookPhysicalDropCount(),
+        (unsigned long long)MotionRecorder::DropHookInvalidDefCount(), MotionRecorder::LastDropHookSlot(),
+        MotionRecorder::LastDropHookWeaponDef(), MotionRecorder::LastDropHookTarget(), MotionRecorder::LastDropHookVelocity(),
+        MotionRecorder::LastDropHookWasRecording() ? "yes" : "no", MotionRecorder::LastDropHookPawn(),
+        (unsigned long long)MotionRecorder::DropCaptureCount(), MotionRecorder::LastDropCaptureSlot(),
+        MotionRecorder::LastDropCaptureVectorFlags(),
+        (unsigned long long)MotionRecorder::DropReplayAttemptCount(),
+        (unsigned long long)MotionRecorder::DropReplayHookCallCount(),
+        (unsigned long long)MotionRecorder::DropReplayVectorOverrideCount(),
+        (unsigned long long)MotionRecorder::DropReplayDetachedCount(),
+        (unsigned long long)MotionRecorder::DropReplayNativeCallCount(), MotionRecorder::LastDropReplaySlot(),
+        MotionRecorder::LastDropReplayWeaponDef(), MotionRecorder::LastDropReplayVectorFlags());
+
     bool printedReplayHeader = false;
     for (int s = 0; s < MotionRecorder::kMaxSlots; ++s)
     {

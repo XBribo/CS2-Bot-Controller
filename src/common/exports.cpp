@@ -37,7 +37,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return BotController::Dispatch::IsLocked(slot, static_cast<BotController::LockKind>(kind));
 }
 
-extern "C" BC_EXPORT int BotController_GetVersion() { return 18; }
+extern "C" BC_EXPORT int BotController_GetVersion() { return 19; }
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)

@@ -612,6 +612,14 @@ static bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB
     return true;
 }
 
+// Applies one recorded G-drop event through the bot client-command path
+static void ApplyReplayDrop(int slot, void* services)
+{
+    ReplayDropEvent event{};
+    if (!MotionRecorder::TakeCurrentReplayDrop(slot, event)) return;
+    MotionRecorder::DropReplayEventWeapon(slot, services, event);
+}
+
 // ---- ProcessMovement: record pre/post + replay pre ----
 
 // Defined after HookedFinishMove
@@ -655,6 +663,9 @@ static void BC_FASTCALL HookedFinishMove(void* services, void* cmd, void* moveDa
     g_finishMoveCalls.fetch_add(1, std::memory_order_relaxed);
     int slot = ServicesToSlot(services);
     bool replaying = slot >= 0 && slot < kMaxSlots && MotionRecorder::IsReplaying(slot);
+
+    // Apply commands before FinishMove so their effects belong to this replay tick.
+    if (replaying && !g_physicsActive) ApplyReplayDrop(slot, services);
 
     // Before original: write post snapshot into MoveData.
     if (replaying) MotionRecorder::OnReplayFinishMove(slot, services, moveData);
@@ -799,6 +810,9 @@ static void BC_FASTCALL HookedPhysicsSimulate(void* controller)
 
     // pre: snapshot start-of-tick state once (before any subtick mover).
     if (recording) MotionRecorder::OnCapturePre(slot, services, nullptr);
+
+    // Client commands are normally handled before this tick's player simulation.
+    if (replaying) ApplyReplayDrop(slot, services);
 
     g_origPhysicsSimulate(controller);
 

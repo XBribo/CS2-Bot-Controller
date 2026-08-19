@@ -64,6 +64,8 @@ inline int kNode_AbsOrigin = 0xC8;
 
 // m_pWeaponServices
 inline int kPawn_WeaponServices = 0xA30;
+// m_pItemServices
+inline int kPawn_ItemServices = 0xA20;
 // m_pMovementServices
 inline int kPawn_MovementServices = 0xA70;
 // m_hController (CHandle)
@@ -117,6 +119,7 @@ inline int kMove_AbsOrigin = 200;
 
 inline int kVtIdx_PlayerRunCommand = 25;
 inline int kVtIdx_FinishMove = 38;
+inline int kVtIdx_DropWeapon = 24;
 
 void LoadFromGamedata(const nlohmann::json& gd);
 

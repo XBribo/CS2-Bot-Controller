@@ -32,6 +32,7 @@ void LoadFromGamedata(const nlohmann::json& gd)
     kMove_AbsOrigin = Sig::FindPlatformOffset(gd, "CMoveData::AbsOrigin", kMove_AbsOrigin);
     kVtIdx_PlayerRunCommand = Sig::FindPlatformOffset(gd, "vtidx::PlayerRunCommand", kVtIdx_PlayerRunCommand);
     kVtIdx_FinishMove = Sig::FindPlatformOffset(gd, "vtidx::FinishMove", kVtIdx_FinishMove);
+    kVtIdx_DropWeapon = Sig::FindPlatformOffset(gd, "vtidx::DropWeapon", kVtIdx_DropWeapon);
 }
 
 // Resolves one required Schema field into its runtime target
@@ -71,6 +72,7 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
         { &kBody_SceneNode, "CBodyComponent", "m_pSceneNode" },
         { &kNode_AbsOrigin, "CGameSceneNode", "m_vecAbsOrigin" },
         { &kPawn_WeaponServices, "CBasePlayerPawn", "m_pWeaponServices" },
+        { &kPawn_ItemServices, "CBasePlayerPawn", "m_pItemServices" },
         { &kPawn_MovementServices, "CBasePlayerPawn", "m_pMovementServices" },
         { &kPawn_Controller, "CBasePlayerPawn", "m_hController" },
         { &kPawn_OriginalController, "CCSPlayerPawnBase", "m_hOriginalController" },

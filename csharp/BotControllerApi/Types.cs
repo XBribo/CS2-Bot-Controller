@@ -58,6 +58,15 @@ namespace BotControllerApi
         public MovementSnapshot Post;
         public int WeaponDefIndex;
         public uint NumSubtick;
+        public uint EventFlags;
+        public int EventWeaponDefIndex;
+        public uint EventDropVectorFlags;
+        public float EventDropTargetX;
+        public float EventDropTargetY;
+        public float EventDropTargetZ;
+        public float EventDropVelocityX;
+        public float EventDropVelocityY;
+        public float EventDropVelocityZ;
     }
 
     /** One subtick input step. Must match C++ SubtickMove byte layout exactly */
