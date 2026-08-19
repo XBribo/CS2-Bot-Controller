@@ -211,67 +211,13 @@ CON_COMMAND_F(bc_unlock_all, "bc_unlock_all <all|aim|weapon>  Release every lock
         Commands::PrintToCaller(context, "[BC] error: unlock_all failed (rc=%d)\n", rc);
 }
 
-CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock.", FCVAR_NONE)
+CON_COMMAND_F(bc_status, "bc_status  Print a concise BotController status summary.", FCVAR_NONE)
 {
     using namespace BotController;
 
-    // Hooks
-    Commands::PrintToCaller(context, "[BC] weapon hooks: %s | EquipBest=%p EquipPistol=%p SelectItem=%p GetSlot=%p\n",
-                            WeaponLockerHooks::Status(), WeaponLockerHooks::EquipBestWeaponAddress(),
-                            WeaponLockerHooks::EquipPistolAddress(), WeaponLockerHooks::SelectItemAddress(),
-                            WeaponLockerHooks::GetSlotAddress());
-
-    Commands::PrintToCaller(context, "[BC] bot hooks:    %s | Update=%p Upkeep=%p\n", BotControllerHooks::Status(),
-                            BotControllerHooks::UpdateAddress(), BotControllerHooks::UpkeepAddress());
-
-    Commands::PrintToCaller(context, "[BC] input inject: %s | ProcessUsercmd=%p\n", InputInjector::Status(),
-                            InputInjector::ProcessUsercmdAddress());
-
-    Commands::PrintToCaller(context, "[BC] process movement hook fired: %llu times | last slot=%d\n",
-                            (unsigned long long)InputInjector::HookCallCount(), InputInjector::LastResolvedSlot());
-
-    Commands::PrintToCaller(context, "[BC] movement detail: finish=%llu runCmd=%llu physics=%llu lastPhysicsSlot=%d commits=%llu\n",
-                            (unsigned long long)InputInjector::FinishMoveCallCount(),
-                            (unsigned long long)InputInjector::PlayerRunCommandCallCount(),
-                            (unsigned long long)InputInjector::PhysicsSimulateCallCount(), InputInjector::LastPhysicsSlot(),
-                             (unsigned long long)InputInjector::ReplayCommitCount());
-
-    Commands::PrintToCaller(
-        context,
-        "[BC] movement override: applies=%llu lastSlot=%d forward=%d left=%d\n",
-        (unsigned long long)InputInjector::UsercmdMovementApplyCount(),
-        InputInjector::LastUsercmdMovementSlot(),
-        InputInjector::LastUsercmdForwardMove(),
-        InputInjector::LastUsercmdLeftMove());
-
-    Commands::PrintToCaller(
-        context,
-        "[BC] slot resolve: calls=%llu failures=%llu last services=%p pawn=%p ownerSlot=%d ctrl=0x%08X idx=%d orig=0x%08X idx=%d\n",
-        (unsigned long long)InputInjector::SlotResolveCallCount(), (unsigned long long)InputInjector::SlotResolveFailureCount(),
-        reinterpret_cast<void*>(InputInjector::LastServices()), reinterpret_cast<void*>(InputInjector::LastPawn()),
-        InputInjector::LastOwnerSlot(), InputInjector::LastControllerHandle(), InputInjector::LastControllerIndex(),
-        InputInjector::LastOriginalControllerHandle(), InputInjector::LastOriginalControllerIndex());
-
-    Commands::PrintToCaller(
-        context,
-        "[BC] replay drop: source=native replay=clientcmd hook=%s address=%p hookCalls=%llu recordingCalls=%llu physicalDrops=%llu invalidDef=%llu "
-        "lastHookSlot=%d hookDef=%d target=%p velocity=%p recording=%s pawn=%p captured=%llu lastCaptureSlot=%d captureVec=0x%X "
-        "attempts=%llu replayHookCalls=%llu overrides=%llu detached=%llu nativeCalls=%llu lastReplaySlot=%d def=%d replayVec=0x%X\n",
-        MotionRecorder::DropHookReady() ? "yes" : "no", MotionRecorder::DropHookAddress(),
-        (unsigned long long)MotionRecorder::DropHookCallCount(),
-        (unsigned long long)MotionRecorder::DropHookRecordingCallCount(),
-        (unsigned long long)MotionRecorder::DropHookPhysicalDropCount(),
-        (unsigned long long)MotionRecorder::DropHookInvalidDefCount(), MotionRecorder::LastDropHookSlot(),
-        MotionRecorder::LastDropHookWeaponDef(), MotionRecorder::LastDropHookTarget(), MotionRecorder::LastDropHookVelocity(),
-        MotionRecorder::LastDropHookWasRecording() ? "yes" : "no", MotionRecorder::LastDropHookPawn(),
-        (unsigned long long)MotionRecorder::DropCaptureCount(), MotionRecorder::LastDropCaptureSlot(),
-        MotionRecorder::LastDropCaptureVectorFlags(),
-        (unsigned long long)MotionRecorder::DropReplayAttemptCount(),
-        (unsigned long long)MotionRecorder::DropReplayHookCallCount(),
-        (unsigned long long)MotionRecorder::DropReplayVectorOverrideCount(),
-        (unsigned long long)MotionRecorder::DropReplayDetachedCount(),
-        (unsigned long long)MotionRecorder::DropReplayNativeCallCount(), MotionRecorder::LastDropReplaySlot(),
-        MotionRecorder::LastDropReplayWeaponDef(), MotionRecorder::LastDropReplayVectorFlags());
+    Commands::PrintToCaller(context, "[BC] hooks: weapon=%s bot=%s input=%s drop=%s buy=%s\n",
+                            WeaponLockerHooks::Status(), BotControllerHooks::Status(), InputInjector::Status(),
+                            MotionRecorder::DropHookReady() ? "ok" : "failed", BuyControllerHooks::Status());
 
     bool printedReplayHeader = false;
     for (int s = 0; s < MotionRecorder::kMaxSlots; ++s)
@@ -288,53 +234,15 @@ CON_COMMAND_F(bc_status, "bc_status  Print hook status and every per-slot lock."
             Commands::PrintToCaller(context, "[BC]   replay slot %2d cursor=%d total=%d\n", s, cursor, total);
         }
     }
+    if (!printedReplayHeader) Commands::PrintToCaller(context, "[BC] replay: none\n");
 
-    // All lock
-    int nAll = BotControllerState::CountAll();
-    Commands::PrintToCaller(context, "[BC] all-locked count:    %d\n", nAll);
-    if (nAll > 0)
-    {
-        for (int s = 0; s < BotControllerState::kMaxSlots; ++s)
-            if (BotControllerState::GetAll(s)) Commands::PrintToCaller(context, "[BC]   all   slot %2d\n", s);
-    }
-
-    // Aim lock
-    int nAim = BotControllerState::CountAim();
-    Commands::PrintToCaller(context, "[BC] aim-locked count:    %d\n", nAim);
-    if (nAim > 0)
-    {
-        for (int s = 0; s < BotControllerState::kMaxSlots; ++s)
-            if (BotControllerState::GetAim(s)) Commands::PrintToCaller(context, "[BC]   aim   slot %2d\n", s);
-    }
-
-    // Weapon lock
-    int nWp = WeaponLockerState::CountLocked();
-    Commands::PrintToCaller(context, "[BC] weapon-locked count: %d\n", nWp);
-    if (nWp > 0)
-    {
-        for (int s = 0; s < WeaponLockerState::kMaxSlots; ++s)
-        {
-            auto t = WeaponLockerState::Get(s);
-            if (t != LockTarget::None) Commands::PrintToCaller(context, "[BC]   weapon slot %2d -> %s\n", s, Commands::TargetName(t));
-        }
-    }
-
-    // Buy plans
-    Commands::PrintToCaller(context, "[BC] buy hooks:       %s | OnUpdate=%p\n", BuyControllerHooks::Status(),
-                            BuyControllerHooks::OnUpdateAddress());
-    int nBuy = BuyControllerState::CountPlans();
-    Commands::PrintToCaller(context, "[BC] buy-plan count:      %d\n", nBuy);
-    if (nBuy > 0)
-    {
-        for (int s = 0; s < BuyControllerState::kMaxSlots; ++s)
-        {
-            BuyPlan plan;
-            if (!BuyControllerState::Copy(s, plan)) continue;
-            if (plan.skip) Commands::PrintToCaller(context, "[BC]   buy slot %2d -> skip\n", s);
-            else
-                Commands::PrintToCaller(context, "[BC]   buy slot %2d -> %d items\n", s, static_cast<int>(plan.items.size()));
-        }
-    }
+    Commands::PrintToCaller(context, "[BC] state: locks(all=%d aim=%d weapon=%d) buyPlans=%d\n",
+                            BotControllerState::CountAll(), BotControllerState::CountAim(),
+                            WeaponLockerState::CountLocked(), BuyControllerState::CountPlans());
+    Commands::PrintToCaller(context, "[BC] drop: captured=%llu attempts=%llu commands=%llu\n",
+                            (unsigned long long)MotionRecorder::DropCaptureCount(),
+                            (unsigned long long)MotionRecorder::DropReplayAttemptCount(),
+                            (unsigned long long)MotionRecorder::DropReplayNativeCallCount());
 }
 
 CON_COMMAND_F(bc_buy, "bc_buy <slot> <alias> [alias...]  Force a bot's buy plan for each round.", FCVAR_NONE)
