@@ -1,6 +1,8 @@
 // Lock dispatch: routes per LockKind to the right state table.
 
 #include "dispatch.h"
+#include "runtime.h"
+#include "BotController.h"
 #include "WeaponLockerState.h"
 #include "WeaponLocker.h"
 #include "BotControllerState.h"
@@ -16,6 +18,10 @@ ISource2GameClients* g_gameClients = nullptr;
 // Set lock; Weapon also triggers a one-shot switch.
 int Lock(int slot, LockKind kind, int arg)
 {
+    if (!runtime::IsEnabled()) return -10;
+
+    if (!bot_controller_hooks::IsLiveBotSlot(slot)) return -4;
+
     if (motion_recorder::IsReplaying(slot)) return -3;
 
     switch (kind)

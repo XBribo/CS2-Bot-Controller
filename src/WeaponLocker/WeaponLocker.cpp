@@ -2,6 +2,7 @@
 // CCSPlayer_WeaponServices::SelectItem
 
 #include "WeaponLocker.h"
+#include "BotController.h"
 #include "nlohmann/json.hpp"
 #include "sig_scan.h"
 #include "WeaponLockerState.h"
@@ -85,6 +86,15 @@ void ClearWeaponServiceBindings()
 void RememberWsForBot(void* bot, int slot)
 {
     if (!bot || slot < 0 || slot >= 64)
+    {
+        return;
+    }
+
+    // EquipBestWeapon / EquipPistol are CCSBot methods, so validate the bot
+    // pointer directly instead of depending on the BotController Update cache.
+    // This keeps the cache bot-only without rejecting a freshly-created bot
+    // that has not reached its first CCSBot::Update yet.
+    if (CCSBotToSlot(bot) != slot)
     {
         return;
     }
@@ -234,6 +244,10 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int /*flag*/) noexc
     const WsBinding binding = LookupBindingForWs(ws);
 
     if (binding.slot < 0)
+    {
+        return { KHook::Action::Ignore };
+    }
+    if (!bot_controller_hooks::IsLiveBotSlot(binding.slot))
     {
         return { KHook::Action::Ignore };
     }
@@ -678,7 +692,7 @@ bool SelectWeaponRaw(void* ws, void* weapon)
 
 void* WsForSlot(int slot)
 {
-    if (!g_installed || slot < 0 || slot >= 64)
+    if (!g_installed || slot < 0 || slot >= 64 || !bot_controller_hooks::IsLiveBotSlot(slot))
     {
         return nullptr;
     }
@@ -707,6 +721,10 @@ int SwitchToLockTarget(int slot)
     }
 
     if (slot < 0 || slot >= 64)
+    {
+        return 3;
+    }
+    if (!bot_controller_hooks::IsLiveBotSlot(slot))
     {
         return 3;
     }

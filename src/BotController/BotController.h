@@ -1,4 +1,4 @@
-// MinHook install/remove for CCSBot Update/Upkeep.
+// KHook install/remove for CCSBot Update/Upkeep and replay view control.
 
 #pragma once
 
@@ -29,3 +29,7 @@ bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw);
 void* BotForSlot(int slot);
 } // namespace bot_controller_hooks
 } // namespace cs2bc
+
+// Returns true only when this slot is currently backed by a live CCSBot.
+// The cached bot pointer is revalidated before returning true.
+bool IsLiveBotSlot(int slot);

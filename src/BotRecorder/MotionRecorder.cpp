@@ -120,19 +120,6 @@ constexpr int kIncendiaryDef = 48;
 
 bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
 
-// Returns true only when BotController has observed a live CCSBot for this
-// slot and the cached pointer still resolves back to the same slot.
-//
-// Replay/control paths use this as a safety boundary so a stale slot can never
-// start driving a human who later reuses the same player index.
-bool IsKnownBotSlot(int slot)
-{
-    if (!ValidSlot(slot)) return false;
-
-    void* bot = bot_controller_hooks::BotForSlot(slot);
-    return bot && CCSBotToSlot(bot) == slot;
-}
-
 static int ReplayWeaponSelectForDef(int slot, int recordedDef);
 
 // Returns whether an item definition is either faction's fire grenade
@@ -169,7 +156,8 @@ int ReplaySlotForWeaponServices(void* weaponServices)
 {
     for (int slot = 0; slot < kMaxSlots; ++slot)
     {
-        if (IsKnownBotSlot(slot) && IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices) return slot;
+        if (bot_controller_hooks::IsLiveBotSlot(slot) && IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices)
+            return slot;
     }
     return -1;
 }
@@ -198,7 +186,8 @@ KHook::Return<DropWeaponResult> HookedDropWeapon(void* weaponServices, void* wea
     void* pawn = nullptr;
     if (weaponServices) GuardedRead(weaponServices, tg::g_servicesPawn, pawn);
     const int recordingSlot = RecordingSlotForWeaponServices(weaponServices, pawn);
-    const int activeReplaySlot = ValidSlot(g_activeReplayDropSlot) && IsKnownBotSlot(g_activeReplayDropSlot) ? g_activeReplayDropSlot : -1;
+    const int activeReplaySlot =
+        ValidSlot(g_activeReplayDropSlot) && bot_controller_hooks::IsLiveBotSlot(g_activeReplayDropSlot) ? g_activeReplayDropSlot : -1;
     const int replaySlot = ValidSlot(activeReplaySlot) ? activeReplaySlot : ReplaySlotForWeaponServices(weaponServices);
     const int slot = ValidSlot(recordingSlot) ? recordingSlot : replaySlot;
 
@@ -296,7 +285,7 @@ KHook::Return<DropWeaponResult> DropWeaponPost(void*, void*, void*, void*) noexc
         }
         if (!found) r.pendingDropCandidates.push_back({ .weapon = weapon, .event = recordedEvent });
     }
-    if (detached && ValidSlot(g_activeReplayDropSlot) && IsKnownBotSlot(g_activeReplayDropSlot))
+    if (detached && ValidSlot(g_activeReplayDropSlot) && bot_controller_hooks::IsLiveBotSlot(g_activeReplayDropSlot))
         g_dropReplayDetachedCount.fetch_add(1, std::memory_order_relaxed);
     return { KHook::Action::Ignore };
 }
@@ -696,7 +685,7 @@ bool StartReplay(int slot, bool loop)
     // Replay is an engine-control operation and is intentionally bot-only.
     // Recording may target humans, but recorded state must never be driven
     // back into a human slot.
-    if (!IsKnownBotSlot(slot)) return false;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot)) return false;
 
     ReplayState& p = g_rep[slot];
     {
@@ -735,7 +724,7 @@ bool IsReplaying(int slot)
 
     // If the bot disappeared or the slot was reused, stop immediately instead
     // of allowing stale replay state to target another player.
-    if (!IsKnownBotSlot(slot))
+    if (!bot_controller_hooks::IsLiveBotSlot(slot))
     {
         p.playing.store(false, std::memory_order_release);
         input_injector::ClearReplayPawn(slot);
@@ -905,7 +894,7 @@ bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b
 
 bool SwitchBotWeaponByDef(int slot, int defIndex)
 {
-    if (!IsKnownBotSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
     if (!weapon_locker_hooks::WeaponHooksReady()) return false;
     void* ws = weapon_locker_hooks::WsForSlot(slot);
     if (!ws) return false;
@@ -917,7 +906,7 @@ bool SwitchBotWeaponByDef(int slot, int defIndex)
 // Def index of the bot's current active weapon
 int BotActiveWeaponDef(int slot)
 {
-    if (!IsKnownBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
     void* ws = weapon_locker_hooks::WsForSlot(slot);
     if (!ws) return -1;
     return weapon_locker_hooks::ActiveWeaponDef(ws);
@@ -947,7 +936,7 @@ namespace {
 
 int ReplayWeaponSelectForDef(int slot, int recordedDef)
 {
-    if (!IsKnownBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
     if (recordedDef < 0) return -1;
 
     void* ws = weapon_locker_hooks::WsForSlot(slot);
@@ -1003,7 +992,8 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event)
 {
     const int weaponDefIndex = event.weaponDefIndex;
-    if (!IsKnownBotSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady())
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) ||
+        !weapon_locker_hooks::WeaponHooksReady())
         return false;
 
     g_dropReplayAttemptCount.fetch_add(1, std::memory_order_relaxed);
@@ -1171,7 +1161,7 @@ void WriteReplayViewHistory(void* services, void* pawn, float pitch, float yaw)
 
 void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView)
 {
-    if (!IsKnownBotSlot(slot) || !services || !IsReplaying(slot)) return;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !services || !IsReplaying(slot)) return;
 
     WriteVelocityToPawn(slot, services, tick.pre);
     WriteMovementServiceState(services, tick.pre);
@@ -1190,7 +1180,7 @@ void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
 // ProcessMovement (pre): seed CMoveData + pawn + moveType with pre state.
 void OnReplayPre(int slot, void* services, void* moveData)
 {
-    if (!IsKnownBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
     ReplayTick t{};
     {
@@ -1219,7 +1209,7 @@ void OnReplayPre(int slot, void* services, void* moveData)
 // FinishMove (pre): write post snapshot into CMoveData + scene-node origin.
 void OnReplayFinishMove(int slot, void* services, void* moveData)
 {
-    if (!IsKnownBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
     ReplayTick t{};
     {
@@ -1235,7 +1225,7 @@ void OnReplayFinishMove(int slot, void* services, void* moveData)
 
 void OnReplayCommit(int slot, void* services)
 {
-    if (!IsKnownBotSlot(slot) || !services || !IsReplaying(slot)) return;
+    if (!bot_controller_hooks::IsLiveBotSlot(slot) || !services || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
 
     ReplayTick t{};

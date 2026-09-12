@@ -540,5 +540,22 @@ void* BotForSlot(int slot)
     return g_slotToBot[slot];
 }
 
+bool IsLiveBotSlot(int slot)
+{
+    if (slot < 0 || slot >= 64) return false;
+
+    void* bot = nullptr;
+
+    {
+        std::scoped_lock lk(g_slotToBotMu);
+
+        bot = g_slotToBot[slot];
+    }
+
+    if (!bot) return false;
+
+    return CCSBotToSlot(bot) == slot;
+}
+
 } // namespace bot_controller_hooks
 } // namespace cs2bc

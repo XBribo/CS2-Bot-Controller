@@ -273,6 +273,19 @@ CON_COMMAND_F(bc_buy, // NOLINT(bugprone-throwing-static-initialization)
     }
 
     const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    if (!runtime::IsEnabled())
+    {
+        commands::PrintToCaller(context, "[BC] error: runtime disabled\n");
+
+        return;
+    }
+
+    if (!bot_controller_hooks::IsLiveBotSlot(slot))
+    {
+        commands::PrintToCaller(context, "[BC] error: no live bot on slot %d\n", slot);
+
+        return;
+    }
     if (slot < 0 || slot >= buy_controller_state::kMaxSlots)
     {
         commands::PrintToCaller(context, "[BC] error: slot out of range\n");
@@ -298,6 +311,19 @@ CON_COMMAND_F(bc_buy_skip, // NOLINT(bugprone-throwing-static-initialization)
     }
 
     const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    if (!runtime::IsEnabled())
+    {
+        commands::PrintToCaller(context, "[BC] error: runtime disabled\n");
+
+        return;
+    }
+
+    if (!bot_controller_hooks::IsLiveBotSlot(slot))
+    {
+        commands::PrintToCaller(context, "[BC] error: no live bot on slot %d\n", slot);
+
+        return;
+    }
     if (slot < 0 || slot >= buy_controller_state::kMaxSlots)
     {
         commands::PrintToCaller(context, "[BC] error: slot out of range\n");

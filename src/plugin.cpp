@@ -76,13 +76,19 @@ std::string ComputeGamedataPath()
 //
 // runtime::Shutdown() is deliberately called first so all callbacks/hooks are
 // gone before engine interfaces and schema state become unavailable.
+//
+// runtime::Shutdown() must also reset:
+//   runtimeRequested = false
+//   metaPaused       = false
+//   enabled          = false
 // -----------------------------------------------------------------------------
 
 void ShutdownCore()
 {
     g_coreReady = false;
 
-    // Remove every runtime hook and forget prepared runtime data.
+    // Remove every runtime hook, clear transient runtime state and forget
+    // prepared runtime data/request/pause state.
     cs2bc::runtime::Shutdown();
 
     // Clear interfaces used by runtime/API helper code.
@@ -97,6 +103,7 @@ void ShutdownCore()
     if (g_schemaInitialized)
     {
         cs2bc::schema::Reset();
+
         g_schemaInitialized = false;
     }
 
@@ -104,6 +111,7 @@ void ShutdownCore()
     if (g_convarsRegistered)
     {
         ConVar_Unregister();
+
         g_convarsRegistered = false;
     }
 
@@ -120,7 +128,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 {
     PLUGIN_SAVEVARS();
 
-    // Start from a known state.
+    // Start from a known plugin-core state.
     g_coreReady = false;
 
     // ---------------------------------------------------------------------
@@ -129,7 +137,10 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!KHook::__exported__khook)
     {
-        std::snprintf(error, maxlen, "Metamod with KHook support is required");
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Metamod with KHook support is required");
+        }
 
         return false;
     }
@@ -142,9 +153,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!g_pCVar)
     {
-        std::snprintf(error, maxlen, "Failed to get ICvar (%s) via engine factory", CVAR_INTERFACE_VERSION);
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Failed to get ICvar (%s) via engine factory", CVAR_INTERFACE_VERSION);
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -156,9 +171,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!cs2bc::schema::Init(schemaError, sizeof(schemaError)))
     {
-        std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -166,9 +185,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!cs2bc::targets::LoadFromSchema(schemaError, sizeof(schemaError)))
     {
-        std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -178,7 +201,8 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     if (cs2bc::projectile_birth_align::ConfigureOffsets(cs2bc::targets::g_projectileInitialPosition,
                                                         cs2bc::targets::g_projectileInitialVelocity) != 0)
     {
-        Warning("[BotController] projectile birth alignment offsets unavailable\n");
+        Warning("[BotController] projectile birth alignment offsets "
+                "unavailable\n");
     }
 
     // ---------------------------------------------------------------------
@@ -197,9 +221,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!cs2bc::dispatch::g_engine)
     {
-        std::snprintf(error, maxlen, "Failed to get IVEngineServer2 (%s)", INTERFACEVERSION_VENGINESERVER);
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Failed to get IVEngineServer2 (%s)", INTERFACEVERSION_VENGINESERVER);
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -217,9 +245,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!serverIface)
     {
-        std::snprintf(error, maxlen, "Failed to get ISource2GameClients (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Failed to get ISource2GameClients (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -254,9 +286,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (gamedataPath.empty())
     {
-        std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -264,9 +300,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!cs2bc::sig::LoadGamedata(gamedataPath.c_str(), gamedata))
     {
-        std::snprintf(error, maxlen, "Failed to load gamedata: %s", gamedataPath.c_str());
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "Failed to load gamedata: %s", gamedataPath.c_str());
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -278,9 +318,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
     if (!serverModule)
     {
-        std::snprintf(error, maxlen, "ModuleFromInterfacePtr returned null");
+        if (error && maxlen > 0)
+        {
+            std::snprintf(error, maxlen, "ModuleFromInterfacePtr returned null");
+        }
 
         ShutdownCore();
+
         return false;
     }
 
@@ -293,36 +337,45 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     // ---------------------------------------------------------------------
     // Prepare runtime
     //
-    // This copies gamedata + serverModule into the runtime controller.
+    // Stores gamedata + server module for later Enable/Disable cycles.
     //
-    // No hooks are installed by Prepare().
+    // Prepare() itself installs no hooks and does not express whether runtime
+    // is requested.
     // ---------------------------------------------------------------------
 
     if (!cs2bc::runtime::Prepare(gamedata, serverModule, error, maxlen))
     {
         ShutdownCore();
+
         return false;
     }
 
-    g_coreReady = true;
-
     // ---------------------------------------------------------------------
-    // Enable runtime
+    // Initial runtime request
     //
-    // For now we preserve the original BotController behaviour:
-    // loading the MetaMod plugin immediately enables its hooks.
+    // IMPORTANT:
     //
-    // Later the CSS provider can explicitly call runtime::SetEnabled(false)
-    // when no bots are required.
+    // Use SetEnabled(true), NOT Enable().
+    //
+    // SetEnabled() records runtimeRequested=true and only activates the hook
+    // layer when MetaMod is not paused.
+    //
+    // This preserves the original plugin behaviour at startup while also
+    // establishing the correct requested-state model for later CSS control.
     // ---------------------------------------------------------------------
 
-    if (!cs2bc::runtime::Enable(error, maxlen))
+    if (!cs2bc::runtime::SetEnabled(true, error, maxlen))
     {
         ShutdownCore();
+
         return false;
     }
 
-    Msg("[BotController] Core loaded; runtime enabled\n");
+    // The plugin core is fully initialized only after runtime preparation and
+    // the initial runtime request succeeded.
+    g_coreReady = true;
+
+    Msg("[BotController] Core loaded; runtime %s\n", cs2bc::runtime::IsEnabled() ? "enabled" : "requested but inactive");
 
     return true;
 }
@@ -330,10 +383,19 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 // -----------------------------------------------------------------------------
 // Pause
 //
-// MetaMod pause now performs a real runtime pause.
+// MetaMod pause has priority over the managed/runtime request.
 //
-// The plugin DLL, interfaces, schema, gamedata, exported C ABI and commands
-// remain loaded, but all BotController runtime hooks are removed.
+// IMPORTANT:
+//
+// Do NOT call runtime::Disable() directly here.
+//
+// SetMetaPaused(true) must remember the MetaMod pause even when runtime was
+// already disabled by SetEnabled(false).
+//
+// Examples:
+//
+//   requested=true  + meta pause -> hooks removed
+//   requested=false + meta pause -> hooks stay removed, pause remembered
 // -----------------------------------------------------------------------------
 
 bool BotControllerPlugin::Pause(char* error, size_t maxlen)
@@ -348,12 +410,12 @@ bool BotControllerPlugin::Pause(char* error, size_t maxlen)
         return false;
     }
 
-    // Idempotent.
-    if (!cs2bc::runtime::IsEnabled()) return true;
+    if (!cs2bc::runtime::SetMetaPaused(true, error, maxlen))
+    {
+        return false;
+    }
 
-    cs2bc::runtime::Disable();
-
-    Msg("[BotController] Runtime paused\n");
+    Msg("[BotController] MetaMod paused; runtime disabled\n");
 
     return true;
 }
@@ -361,8 +423,19 @@ bool BotControllerPlugin::Pause(char* error, size_t maxlen)
 // -----------------------------------------------------------------------------
 // Unpause
 //
-// Reinstalls the runtime hooks using the gamedata/module information retained
-// by runtime::Prepare().
+// Releases MetaMod's runtime veto.
+//
+// IMPORTANT:
+//
+// Do NOT call runtime::Enable() directly here.
+//
+// SetMetaPaused(false) decides whether runtime should actually become active:
+//
+//   requested=true  -> reinstall hooks
+//   requested=false -> remain inactive
+//
+// Therefore a CSS SetRuntimeEnabled(false) request survives a
+// MetaMod pause/unpause cycle.
 // -----------------------------------------------------------------------------
 
 bool BotControllerPlugin::Unpause(char* error, size_t maxlen)
@@ -377,15 +450,20 @@ bool BotControllerPlugin::Unpause(char* error, size_t maxlen)
         return false;
     }
 
-    // Idempotent.
-    if (cs2bc::runtime::IsEnabled()) return true;
-
-    if (!cs2bc::runtime::Enable(error, maxlen))
+    if (!cs2bc::runtime::SetMetaPaused(false, error, maxlen))
     {
         return false;
     }
 
-    Msg("[BotController] Runtime resumed\n");
+    if (cs2bc::runtime::IsEnabled())
+    {
+        Msg("[BotController] MetaMod unpaused; runtime enabled\n");
+    }
+    else
+    {
+        Msg("[BotController] MetaMod unpaused; "
+            "runtime remains disabled by request\n");
+    }
 
     return true;
 }

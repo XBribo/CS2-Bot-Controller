@@ -143,21 +143,6 @@ bool IsThrowableUtilityDef(int def) { return def >= 43 && def <= 48; }
 // Reports whether a slot can index the fixed replay state arrays.
 bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
 
-// Returns true only for a slot currently backed by a live CCSBot.
-//
-// BotController's CCSBot::Update hook is the authoritative source of live bot
-// pointers. Re-resolving the cached pointer here prevents a stale slot cache
-// from classifying a human as a bot after slot reuse.
-bool IsKnownBotSlot(int slot)
-{
-    if (!ValidSlotIndex(slot)) return false;
-
-    void* bot = bot_controller_hooks::BotForSlot(slot);
-    if (!bot) return false;
-
-    return CCSBotToSlot(bot) == slot;
-}
-
 // Reads the helper pawn field embedded in movement services.
 void* ServicesToPawnField(void* services)
 {
@@ -180,7 +165,8 @@ bool SetReplayPawn(int slot, void* pawn)
 {
     // Replay ownership is bot-only. Recording may target a human, but replay
     // state and replay pawn registration must never be attached to a human.
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || motion_recorder::IsReplaying(slot))
+        return false;
 
     g_slotPawns[slot].store(nullptr, std::memory_order_release);
 
@@ -294,8 +280,8 @@ int64_t MonotonicMilliseconds()
 
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive ||
-        motion_recorder::IsReplaying(slot))
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || buttonMask == 0 || durationMs < 0 ||
+        !g_subtickActive || motion_recorder::IsReplaying(slot))
     {
         return -1;
     }
@@ -304,7 +290,7 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
 
-    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+    if (!g_installed || !bot_controller_hooks::IsLiveBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
 
     g_usercmdInjections[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .durationMs = durationMs, .phase = UsercmdInjectionPhase::PendingPress });
@@ -315,8 +301,8 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 // Creates an independently cancellable persistent analog movement override
 int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) ||
-        !g_subtickActive || motion_recorder::IsReplaying(slot))
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || !std::isfinite(forwardMove) ||
+        !std::isfinite(leftMove) || !g_subtickActive || motion_recorder::IsReplaying(slot))
     {
         return -1;
     }
@@ -325,7 +311,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
 
-    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+    if (!g_installed || !bot_controller_hooks::IsLiveBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
 
     g_usercmdMovements[slot].push_back(
         { .id = id, .forwardMove = std::clamp(forwardMove, -1.0F, 1.0F), .leftMove = std::clamp(leftMove, -1.0F, 1.0F) });
@@ -336,7 +322,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 // Updates one persistent analog movement override
 bool UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
 {
-    if (!g_installed || !g_subtickActive || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || movementId <= 0 ||
+    if (!g_installed || !g_subtickActive || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || movementId <= 0 ||
         !std::isfinite(forwardMove) || !std::isfinite(leftMove) || motion_recorder::IsReplaying(slot))
     {
         return false;
@@ -394,8 +380,8 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
 // Suppresses selected usercmd buttons until the requested duration expires
 bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || durationMs <= 0 || !g_subtickActive ||
-        motion_recorder::IsReplaying(slot))
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || buttonMask == 0 || durationMs <= 0 ||
+        !g_subtickActive || motion_recorder::IsReplaying(slot))
     {
         return false;
     }
@@ -404,7 +390,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
 
-    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return false;
+    if (!g_installed || !bot_controller_hooks::IsLiveBotSlot(slot) || motion_recorder::IsReplaying(slot)) return false;
 
     g_usercmdSuppressions[slot].push_back(
         { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false, .releasePending = true });
@@ -415,7 +401,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 // Creates an independently cancellable persistent usercmd suppression
 int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || !g_subtickActive ||
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || buttonMask == 0 || !g_subtickActive ||
         motion_recorder::IsReplaying(slot))
     {
         return -1;
@@ -425,7 +411,7 @@ int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
 
-    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+    if (!g_installed || !bot_controller_hooks::IsLiveBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
 
     g_usercmdSuppressions[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true, .releasePending = true });
@@ -494,7 +480,8 @@ bool HasUsercmdMovement(int slot)
 // Replaces Bot AI analog movement after the final command is generated
 bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || pc == nullptr || base == nullptr) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || pc == nullptr || base == nullptr)
+        return false;
 
     UsercmdMovement movement{};
     uint64_t previousMask = 0;
@@ -558,7 +545,7 @@ bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // 
 // Merges active injections and emits aggregate press and release edges
 bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !pc || !base) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || !pc || !base) return false;
 
     uint64_t activeMask = 0;
     uint64_t previousMask = 0;
@@ -620,7 +607,7 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 // Removes suppressed buttons after Bot AI has produced the final command
 bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
-    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !pc || !base) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !bot_controller_hooks::IsLiveBotSlot(slot) || !pc || !base) return false;
 
     uint64_t suppressedMask = 0;
     uint64_t releasedMask = 0;
@@ -703,7 +690,7 @@ KHook::Return<void> HookedProcessMovement(void* services, void* moveData) noexce
 
     // Bot-only control path. Recording is intentionally allowed for a human
     // source slot because recordings are later replayed on bots.
-    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+    const bool botSlot = validSlot && bot_controller_hooks::IsLiveBotSlot(slot);
     const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
 
     // FinishMove / PlayerRunCommand are only needed when this subsystem has
@@ -755,7 +742,7 @@ KHook::Return<void> HookedFinishMove(void* services, void* cmd, void* moveData) 
     g_finishMoveCalls.fetch_add(1, std::memory_order_relaxed);
 
     const int slot = ServicesToSlot(services);
-    const bool botSlot = ValidSlotIndex(slot) && IsKnownBotSlot(slot);
+    const bool botSlot = ValidSlotIndex(slot) && bot_controller_hooks::IsLiveBotSlot(slot);
     const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
 
     // Apply commands before FinishMove so their effects belong to this replay
@@ -803,7 +790,7 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
     const bool recording = validSlot && motion_recorder::IsRecording(slot);
 
     // Every control operation is bot-only.
-    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+    const bool botSlot = validSlot && bot_controller_hooks::IsLiveBotSlot(slot);
     const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
 
     const bool hasUsercmdInjection = botSlot && HasUsercmdInjection(slot);
@@ -984,7 +971,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
 
     const bool recording = validSlot && services && motion_recorder::IsRecording(slot);
 
-    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+    const bool botSlot = validSlot && bot_controller_hooks::IsLiveBotSlot(slot);
 
     const bool replaying = botSlot && services && motion_recorder::IsReplaying(slot);
 

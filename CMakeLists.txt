@@ -203,6 +203,7 @@ add_library(
     src/common/dispatch.cpp
     src/common/commands.cpp
     src/common/exports.cpp
+    src/common/runtime.cpp
     ${PROTO_SRCS}
     ${SDK_SOURCES}
 )

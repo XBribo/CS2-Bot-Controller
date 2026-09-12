@@ -215,6 +215,7 @@ std::vector<std::string> SplitAliases(const char* csv)
 extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char* aliases)
 {
     if (!RuntimeEnabled()) return kRuntimeDisabled;
+    if (!cs2bc::bot_controller_hooks::IsLiveBotSlot(slot)) return -4;
     if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
     cs2bc::buy_controller_state::Set(slot, SplitAliases(aliases), false);
     return 0;
@@ -224,6 +225,7 @@ extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char* aliases)
 extern "C" BC_EXPORT int BotController_SetBuySkip(int slot)
 {
     if (!RuntimeEnabled()) return kRuntimeDisabled;
+    if (!cs2bc::bot_controller_hooks::IsLiveBotSlot(slot)) return -4;
     if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
     cs2bc::buy_controller_state::Set(slot, {}, true);
     return 0;
@@ -411,3 +413,10 @@ extern "C" BC_EXPORT int BotController_GetLastControllerIndex() { return cs2bc::
 extern "C" BC_EXPORT int BotController_GetLastOriginalControllerIndex() { return cs2bc::input_injector::LastOriginalControllerIndex(); }
 
 extern "C" BC_EXPORT int BotController_GetLastOwnerSlot() { return cs2bc::input_injector::LastOwnerSlot(); }
+
+extern "C" BC_EXPORT int BotController_IsLiveBotSlot(int slot)
+{
+    if (!cs2bc::runtime::IsEnabled()) return 0;
+
+    return cs2bc::bot_controller_hooks::IsLiveBotSlot(slot) ? 1 : 0;
+}

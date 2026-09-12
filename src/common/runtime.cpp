@@ -1,7 +1,7 @@
 // BotController runtime lifecycle implementation.
 
 #include "runtime.h"
-
+#include <atomic>
 #include <cstdio>
 
 #include <tier0/dbg.h>
@@ -37,6 +37,8 @@ cs2bc::sig::ModuleInfo g_serverModule;
 
 bool g_prepared = false;
 std::atomic<bool> g_enabled{ false };
+bool g_runtimeRequested = false;
+bool g_metaPaused = false;
 
 // Safely writes an error message when an error buffer was supplied.
 void SetError(char* error, size_t maxlen, const char* message)
@@ -67,7 +69,7 @@ bool Prepare(const nlohmann::json& gamedata, const cs2bc::sig::ModuleInfo& serve
     ClearError(error, maxlen);
 
     // Do not replace the data underneath an active runtime.
-    if (g_enabled)
+    if (g_enabled.load(std::memory_order_acquire))
     {
         SetError(error, maxlen, "Cannot prepare BotController runtime while it is enabled");
 
@@ -118,7 +120,7 @@ void Disable()
     // NativeHook::Remove() waits for active hook invocations before destroying
     // callback storage, so after the following calls return no runtime callback
     // remains owned by these modules.
-    g_enabled = false;
+    g_enabled.store(false, std::memory_order_release);
 
     // ---------------------------------------------------------------------
     // 1. Player simulation hooks
@@ -175,7 +177,10 @@ bool Enable(char* error, size_t maxlen)
     // being called twice while their hooks are already installed.
     //
     // Therefore the runtime coordinator must prevent double installation.
-    if (g_enabled) return true;
+    if (g_enabled.load(std::memory_order_acquire))
+    {
+        return true;
+    }
 
     if (!g_prepared)
     {
@@ -264,7 +269,7 @@ bool Enable(char* error, size_t maxlen)
                 injectorError);
     }
 
-    g_enabled = true;
+    g_enabled.store(true, std::memory_order_release);
 
     Msg("[BotController] Runtime enabled\n");
 
@@ -285,13 +290,43 @@ bool Enable(char* error, size_t maxlen)
 
 bool SetEnabled(bool enabled, char* error, size_t maxlen)
 {
-    if (enabled) return Enable(error, maxlen);
+    g_runtimeRequested = enabled;
 
-    ClearError(error, maxlen);
+    if (!enabled)
+    {
+        ClearError(error, maxlen);
+        Disable();
+        return true;
+    }
 
-    Disable();
+    if (g_metaPaused)
+    {
+        // Request remembered, but MetaMod pause wins.
+        ClearError(error, maxlen);
+        return true;
+    }
 
-    return true;
+    return Enable(error, maxlen);
+}
+
+bool SetMetaPaused(bool paused, char* error, size_t maxlen)
+{
+    g_metaPaused = paused;
+
+    if (paused)
+    {
+        ClearError(error, maxlen);
+        Disable();
+        return true;
+    }
+
+    if (!g_runtimeRequested)
+    {
+        ClearError(error, maxlen);
+        return true;
+    }
+
+    return Enable(error, maxlen);
 }
 
 // -----------------------------------------------------------------------------
@@ -300,7 +335,7 @@ bool SetEnabled(bool enabled, char* error, size_t maxlen)
 
 bool IsPrepared() { return g_prepared; }
 
-bool IsEnabled() { return g_enabled; }
+bool IsEnabled() { return g_enabled.load(std::memory_order_acquire); }
 
 // -----------------------------------------------------------------------------
 // Shutdown
@@ -315,7 +350,7 @@ void Shutdown()
     g_serverModule = cs2bc::sig::ModuleInfo{};
 
     g_prepared = false;
-    g_enabled = false;
+    g_enabled.store(false, std::memory_order_release);
 }
 
 } // namespace cs2bc::runtime
