@@ -8,6 +8,7 @@
 #include "playercommand.h"
 
 #include "InputInjector.h"
+#include "BotController.h"
 #include "ccsbot_slot.h"
 #include "sig_scan.h"
 #include "MotionRecorder.h"
@@ -142,6 +143,21 @@ bool IsThrowableUtilityDef(int def) { return def >= 43 && def <= 48; }
 // Reports whether a slot can index the fixed replay state arrays.
 bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
 
+// Returns true only for a slot currently backed by a live CCSBot.
+//
+// BotController's CCSBot::Update hook is the authoritative source of live bot
+// pointers. Re-resolving the cached pointer here prevents a stale slot cache
+// from classifying a human as a bot after slot reuse.
+bool IsKnownBotSlot(int slot)
+{
+    if (!ValidSlotIndex(slot)) return false;
+
+    void* bot = bot_controller_hooks::BotForSlot(slot);
+    if (!bot) return false;
+
+    return CCSBotToSlot(bot) == slot;
+}
+
 // Reads the helper pawn field embedded in movement services.
 void* ServicesToPawnField(void* services)
 {
@@ -162,18 +178,25 @@ bool PawnOwnsServices(void* pawn, void* services)
 
 bool SetReplayPawn(int slot, void* pawn)
 {
-    if (!ValidSlotIndex(slot) || motion_recorder::IsReplaying(slot)) return false;
+    // Replay ownership is bot-only. Recording may target a human, but replay
+    // state and replay pawn registration must never be attached to a human.
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return false;
+
     g_slotPawns[slot].store(nullptr, std::memory_order_release);
+
     if (!pawn) return false;
 
     void* identity = nullptr;
     uint32_t handle = 0;
+
     if (!GuardedRead(pawn, tg::g_entIdentity, identity) || !identity || !GuardedRead(identity, tg::g_entIdentityEHandle, handle) ||
         handle == 0U || handle == 0xFFFFFFFFU)
+    {
         return false;
+    }
 
-    int ownerSlot = ControllerSlotForPawn(pawn);
-    if (ownerSlot >= 0 && ownerSlot != slot) return false;
+    const int ownerSlot = ControllerSlotForPawn(pawn);
+    if (ownerSlot != slot) return false;
 
     g_slotPawns[slot].store(pawn, std::memory_order_release);
     return true;
@@ -271,44 +294,65 @@ int64_t MonotonicMilliseconds()
 
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive ||
+        motion_recorder::IsReplaying(slot))
+    {
+        return -1;
+    }
 
-    int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
+    const int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
+
     std::scoped_lock lock(g_usercmdInjectionMutex);
-    if (motion_recorder::IsReplaying(slot)) return -1;
+
+    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+
     g_usercmdInjections[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .durationMs = durationMs, .phase = UsercmdInjectionPhase::PendingPress });
+
     return id;
 }
 
 // Creates an independently cancellable persistent analog movement override
 int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 {
-    if (!ValidSlotIndex(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) || !g_subtickActive ||
-        motion_recorder::IsReplaying(slot))
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) ||
+        !g_subtickActive || motion_recorder::IsReplaying(slot))
+    {
         return -1;
+    }
 
-    int64_t id = g_nextUsercmdMovementId.fetch_add(1, std::memory_order_relaxed);
+    const int64_t id = g_nextUsercmdMovementId.fetch_add(1, std::memory_order_relaxed);
+
     std::scoped_lock lock(g_usercmdInjectionMutex);
-    if (motion_recorder::IsReplaying(slot)) return -1;
+
+    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+
     g_usercmdMovements[slot].push_back(
         { .id = id, .forwardMove = std::clamp(forwardMove, -1.0F, 1.0F), .leftMove = std::clamp(leftMove, -1.0F, 1.0F) });
+
     return id;
 }
 
 // Updates one persistent analog movement override
 bool UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
 {
-    if (!ValidSlotIndex(slot) || movementId <= 0 || !std::isfinite(forwardMove) || !std::isfinite(leftMove)) return false;
+    if (!g_installed || !g_subtickActive || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || movementId <= 0 ||
+        !std::isfinite(forwardMove) || !std::isfinite(leftMove) || motion_recorder::IsReplaying(slot))
+    {
+        return false;
+    }
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
+
     for (UsercmdMovement& movement : g_usercmdMovements[slot])
     {
         if (movement.id != movementId) continue;
+
         movement.forwardMove = std::clamp(forwardMove, -1.0F, 1.0F);
         movement.leftMove = std::clamp(leftMove, -1.0F, 1.0F);
         return true;
     }
+
     return false;
 }
 
@@ -350,26 +394,42 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
 // Suppresses selected usercmd buttons until the requested duration expires
 bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || durationMs <= 0 || !g_subtickActive ||
+        motion_recorder::IsReplaying(slot))
+    {
+        return false;
+    }
 
-    int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
+    const int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
+
     std::scoped_lock lock(g_usercmdInjectionMutex);
-    if (motion_recorder::IsReplaying(slot)) return false;
+
+    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return false;
+
     g_usercmdSuppressions[slot].push_back(
         { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false, .releasePending = true });
+
     return true;
 }
 
 // Creates an independently cancellable persistent usercmd suppression
 int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || buttonMask == 0 || !g_subtickActive ||
+        motion_recorder::IsReplaying(slot))
+    {
+        return -1;
+    }
 
-    int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
+    const int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
+
     std::scoped_lock lock(g_usercmdInjectionMutex);
-    if (motion_recorder::IsReplaying(slot)) return -1;
+
+    if (!g_installed || !IsKnownBotSlot(slot) || motion_recorder::IsReplaying(slot)) return -1;
+
     g_usercmdSuppressions[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true, .releasePending = true });
+
     return id;
 }
 
@@ -434,10 +494,11 @@ bool HasUsercmdMovement(int slot)
 // Replaces Bot AI analog movement after the final command is generated
 bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
-    if (!ValidSlotIndex(slot) || pc == nullptr || base == nullptr) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || pc == nullptr || base == nullptr) return false;
 
     UsercmdMovement movement{};
     uint64_t previousMask = 0;
+
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
         const auto& movements = g_usercmdMovements[slot];
@@ -450,6 +511,7 @@ bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // 
     if (movement.forwardMove > 0.0F) movementMask |= kInForward;
     else if (movement.forwardMove < 0.0F)
         movementMask |= kInBack;
+
     if (movement.leftMove > 0.0F) movementMask |= kInMoveLeft;
     else if (movement.leftMove < 0.0F)
         movementMask |= kInMoveRight;
@@ -459,50 +521,57 @@ bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // 
         g_movementHeldMasks[slot] = movementMask;
     }
 
-    uint64_t pressedMask = movementMask & ~previousMask;
-    uint64_t releasedMask = previousMask & ~movementMask;
-    uint64_t held = (pc->buttonstates.m_pButtonStates[0] & ~kMovementButtonMask) | movementMask;
-    uint64_t pressed = (pc->buttonstates.m_pButtonStates[1] & ~kMovementButtonMask) | pressedMask;
-    uint64_t released = (pc->buttonstates.m_pButtonStates[2] & ~movementMask) | releasedMask;
+    const uint64_t pressedMask = movementMask & ~previousMask;
+    const uint64_t releasedMask = previousMask & ~movementMask;
+    const uint64_t held = (pc->buttonstates.m_pButtonStates[0] & ~kMovementButtonMask) | movementMask;
+    const uint64_t pressed = (pc->buttonstates.m_pButtonStates[1] & ~kMovementButtonMask) | pressedMask;
+    const uint64_t released = (pc->buttonstates.m_pButtonStates[2] & ~movementMask) | releasedMask;
 
     CInButtonStatePB* buttons = base->mutable_buttons_pb();
     buttons->set_buttonstate1(held);
     buttons->set_buttonstate2(pressed);
     buttons->set_buttonstate3(released);
+
     pc->buttonstates.m_pButtonStates[0] = held;
     pc->buttonstates.m_pButtonStates[1] = pressed;
     pc->buttonstates.m_pButtonStates[2] = released;
 
     base->set_forwardmove(movement.forwardMove * kUsercmdKeyboardMoveScale);
     base->set_leftmove(movement.leftMove * kUsercmdKeyboardMoveScale);
+
     g_usercmdMovementApplyCalls.fetch_add(1, std::memory_order_relaxed);
     g_lastUsercmdMovementSlot.store(slot, std::memory_order_relaxed);
     g_lastUsercmdForwardMove.store(static_cast<int>(std::lround(movement.forwardMove * kUsercmdKeyboardMoveScale)),
                                    std::memory_order_relaxed);
     g_lastUsercmdLeftMove.store(static_cast<int>(std::lround(movement.leftMove * kUsercmdKeyboardMoveScale)), std::memory_order_relaxed);
+
     for (int index = 0; index < base->subtick_moves_size(); ++index)
     {
         CSubtickMoveStep* step = base->mutable_subtick_moves(index);
         step->set_analog_forward_delta(0.0F);
         step->set_analog_left_delta(0.0F);
     }
+
     return true;
 }
 
 // Merges active injections and emits aggregate press and release edges
 bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
-    if (!ValidSlotIndex(slot) || !pc || !base) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !pc || !base) return false;
 
     uint64_t activeMask = 0;
     uint64_t previousMask = 0;
+
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
         auto& injections = g_usercmdInjections[slot];
-        int64_t nowMs = MonotonicMilliseconds();
+        const int64_t nowMs = MonotonicMilliseconds();
+
         for (auto it = injections.begin(); it != injections.end();)
         {
-            UsercmdInjectionPhase phase = it->phase;
+            const UsercmdInjectionPhase phase = it->phase;
+
             if (phase == UsercmdInjectionPhase::PendingRelease || (phase == UsercmdInjectionPhase::Holding && nowMs >= it->expiresAtMs))
             {
                 it = injections.erase(it);
@@ -510,11 +579,14 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
             }
 
             activeMask |= it->buttonMask;
+
             if (phase == UsercmdInjectionPhase::PendingPress)
             {
                 if (it->durationMs > 0) it->expiresAtMs = nowMs + it->durationMs;
+
                 it->phase = it->durationMs == 0 ? UsercmdInjectionPhase::PendingRelease : UsercmdInjectionPhase::Holding;
             }
+
             ++it;
         }
 
@@ -522,8 +594,9 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
         g_injectedHeldMasks[slot] = activeMask;
     }
 
-    uint64_t pressedMask = activeMask & ~previousMask;
-    uint64_t releasedMask = previousMask & ~activeMask;
+    const uint64_t pressedMask = activeMask & ~previousMask;
+    const uint64_t releasedMask = previousMask & ~activeMask;
+
     uint64_t held = pc->buttonstates.m_pButtonStates[0];
     uint64_t pressed = pc->buttonstates.m_pButtonStates[1];
     uint64_t released = pc->buttonstates.m_pButtonStates[2];
@@ -536,23 +609,27 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
     buttons->set_buttonstate1(held);
     buttons->set_buttonstate2(pressed);
     buttons->set_buttonstate3(released);
+
     pc->buttonstates.m_pButtonStates[0] = held;
     pc->buttonstates.m_pButtonStates[1] = pressed;
     pc->buttonstates.m_pButtonStates[2] = released;
+
     return true;
 }
 
 // Removes suppressed buttons after Bot AI has produced the final command
 bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
-    if (!ValidSlotIndex(slot) || !pc || !base) return false;
+    if (!g_installed || !ValidSlotIndex(slot) || !IsKnownBotSlot(slot) || !pc || !base) return false;
 
     uint64_t suppressedMask = 0;
     uint64_t releasedMask = 0;
+
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
         auto& suppressions = g_usercmdSuppressions[slot];
-        int64_t nowMs = MonotonicMilliseconds();
+        const int64_t nowMs = MonotonicMilliseconds();
+
         for (auto it = suppressions.begin(); it != suppressions.end();)
         {
             if (!it->persistent && nowMs >= it->expiresAtMs)
@@ -562,25 +639,28 @@ bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
             }
 
             suppressedMask |= it->buttonMask;
+
             if (it->releasePending)
             {
                 releasedMask |= it->buttonMask;
                 it->releasePending = false;
             }
+
             ++it;
         }
     }
 
     if (suppressedMask == 0) return false;
 
-    uint64_t held = pc->buttonstates.m_pButtonStates[0] & ~suppressedMask;
-    uint64_t pressed = pc->buttonstates.m_pButtonStates[1] & ~suppressedMask;
-    uint64_t released = pc->buttonstates.m_pButtonStates[2] | releasedMask;
+    const uint64_t held = pc->buttonstates.m_pButtonStates[0] & ~suppressedMask;
+    const uint64_t pressed = pc->buttonstates.m_pButtonStates[1] & ~suppressedMask;
+    const uint64_t released = pc->buttonstates.m_pButtonStates[2] | releasedMask;
 
     CInButtonStatePB* buttons = base->mutable_buttons_pb();
     buttons->set_buttonstate1(held);
     buttons->set_buttonstate2(pressed);
     buttons->set_buttonstate3(released);
+
     pc->buttonstates.m_pButtonStates[0] = held;
     pc->buttonstates.m_pButtonStates[1] = pressed;
     pc->buttonstates.m_pButtonStates[2] = released;
@@ -588,10 +668,12 @@ bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
     for (int i = 0; i < base->subtick_moves_size(); ++i)
     {
         CSubtickMoveStep* move = base->mutable_subtick_moves(i);
-        uint64_t buttonsMask = move->button() & ~suppressedMask;
+        const uint64_t buttonsMask = move->button() & ~suppressedMask;
         move->set_button(buttonsMask);
+
         if (buttonsMask == 0) move->set_pressed(false);
     }
+
     return true;
 }
 
@@ -612,40 +694,56 @@ void EnsureVtableHooks(void* services);
 KHook::Return<void> HookedProcessMovement(void* services, void* moveData) noexcept
 {
     g_hookCalls.fetch_add(1, std::memory_order_relaxed);
-    int slot = ServicesToSlot(services);
+
+    const int slot = ServicesToSlot(services);
     g_lastSlot.store(slot, std::memory_order_relaxed);
 
-    // Lazily hook FinishMove from the live services vtable on first tick.
-    EnsureVtableHooks(services);
+    const bool validSlot = ValidSlotIndex(slot);
+    const bool recording = validSlot && motion_recorder::IsRecording(slot);
 
-    // Cache slot -> services so PhysicsSimulate
-    if (slot >= 0 && slot < kMaxSlots) g_slotServices[slot].store(services, std::memory_order_release);
+    // Bot-only control path. Recording is intentionally allowed for a human
+    // source slot because recordings are later replayed on bots.
+    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+    const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
 
-    bool recording = slot >= 0 && slot < kMaxSlots && motion_recorder::IsRecording(slot);
-    bool replaying = slot >= 0 && slot < kMaxSlots && motion_recorder::IsReplaying(slot);
+    // FinishMove / PlayerRunCommand are only needed when this subsystem has
+    // actual work for this player. Do not initialize the lazy vtable hooks
+    // just because an unrelated human moved.
+    if (recording || botSlot) EnsureVtableHooks(services);
 
-    // Recording weapon tap
+    // PhysicsSimulate needs slot -> services only for recording or bot control.
+    if ((recording || botSlot) && validSlot) g_slotServices[slot].store(services, std::memory_order_release);
+
+    // Recording weapon tap.
     if (recording)
     {
         motion_recorder::SetLiveWs(slot, ServicesToWeaponServices(slot, services));
+
         if (!g_physicsActive) motion_recorder::OnCapturePre(slot, services, moveData);
     }
 
-    // Replay: seed CMoveData + pawn with this tick's pre snapshot
+    // Replay is strictly bot-only.
     if (replaying) motion_recorder::OnReplayPre(slot, services, moveData);
 
+    // The post hook runs for every ProcessMovement call, so keep a matching
+    // lightweight frame even for unrelated humans.
     g_processFrames.push_back({ slot, services, moveData, recording, replaying });
+
     return { KHook::Action::Ignore };
 }
 
 // Completes the matching movement capture after the engine call.
 KHook::Return<void> ProcessMovementPost(void*, void*) noexcept
 {
+    if (g_processFrames.empty()) return { KHook::Action::Ignore };
+
     const auto [slot, services, moveData, recording, replaying] = g_processFrames.back();
     g_processFrames.pop_back();
 
-    // Recording: commit the tick here only when PhysicsSimulate isn't the boundary
+    // Recording: commit the tick here only when PhysicsSimulate is not the
+    // authoritative per-tick boundary.
     if (recording && !g_physicsActive) motion_recorder::OnCapturePost(slot, services, moveData);
+
     return { KHook::Action::Ignore };
 }
 
@@ -655,31 +753,39 @@ KHook::Return<void> ProcessMovementPost(void*, void*) noexcept
 KHook::Return<void> HookedFinishMove(void* services, void* cmd, void* moveData) noexcept
 {
     g_finishMoveCalls.fetch_add(1, std::memory_order_relaxed);
-    int slot = ServicesToSlot(services);
-    bool replaying = slot >= 0 && slot < kMaxSlots && motion_recorder::IsReplaying(slot);
 
-    // Apply commands before FinishMove so their effects belong to this replay tick.
+    const int slot = ServicesToSlot(services);
+    const bool botSlot = ValidSlotIndex(slot) && IsKnownBotSlot(slot);
+    const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
+
+    // Apply commands before FinishMove so their effects belong to this replay
+    // tick. Replay is deliberately bot-only.
     if (replaying && !g_physicsActive) ApplyReplayDrop(slot, services);
 
     // Before original: write post snapshot into MoveData.
     if (replaying) motion_recorder::OnReplayFinishMove(slot, services, moveData);
 
     g_finishFrames.push_back({ slot, services, moveData, false, replaying });
+
     return { KHook::Action::Ignore };
 }
 
 // Advances the matching replay frame when PhysicsSimulate is unavailable.
 KHook::Return<void> FinishMovePost(void*, void*, void*) noexcept
 {
+    if (g_finishFrames.empty()) return { KHook::Action::Ignore };
+
     const auto [slot, services, moveData, recording, replaying] = g_finishFrames.back();
     g_finishFrames.pop_back();
 
-    // After original: commit moveType/flags + advance the replay cursor
+    // After original: commit movement and advance the replay cursor only for
+    // a bot replay when PhysicsSimulate is unavailable.
     if (replaying && !g_physicsActive)
     {
         motion_recorder::OnReplayCommit(slot, services);
         g_replayCommitCalls.fetch_add(1, std::memory_order_relaxed);
     }
+
     return { KHook::Action::Ignore };
 }
 
@@ -688,16 +794,31 @@ KHook::Return<void> FinishMovePost(void*, void*, void*) noexcept
 // Records or injects the user command before native simulation.
 KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
 {
-    projectile_birth_align::ProcessPending();
     g_playerRunCommandCalls.fetch_add(1, std::memory_order_relaxed);
-    int slot = ServicesToSlot(services);
-    bool recording = slot >= 0 && slot < kMaxSlots && motion_recorder::IsRecording(slot);
-    bool replaying = slot >= 0 && slot < kMaxSlots && motion_recorder::IsReplaying(slot);
-    bool hasUsercmdInjection = HasUsercmdInjection(slot);
-    bool hasUsercmdSuppression = HasUsercmdSuppression(slot);
-    bool hasUsercmdMovement = HasUsercmdMovement(slot);
 
-    if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement))
+    const int slot = ServicesToSlot(services);
+    const bool validSlot = ValidSlotIndex(slot);
+
+    // Recording may intentionally target a human source slot.
+    const bool recording = validSlot && motion_recorder::IsRecording(slot);
+
+    // Every control operation is bot-only.
+    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+    const bool replaying = botSlot && motion_recorder::IsReplaying(slot);
+
+    const bool hasUsercmdInjection = botSlot && HasUsercmdInjection(slot);
+    const bool hasUsercmdSuppression = botSlot && HasUsercmdSuppression(slot);
+    const bool hasUsercmdMovement = botSlot && HasUsercmdMovement(slot);
+
+    // Projectile alignment belongs to replay/bot control. Never process it
+    // from an unrelated human PlayerRunCommand callback.
+    if (botSlot) projectile_birth_align::ProcessPending();
+
+    // Unlike ProcessMovement this hook has no post callback, so unrelated
+    // humans can leave immediately without touching command protobufs.
+    if (!cmd || (!recording && !replaying && !hasUsercmdInjection && !hasUsercmdSuppression && !hasUsercmdMovement))
+        return { KHook::Action::Ignore };
+
     {
         // Compiler computes the multiple-inheritance adjust here.
         auto* pc = reinterpret_cast<PlayerCommand*>(cmd);
@@ -852,38 +973,55 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
 // Captures the per-tick state before any subtick movement.
 KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
 {
-    projectile_birth_align::ProcessPending();
     g_physicsSimulateCalls.fetch_add(1, std::memory_order_relaxed);
-    int slot = ControllerToSlot(controller);
+
+    const int slot = ControllerToSlot(controller);
     g_lastPhysicsSlot.store(slot, std::memory_order_relaxed);
-    void* services = (slot >= 0 && slot < kMaxSlots) ? g_slotServices[slot].load(std::memory_order_acquire) : nullptr;
 
-    bool recording = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsRecording(slot);
-    bool replaying = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsReplaying(slot);
+    const bool validSlot = ValidSlotIndex(slot);
 
-    // pre: snapshot start-of-tick state once (before any subtick mover).
+    void* services = validSlot ? g_slotServices[slot].load(std::memory_order_acquire) : nullptr;
+
+    const bool recording = validSlot && services && motion_recorder::IsRecording(slot);
+
+    const bool botSlot = validSlot && IsKnownBotSlot(slot);
+
+    const bool replaying = botSlot && services && motion_recorder::IsReplaying(slot);
+
+    // Projectile alignment is part of bot replay/control only.
+    if (botSlot) projectile_birth_align::ProcessPending();
+
+    // Pre: snapshot start-of-tick state once, before any subtick mover.
+    // Recording is intentionally allowed for a human source slot.
     if (recording) motion_recorder::OnCapturePre(slot, services, nullptr);
 
-    // Client commands are normally handled before this tick's player simulation.
+    // Client commands are normally handled before this tick's player
+    // simulation. Replay is bot-only.
     if (replaying) ApplyReplayDrop(slot, services);
 
+    // The post hook runs for every controller simulation call.
     g_physicsFrames.push_back({ slot, services, nullptr, recording, replaying });
+
     return { KHook::Action::Ignore };
 }
 
 // Commits the recording and replay state for the matching simulation call.
 KHook::Return<void> PhysicsSimulatePost(void*) noexcept
 {
+    if (g_physicsFrames.empty()) return { KHook::Action::Ignore };
+
     const auto [slot, services, moveData, recording, replaying] = g_physicsFrames.back();
     g_physicsFrames.pop_back();
 
-    // post: snapshot end-of-tick state + commit one frame
+    // Post: snapshot end-of-tick state + commit one frame.
     if (recording) motion_recorder::OnCapturePost(slot, services, nullptr);
+
     if (replaying)
     {
         motion_recorder::OnReplayCommit(slot, services);
         g_replayCommitCalls.fetch_add(1, std::memory_order_relaxed);
     }
+
     return { KHook::Action::Ignore };
 }
 
@@ -891,26 +1029,52 @@ std::atomic<bool> g_vtHooksTried{ false };
 
 void EnsureVtableHooks(void* services)
 {
-    if (g_vtHooksTried.exchange(true, std::memory_order_acq_rel)) return;
-    if (!services) return;
+    if (!g_installed || !services) return;
+
+    if (g_vtHooksTried.load(std::memory_order_acquire)) return;
+
     void** vt = nullptr;
+
+    // Do not permanently mark the lazy-hook attempt as consumed until a
+    // readable vtable has actually been obtained. A transient/null services
+    // pointer must not disable FinishMove/PlayerRunCommand for the rest of the
+    // activation cycle.
     if (!GuardedRead(services, 0, vt) || !vt) return;
 
-    if (!GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxFinishMove * static_cast<int>(sizeof(void*)), g_addrFinishMove))
-        g_addrFinishMove = nullptr;
-    if (g_addrFinishMove && !g_hookFinishMove.Install(g_addrFinishMove, &HookedFinishMove, &FinishMovePost)) g_addrFinishMove = nullptr;
+    bool expected = false;
+    if (!g_vtHooksTried.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
 
-    // PlayerRunCommand (subtick record/re-inject)
+    g_addrFinishMove = nullptr;
+    g_addrPlayerRunCommand = nullptr;
+    g_subtickActive = false;
+
+    // FinishMove
+    if (!GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxFinishMove * static_cast<int>(sizeof(void*)), g_addrFinishMove))
+    {
+        g_addrFinishMove = nullptr;
+    }
+
+    if (g_addrFinishMove && !g_hookFinishMove.Install(g_addrFinishMove, &HookedFinishMove, &FinishMovePost))
+    {
+        g_hookFinishMove.Remove();
+        g_addrFinishMove = nullptr;
+    }
+
+    // PlayerRunCommand (subtick recording + bot-only replay/injection).
     if (!GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxPlayerRunCommand * static_cast<int>(sizeof(void*)), g_addrPlayerRunCommand))
+    {
         g_addrPlayerRunCommand = nullptr;
+    }
+
     if (g_addrPlayerRunCommand && g_hookPlayerRunCommand.Install(g_addrPlayerRunCommand, &HookedPlayerRunCommand))
     {
         g_subtickActive = true;
     }
-    else if (g_addrPlayerRunCommand)
+    else
     {
         g_hookPlayerRunCommand.Remove();
         g_addrPlayerRunCommand = nullptr;
+        g_subtickActive = false;
     }
 }
 
@@ -922,74 +1086,119 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
+    // Idempotent: never install a second hook set.
+    if (g_installed)
+    {
+        g_status = "ok";
+        return true;
+    }
+
+    // Defensive rollback of any partial previous attempt.
+    Remove();
+
     g_addrProcessMovement = sig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
+
     if (!g_addrProcessMovement)
     {
         g_status = "failed: ProcessMovement sig";
         return false;
     }
+
     if (!g_hookProcessMovement.Install(g_addrProcessMovement, &HookedProcessMovement, &ProcessMovementPost))
     {
-        std::snprintf(errorOut, errorOutLen, "hook ProcessMovement failed");
-        g_hookProcessMovement.Remove();
+        Remove();
+
+        if (errorOut && errorOutLen > 0) std::snprintf(errorOut, errorOutLen, "hook ProcessMovement failed");
+
         g_status = "failed: hook ProcessMovement";
         return false;
     }
 
-    // PhysicsSimulate: the per-tick boundary
+    // PhysicsSimulate: optional authoritative per-tick boundary.
     char psErr[256] = { 0 };
+
     g_addrPhysicsSimulate = sig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", psErr, sizeof(psErr));
+
     if (g_addrPhysicsSimulate && g_hookPhysicsSimulate.Install(g_addrPhysicsSimulate, &HookedPhysicsSimulate, &PhysicsSimulatePost))
     {
         g_physicsActive = true;
     }
     else
     {
-        if (g_addrPhysicsSimulate)
-        {
-            g_hookPhysicsSimulate.Remove();
-            g_addrPhysicsSimulate = nullptr;
-        }
-        Warning("[BotController] PhysicsSimulate hook unavailable (%s); replay falls back to per-subtick boundary (may stutter)\n",
+        g_hookPhysicsSimulate.Remove();
+        g_addrPhysicsSimulate = nullptr;
+        g_physicsActive = false;
+
+        Warning("[BotController] PhysicsSimulate hook unavailable (%s); "
+                "replay falls back to per-subtick boundary (may stutter)\n",
                 psErr[0] ? psErr : "KHook failed");
     }
 
-    // FinishMove is hooked lazily from the live vtable on the first ProcessMovement tick.
+    // FinishMove and PlayerRunCommand remain lazy. They are discovered only
+    // when ProcessMovement sees either a recording slot or a confirmed bot.
     g_installed = true;
     g_status = "ok";
+
     return true;
 }
 
 void Remove()
 {
-    if (!g_installed) return;
-    g_hookProcessMovement.Remove();
-    g_hookFinishMove.Remove();
+    // Disable API-visible state first so no new injection/replay control work
+    // can be accepted while hooks are being drained.
+    g_installed = false;
+    g_subtickActive = false;
+
+    // Remove in reverse/lazy dependency order. NativeHook::Remove() is safe
+    // when the hook is absent and waits for active invocations to drain.
     g_hookPlayerRunCommand.Remove();
+    g_hookFinishMove.Remove();
     g_hookPhysicsSimulate.Remove();
+    g_hookProcessMovement.Remove();
+
+    // Keep the old boundary semantics until all in-flight callbacks have
+    // drained; only then publish that PhysicsSimulate is unavailable.
+    g_physicsActive = false;
+
     g_addrProcessMovement = nullptr;
     g_addrFinishMove = nullptr;
     g_addrPlayerRunCommand = nullptr;
     g_addrPhysicsSimulate = nullptr;
-    g_physicsActive = false;
-    g_subtickActive = false;
+
+    // Next Enable() must rediscover the live MovementServices vtable.
     g_vtHooksTried.store(false, std::memory_order_release);
-    for (auto& s : g_slotServices)
-        s.store(nullptr, std::memory_order_release);
+
+    // Live engine pointers must never survive runtime-off.
+    for (auto& services : g_slotServices)
+        services.store(nullptr, std::memory_order_release);
+
     for (auto& pawn : g_slotPawns)
         pawn.store(nullptr, std::memory_order_release);
+
+    // Clear all deferred usercmd state.
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
+
         for (auto& injections : g_usercmdInjections)
             injections.clear();
+
         for (auto& suppressions : g_usercmdSuppressions)
             suppressions.clear();
+
         for (auto& movements : g_usercmdMovements)
             movements.clear();
+
         g_injectedHeldMasks.fill(0);
         g_movementHeldMasks.fill(0);
     }
-    g_installed = false;
+
+    // KHook callbacks are expected on the server/game thread. Once Remove()
+    // has drained them, no invocation-local frame should survive this runtime
+    // cycle.
+    g_processFrames.clear();
+    g_finishFrames.clear();
+    g_physicsFrames.clear();
+
     g_status = "not_attempted";
 }
 

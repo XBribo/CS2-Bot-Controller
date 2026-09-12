@@ -7,6 +7,9 @@
 #include "BotProfile.h"
 #include "VoiceSender.h"
 #include "ProjectileBirthAlign.h"
+#include "runtime.h"
+
+#include <tier0/dbg.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -19,8 +22,17 @@
 #define BC_EXPORT __attribute__((visibility("default")))
 #endif
 
+namespace {
+
+constexpr int kRuntimeDisabled = -10;
+
+bool RuntimeEnabled() { return cs2bc::runtime::IsEnabled(); }
+
+} // namespace
+
 extern "C" BC_EXPORT int BotController_Lock(int slot, int kind, int arg)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::dispatch::Lock(slot, static_cast<cs2bc::LockKind>(kind), arg);
 }
 
@@ -36,7 +48,22 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-extern "C" BC_EXPORT int BotController_GetVersion() { return 20; }
+extern "C" BC_EXPORT int BotController_GetVersion() { return 21; }
+
+// Enables/disables the native runtime hook layer while keeping the DLL,
+// interfaces, schema, commands and C ABI loaded.
+extern "C" BC_EXPORT int BotController_SetRuntimeEnabled(int enabled)
+{
+    char error[256] = { 0 };
+    if (cs2bc::runtime::SetEnabled(enabled != 0, error, sizeof(error))) return 0;
+
+    Warning("[BotController] SetRuntimeEnabled(%d) failed: %s\n", enabled != 0 ? 1 : 0, error[0] ? error : "unknown error");
+    return -1;
+}
+
+extern "C" BC_EXPORT int BotController_IsRuntimeEnabled() { return cs2bc::runtime::IsEnabled() ? 1 : 0; }
+
+extern "C" BC_EXPORT int BotController_IsRuntimePrepared() { return cs2bc::runtime::IsPrepared() ? 1 : 0; }
 
 // Configures native projectile birth fields for the current server build
 extern "C" BC_EXPORT int BotController_SetProjectileBirthAlignOffsets(int initialPositionOffset, int initialVelocityOffset)
@@ -45,9 +72,14 @@ extern "C" BC_EXPORT int BotController_SetProjectileBirthAlignOffsets(int initia
 }
 
 // Queues one projectile's recorded birth position and velocity
-extern "C" BC_EXPORT int
-BotController_QueueProjectileBirthAlign(uint64_t entityPtr, float posX, float posY, float posZ, float velX, float velY, float velZ)
+extern "C" BC_EXPORT int BotController_QueueProjectileBirthAlign(
+    int slot, uint64_t entityPtr, float posX, float posY, float posZ, float velX, float velY, float velZ)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
+
+    // IsReplaying() now also validates that the slot still belongs to a live bot.
+    if (!cs2bc::motion_recorder::IsReplaying(slot)) return -3;
+
     return cs2bc::projectile_birth_align::Queue(entityPtr, posX, posY, posZ, velX, velY, velZ);
 }
 
@@ -63,18 +95,21 @@ extern "C" BC_EXPORT int BotController_GetProjectileBirthAlignStatus(cs2bc::proj
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
+    if (!RuntimeEnabled()) return -1;
     return cs2bc::input_injector::InjectUsercmd(slot, buttonMask, durationMs);
 }
 
 // Create an independently cancellable persistent analog movement override
 extern "C" BC_EXPORT int64_t BotController_StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 {
+    if (!RuntimeEnabled()) return -1;
     return cs2bc::input_injector::StartUsercmdMovement(slot, forwardMove, leftMove);
 }
 
 // Update one persistent analog movement override
 extern "C" BC_EXPORT int BotController_UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::input_injector::UpdateUsercmdMovement(slot, movementId, forwardMove, leftMove) ? 0 : -1;
 }
 
@@ -93,12 +128,14 @@ extern "C" BC_EXPORT int BotController_CancelUsercmdInjection(int slot, int64_t 
 // Suppress selected usercmd buttons for a fixed duration
 extern "C" BC_EXPORT int BotController_SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::input_injector::SuppressUsercmd(slot, buttonMask, durationMs) ? 0 : -1;
 }
 
 // Create an independently cancellable persistent usercmd suppression
 extern "C" BC_EXPORT int64_t BotController_StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
+    if (!RuntimeEnabled()) return -1;
     return cs2bc::input_injector::StartUsercmdSuppression(slot, buttonMask);
 }
 
@@ -140,6 +177,7 @@ extern "C" BC_EXPORT int BotController_SendVoiceFrame(int recipientSlot,
 extern "C" BC_EXPORT int BotController_GetProfile(int slot, cs2bc::BotProfileData* out)
 {
     if (!out) return -1;
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::bot_profile::ReadProfile(slot, *out) ? 0 : -1;
 }
 
@@ -176,6 +214,7 @@ std::vector<std::string> SplitAliases(const char* csv)
 // Set a slot's buy plan from a space/comma separated alias list. 0 ok.
 extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char* aliases)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
     cs2bc::buy_controller_state::Set(slot, SplitAliases(aliases), false);
     return 0;
@@ -184,6 +223,7 @@ extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char* aliases)
 // Mark a slot to buy nothing this round. 0 ok.
 extern "C" BC_EXPORT int BotController_SetBuySkip(int slot)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
     cs2bc::buy_controller_state::Set(slot, {}, true);
     return 0;
@@ -208,7 +248,11 @@ extern "C" BC_EXPORT int BotController_GetBuyPlanItemCount(int slot) { return cs
 // ---- Motion recording & replay ----
 
 // Begin/stop recording a human slot's per-tick movement. 0 ok / -1 fail.
-extern "C" BC_EXPORT int BotController_StartRecord(int slot) { return cs2bc::motion_recorder::StartRecord(slot) ? 0 : -1; }
+extern "C" BC_EXPORT int BotController_StartRecord(int slot)
+{
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
+    return cs2bc::motion_recorder::StartRecord(slot) ? 0 : -1;
+}
 
 extern "C" BC_EXPORT int BotController_StopRecord(int slot) { return cs2bc::motion_recorder::StopRecord(slot) ? 0 : -1; }
 
@@ -241,6 +285,7 @@ extern "C" BC_EXPORT int BotController_CopyRecordedCommands(int slot, cs2bc::Rep
 extern "C" BC_EXPORT int
 BotController_LoadReplay(int slot, const cs2bc::ReplayTick* ticks, int tickCount, const cs2bc::SubtickMove* subs, int subCount) noexcept
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount) ? 0 : -1;
 }
 
@@ -255,6 +300,7 @@ extern "C" BC_EXPORT int BotController_LoadReplayExtended(int slot,
                                                           const cs2bc::ReplayMovementExtra* movementExtras,
                                                           int movementExtraCount) noexcept
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::motion_recorder::LoadReplayExtended(slot, ticks, tickCount, subs, subCount, commands, commandCount, movementExtras,
                                                       movementExtraCount)
                ? 0
@@ -264,6 +310,8 @@ extern "C" BC_EXPORT int BotController_LoadReplayExtended(int slot,
 // Move a slot's just-recorded buffers into another slot's replay buffer
 extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
+
     int nt = cs2bc::motion_recorder::RecordedTickCount(srcSlot);
     if (nt <= 0) return -1;
     int ns = cs2bc::motion_recorder::RecordedSubtickCount(srcSlot);
@@ -284,12 +332,15 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::motion_recorder::StartReplay(slot, loop != 0) ? 0 : -1;
 }
 
 // Registers the managed plugin's authoritative pawn pointer for replay.
 extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
+
     void* pawn = reinterpret_cast<void*>(static_cast<uintptr_t>(pawnPtr)); // NOLINT(performance-no-int-to-ptr)
     return cs2bc::input_injector::SetReplayPawn(slot, pawn) ? 0 : -1;
 }
@@ -314,12 +365,17 @@ extern "C" BC_EXPORT int BotController_GetReplayTick(int slot, cs2bc::ReplayTick
 // Returns 0 ok / -1 not found or bot not ready.
 extern "C" BC_EXPORT int BotController_SwitchBotWeapon(int slot, int defIndex)
 {
+    if (!RuntimeEnabled()) return kRuntimeDisabled;
     return cs2bc::motion_recorder::SwitchBotWeaponByDef(slot, defIndex) ? 0 : -1;
 }
 
 // Def index of the bot's current active weapon (same normalization as the
 // recorded WeaponDefIndex). <0 if unresolved. For C# to reconcile replay.
-extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot) { return cs2bc::motion_recorder::BotActiveWeaponDef(slot); }
+extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot)
+{
+    if (!RuntimeEnabled()) return -1;
+    return cs2bc::motion_recorder::BotActiveWeaponDef(slot);
+}
 
 extern "C" BC_EXPORT uint64_t BotController_GetHookCallCount() { return cs2bc::input_injector::HookCallCount(); }
 

@@ -119,6 +119,20 @@ constexpr int kMolotovDef = 46;
 constexpr int kIncendiaryDef = 48;
 
 bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
+
+// Returns true only when BotController has observed a live CCSBot for this
+// slot and the cached pointer still resolves back to the same slot.
+//
+// Replay/control paths use this as a safety boundary so a stale slot can never
+// start driving a human who later reuses the same player index.
+bool IsKnownBotSlot(int slot)
+{
+    if (!ValidSlot(slot)) return false;
+
+    void* bot = bot_controller_hooks::BotForSlot(slot);
+    return bot && CCSBotToSlot(bot) == slot;
+}
+
 static int ReplayWeaponSelectForDef(int slot, int recordedDef);
 
 // Returns whether an item definition is either faction's fire grenade
@@ -155,7 +169,7 @@ int ReplaySlotForWeaponServices(void* weaponServices)
 {
     for (int slot = 0; slot < kMaxSlots; ++slot)
     {
-        if (IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices) return slot;
+        if (IsKnownBotSlot(slot) && IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices) return slot;
     }
     return -1;
 }
@@ -184,8 +198,20 @@ KHook::Return<DropWeaponResult> HookedDropWeapon(void* weaponServices, void* wea
     void* pawn = nullptr;
     if (weaponServices) GuardedRead(weaponServices, tg::g_servicesPawn, pawn);
     const int recordingSlot = RecordingSlotForWeaponServices(weaponServices, pawn);
-    const int replaySlot = ValidSlot(g_activeReplayDropSlot) ? g_activeReplayDropSlot : ReplaySlotForWeaponServices(weaponServices);
+    const int activeReplaySlot = ValidSlot(g_activeReplayDropSlot) && IsKnownBotSlot(g_activeReplayDropSlot) ? g_activeReplayDropSlot : -1;
+    const int replaySlot = ValidSlot(activeReplaySlot) ? activeReplaySlot : ReplaySlotForWeaponServices(weaponServices);
     const int slot = ValidSlot(recordingSlot) ? recordingSlot : replaySlot;
+
+    // The DropWeapon vtable hook is global once installed for recording, so it
+    // can observe unrelated players. If this call belongs to neither an active
+    // recorder nor a replaying bot, keep the paired post-hook balanced but do
+    // no weapon/vector work.
+    if (!ValidSlot(recordingSlot) && !ValidSlot(replaySlot))
+    {
+        g_dropFrames.push_back({ nullptr, nullptr, -1, -1, {} });
+        return { KHook::Action::Ignore };
+    }
+
     int weaponDefIndex = weapon_locker_hooks::ReadDefIndex(weapon);
     if (weaponDefIndex < 0 && weaponServices) weaponDefIndex = weapon_locker_hooks::ActiveWeaponDef(weaponServices);
     if (weaponDefIndex < 0 && ValidSlot(recordingSlot)) weaponDefIndex = g_rec[recordingSlot].currentDef.load(std::memory_order_relaxed);
@@ -199,7 +225,7 @@ KHook::Return<DropWeaponResult> HookedDropWeapon(void* weaponServices, void* wea
     float replayVelocity[3] = {};
     void* effectiveTarget = target;
     void* effectiveVelocity = velocity;
-    if (g_activeReplayDropEvent)
+    if (ValidSlot(activeReplaySlot) && g_activeReplayDropEvent)
     {
         if (g_activeReplayDropEvent->vectorFlags != ReplayDropVectorNone)
             g_dropReplayVectorOverrideCount.fetch_add(1, std::memory_order_relaxed);
@@ -222,7 +248,7 @@ KHook::Return<DropWeaponResult> HookedDropWeapon(void* weaponServices, void* wea
         g_dropHookRecordingCallCount.fetch_add(1, std::memory_order_relaxed);
         if (weaponDefIndex < 0) g_dropHookInvalidDefCount.fetch_add(1, std::memory_order_relaxed);
     }
-    if (ValidSlot(g_activeReplayDropSlot)) g_dropReplayHookCallCount.fetch_add(1, std::memory_order_relaxed);
+    if (ValidSlot(activeReplaySlot)) g_dropReplayHookCallCount.fetch_add(1, std::memory_order_relaxed);
 
     g_lastDropHookPawn.store(pawn, std::memory_order_relaxed);
     g_lastDropHookSlot.store(slot, std::memory_order_relaxed);
@@ -241,6 +267,10 @@ KHook::Return<DropWeaponResult> HookedDropWeapon(void* weaponServices, void* wea
 // Records only physical detachments and preserves the engine's return value.
 KHook::Return<DropWeaponResult> DropWeaponPost(void*, void*, void*, void*) noexcept
 {
+    // Defensive guard: a mismatched pre/post callback must never crash the
+    // server by reading an empty thread-local frame stack.
+    if (g_dropFrames.empty()) return { KHook::Action::Ignore };
+
     const auto [weaponServices, weapon, recordingSlot, weaponDefIndex, recordedEvent] = g_dropFrames.back();
     g_dropFrames.pop_back();
     const bool detached =
@@ -266,20 +296,34 @@ KHook::Return<DropWeaponResult> DropWeaponPost(void*, void*, void*, void*) noexc
         }
         if (!found) r.pendingDropCandidates.push_back({ .weapon = weapon, .event = recordedEvent });
     }
-    if (detached && ValidSlot(g_activeReplayDropSlot)) g_dropReplayDetachedCount.fetch_add(1, std::memory_order_relaxed);
+    if (detached && ValidSlot(g_activeReplayDropSlot) && IsKnownBotSlot(g_activeReplayDropSlot))
+        g_dropReplayDetachedCount.fetch_add(1, std::memory_order_relaxed);
     return { KHook::Action::Ignore };
 }
 
-// Installs the drop hook from a live weapon-services vtable once
+// Installs the drop hook from a live weapon-services vtable once.
+//
+// Do not mark the lazy lookup as attempted until a valid vtable entry has
+// actually been resolved. Otherwise one transient bad services pointer would
+// permanently disable drop capture until the next runtime reset.
 void EnsureDropWeaponHook(void* weaponServices)
 {
-    if (!weaponServices || g_dropHookTried.exchange(true, std::memory_order_acq_rel)) return;
+    if (!weaponServices || g_dropHookReady.load(std::memory_order_acquire)) return;
 
     void** vtable = nullptr;
     if (!GuardedRead(weaponServices, 0, vtable) || !vtable) return;
-    if (!GuardedRead(static_cast<const void*>(vtable), tg::g_vtIdxDropWeapon * static_cast<int>(sizeof(void*)), g_addrDropWeapon) ||
-        !g_addrDropWeapon)
+
+    void* resolvedDropWeapon = nullptr;
+    if (!GuardedRead(static_cast<const void*>(vtable), tg::g_vtIdxDropWeapon * static_cast<int>(sizeof(void*)), resolvedDropWeapon) ||
+        !resolvedDropWeapon)
+    {
         return;
+    }
+
+    bool expected = false;
+    if (!g_dropHookTried.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+
+    g_addrDropWeapon = resolvedDropWeapon;
 
     if (g_hookDropWeapon.Install(g_addrDropWeapon, &HookedDropWeapon, &DropWeaponPost))
     {
@@ -287,6 +331,9 @@ void EnsureDropWeaponHook(void* weaponServices)
         return;
     }
 
+    // A real install attempt failed. Keep g_dropHookTried=true for this
+    // runtime cycle so SetLiveWs() does not retry an expensive failed hook on
+    // every movement tick. ClearAll() resets the lazy state for the next cycle.
     g_hookDropWeapon.Remove();
     g_addrDropWeapon = nullptr;
 }
@@ -345,7 +392,8 @@ bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 
 bool StartRecord(int slot)
 {
-    if (!ValidSlot(slot)) return false;
+    if (!ValidSlot(slot) || IsReplaying(slot)) return false;
+
     RecordState& r = g_rec[slot];
     {
         std::scoped_lock lk(r.mu);
@@ -407,8 +455,14 @@ int RecordedCommandCount(int slot)
 void SetLiveWs(int slot, void* ws)
 {
     if (!ValidSlot(slot)) return;
-    g_rec[slot].liveWs.store(ws, std::memory_order_relaxed);
-    EnsureDropWeaponHook(ws);
+
+    RecordState& r = g_rec[slot];
+    r.liveWs.store(ws, std::memory_order_relaxed);
+
+    // DropWeapon interception is needed only while a recording is active.
+    // Replay uses the already-installed hook when a recorded drop must be
+    // reproduced; ordinary players should never cause lazy hook installation.
+    if (ws && r.recording.load(std::memory_order_acquire)) EnsureDropWeaponHook(ws);
 }
 
 void* LiveWs(int slot) { return ValidSlot(slot) ? g_rec[slot].liveWs.load(std::memory_order_relaxed) : nullptr; }
@@ -639,7 +693,11 @@ bool LoadReplayExtended(int slot,
 
 bool StartReplay(int slot, bool loop)
 {
-    if (!ValidSlot(slot)) return false;
+    // Replay is an engine-control operation and is intentionally bot-only.
+    // Recording may target humans, but recorded state must never be driven
+    // back into a human slot.
+    if (!IsKnownBotSlot(slot)) return false;
+
     ReplayState& p = g_rep[slot];
     {
         std::scoped_lock lk(p.mu);
@@ -660,18 +718,38 @@ bool StartReplay(int slot, bool loop)
 bool StopReplay(int slot)
 {
     if (!ValidSlot(slot)) return false;
+
     g_rep[slot].playing.store(false, std::memory_order_release);
+    g_rep[slot].loop.store(false, std::memory_order_relaxed);
     input_injector::ClearReplayPawn(slot);
+
     return true;
 }
 
-bool IsReplaying(int slot) { return ValidSlot(slot) && g_rep[slot].playing.load(std::memory_order_acquire); }
+bool IsReplaying(int slot)
+{
+    if (!ValidSlot(slot)) return false;
+
+    ReplayState& p = g_rep[slot];
+    if (!p.playing.load(std::memory_order_acquire)) return false;
+
+    // If the bot disappeared or the slot was reused, stop immediately instead
+    // of allowing stale replay state to target another player.
+    if (!IsKnownBotSlot(slot))
+    {
+        p.playing.store(false, std::memory_order_release);
+        input_injector::ClearReplayPawn(slot);
+        return false;
+    }
+
+    return true;
+}
 
 int ReplayCursor(int slot)
 {
     if (!ValidSlot(slot)) return -1;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return -1;
+    if (!IsReplaying(slot)) return -1;
     return p.cursor.load(std::memory_order_relaxed);
 }
 
@@ -688,7 +766,7 @@ bool CurrentReplayTick(int slot, ReplayTick& out)
 {
     if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
+    if (!IsReplaying(slot)) return false;
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int idx = p.cursor.load(std::memory_order_relaxed) - 1;
@@ -707,7 +785,7 @@ bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
     if (!ValidSlot(slot)) return false;
 
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
+    if (!IsReplaying(slot)) return false;
 
     int recordedDef = -1;
     {
@@ -776,7 +854,7 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
 {
     if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
+    if (!IsReplaying(slot)) return false;
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
@@ -789,7 +867,7 @@ int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut)
 {
     if (!ValidSlot(slot) || !out || maxOut <= 0) return -1;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return -1;
+    if (!IsReplaying(slot)) return -1;
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int idx = p.cursor.load(std::memory_order_relaxed);
@@ -807,7 +885,7 @@ bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b
 {
     if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
+    if (!IsReplaying(slot)) return false;
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
@@ -827,7 +905,7 @@ bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b
 
 bool SwitchBotWeaponByDef(int slot, int defIndex)
 {
-    if (!ValidSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
+    if (!IsKnownBotSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
     if (!weapon_locker_hooks::WeaponHooksReady()) return false;
     void* ws = weapon_locker_hooks::WsForSlot(slot);
     if (!ws) return false;
@@ -839,7 +917,7 @@ bool SwitchBotWeaponByDef(int slot, int defIndex)
 // Def index of the bot's current active weapon
 int BotActiveWeaponDef(int slot)
 {
-    if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
+    if (!IsKnownBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
     void* ws = weapon_locker_hooks::WsForSlot(slot);
     if (!ws) return -1;
     return weapon_locker_hooks::ActiveWeaponDef(ws);
@@ -856,7 +934,7 @@ int CurrentReplayWeaponDef(int slot)
 {
     if (!ValidSlot(slot)) return -1;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return -1;
+    if (!IsReplaying(slot)) return -1;
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
@@ -869,7 +947,7 @@ namespace {
 
 int ReplayWeaponSelectForDef(int slot, int recordedDef)
 {
-    if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
+    if (!IsKnownBotSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
     if (recordedDef < 0) return -1;
 
     void* ws = weapon_locker_hooks::WsForSlot(slot);
@@ -901,7 +979,7 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
     event.weaponDefIndex = -1;
     if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
+    if (!IsReplaying(slot)) return false;
 
     std::scoped_lock lk(p.mu);
     int cur = p.cursor.load(std::memory_order_relaxed);
@@ -925,7 +1003,8 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event)
 {
     const int weaponDefIndex = event.weaponDefIndex;
-    if (!ValidSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady()) return false;
+    if (!IsKnownBotSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady())
+        return false;
 
     g_dropReplayAttemptCount.fetch_add(1, std::memory_order_relaxed);
     g_lastDropReplaySlot.store(slot, std::memory_order_relaxed);
@@ -1092,7 +1171,7 @@ void WriteReplayViewHistory(void* services, void* pawn, float pitch, float yaw)
 
 void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView)
 {
-    if (!ValidSlot(slot) || !services || !g_rep[slot].playing.load(std::memory_order_acquire)) return;
+    if (!IsKnownBotSlot(slot) || !services || !IsReplaying(slot)) return;
 
     WriteVelocityToPawn(slot, services, tick.pre);
     WriteMovementServiceState(services, tick.pre);
@@ -1111,9 +1190,8 @@ void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
 // ProcessMovement (pre): seed CMoveData + pawn + moveType with pre state.
 void OnReplayPre(int slot, void* services, void* moveData)
 {
-    if (!ValidSlot(slot) || !services || !moveData) return;
+    if (!IsKnownBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return;
     ReplayTick t{};
     {
         std::scoped_lock lk(p.mu);
@@ -1141,9 +1219,8 @@ void OnReplayPre(int slot, void* services, void* moveData)
 // FinishMove (pre): write post snapshot into CMoveData + scene-node origin.
 void OnReplayFinishMove(int slot, void* services, void* moveData)
 {
-    if (!ValidSlot(slot) || !services || !moveData) return;
+    if (!IsKnownBotSlot(slot) || !services || !moveData || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return;
     ReplayTick t{};
     {
         std::scoped_lock lk(p.mu);
@@ -1158,9 +1235,8 @@ void OnReplayFinishMove(int slot, void* services, void* moveData)
 
 void OnReplayCommit(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return;
+    if (!IsKnownBotSlot(slot) || !services || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return;
 
     ReplayTick t{};
     int cur;
@@ -1210,14 +1286,25 @@ void OnReplayCommit(int slot, void* services)
 
 void ClearAll()
 {
+    // Remove the lazy global DropWeapon hook first. NativeHook::Remove()
+    // drains active callbacks before returning, so no new drop frame can race
+    // with the state reset below.
     g_dropHookReady.store(false, std::memory_order_release);
     g_hookDropWeapon.Remove();
     g_addrDropWeapon = nullptr;
     g_dropHookTried.store(false, std::memory_order_release);
+
+    // Clear thread-local replay/drop context for the calling game thread.
+    g_activeReplayDropSlot = -1;
+    g_activeReplayDropEvent = nullptr;
+    g_dropFrames.clear();
+
     for (int i = 0; i < kMaxSlots; ++i)
     {
         g_rec[i].recording.store(false, std::memory_order_release);
         g_rep[i].playing.store(false, std::memory_order_release);
+        g_rep[i].loop.store(false, std::memory_order_relaxed);
+
         {
             std::scoped_lock lk(g_rec[i].mu);
             g_rec[i].ticks.clear();
@@ -1226,12 +1313,14 @@ void ClearAll()
             g_rec[i].pendingSubs.clear();
             g_rec[i].pendingCommand = {};
             g_rec[i].havePendingCommand = false;
+            g_rec[i].pendingPre = {};
             g_rec[i].havePre = false;
             g_rec[i].pendingEventFlags = ReplayEventNone;
             g_rec[i].pendingDropEvent = {};
             g_rec[i].pendingDropEvent.weaponDefIndex = -1;
             g_rec[i].pendingDropCandidates.clear();
         }
+
         {
             std::scoped_lock lk(g_rep[i].mu);
             g_rep[i].ticks.clear();
@@ -1241,10 +1330,12 @@ void ClearAll()
             g_rep[i].subOffset.clear();
             g_rep[i].lastEventCursor = -1;
         }
+
         g_rec[i].currentDef.store(-1, std::memory_order_relaxed);
         g_rec[i].liveWs.store(nullptr, std::memory_order_relaxed);
         g_rep[i].cursor.store(0, std::memory_order_relaxed);
         g_rep[i].lastAppliedDef.store(-1, std::memory_order_relaxed);
+
         input_injector::ClearReplayPawn(i);
     }
 }
