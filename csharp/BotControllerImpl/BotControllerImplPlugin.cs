@@ -117,11 +117,14 @@ public partial class BotControllerPlugin : BasePlugin
     // Registers the live bot pawn pointer required by the current native replay path.
     private static bool RegisterReplayPawnForSlot(int slot)
     {
-        if (!TryGetLiveBot(slot, out CCSPlayerController? player) ||
-            player.PlayerPawn is not { IsValid: true, Value.IsValid: true })
+        if (!TryGetLiveBot(slot, out CCSPlayerController? player) || player is not { IsValid: true, PlayerPawn: { IsValid: true } })
             return false;
 
-        return BotController.SetReplayPawn(slot, player.PlayerPawn.Value.Handle);
+        var pawn = player.PlayerPawn;
+        if (pawn is not { IsValid: true, Value.IsValid: true })
+            return false;
+
+        return BotController.SetReplayPawn(slot, pawn.Value.Handle);
     }
 
     // Starts recording under the optional file name

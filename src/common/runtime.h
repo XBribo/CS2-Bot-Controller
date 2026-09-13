@@ -38,6 +38,13 @@ void Disable();
 // Convenience function intended for the C ABI / managed provider.
 bool SetEnabled(bool enabled, char* error, size_t maxlen);
 
+// Records or releases the MetaMod pause state.
+//
+// When paused, runtime hooks are always disabled regardless of the managed
+// runtime request. When unpaused, hooks are restored only if runtime was
+// previously requested.
+bool SetMetaPaused(bool paused, char* error, size_t maxlen);
+
 // Returns true once Prepare() has successfully completed.
 bool IsPrepared();
 
