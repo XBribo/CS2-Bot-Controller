@@ -2,6 +2,7 @@
 
 #include "commands.h"
 #include "dispatch.h"
+#include "runtime.h"
 #include "WeaponLocker.h" // NOLINT(misc-include-cleaner)
 #include "BotController.h" // NOLINT(misc-include-cleaner)
 #include "InputInjector.h" // NOLINT(misc-include-cleaner)
@@ -119,6 +120,7 @@ namespace {
 
 namespace commands = cs2bc::commands;
 namespace dispatch = cs2bc::dispatch;
+namespace runtime = cs2bc::runtime;
 namespace bot_controller_state = cs2bc::bot_controller_state;
 namespace bot_profile = cs2bc::bot_profile;
 namespace buy_controller_hooks = cs2bc::buy_controller_hooks;
