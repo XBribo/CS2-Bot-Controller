@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 20), check IsCompatible() before use
+// P/Invoke wrapper for BotController native plugin (ABI 21).
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 20;
+        private const int ExpectedAbiVersion = 21;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -29,12 +29,25 @@ namespace BotControllerApi
         private static extern int BotController_GetVersion();
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SetRuntimeEnabled(int enabled);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_IsRuntimeEnabled();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_IsRuntimePrepared();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_IsLiveBotSlot(int slot);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetProjectileBirthAlignOffsets(
             int initialPositionOffset,
             int initialVelocityOffset);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_QueueProjectileBirthAlign(
+            int slot,
             ulong entityPtr,
             float posX,
             float posY,
@@ -195,11 +208,46 @@ namespace BotControllerApi
             int tick,
             int audibleMask);
 
+        public static bool TryGetAbiVersion(out int version)
+        {
+            try
+            {
+                version = BotController_GetVersion();
+                return true;
+            }
+            catch (DllNotFoundException)
+            {
+                version = -1;
+                return false;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                version = -1;
+                return false;
+            }
+            catch (BadImageFormatException)
+            {
+                version = -1;
+                return false;
+            }
+        }
+
         // Native ABI must match what this wrapper expects.
-        public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
+        public static bool IsCompatible()
+            => TryGetAbiVersion(out int version) && version == ExpectedAbiVersion;
 
         // Native C-ABI version the loaded DLL reports.
         public static int AbiVersion => BotController_GetVersion();
+
+        public static bool RuntimePrepared => BotController_IsRuntimePrepared() != 0;
+
+        public static bool RuntimeEnabled => BotController_IsRuntimeEnabled() != 0;
+
+        public static bool SetRuntimeEnabled(bool enabled)
+            => BotController_SetRuntimeEnabled(enabled ? 1 : 0) == 0;
+
+        public static bool IsLiveBotSlot(int slot)
+            => BotController_IsLiveBotSlot(slot) != 0;
 
         // Configures native projectile birth offsets for the loaded server build
         public static bool ConfigureProjectileBirthAlign(int initialPositionOffset, int initialVelocityOffset)
@@ -207,11 +255,13 @@ namespace BotControllerApi
 
         // Queues one projectile's recorded birth position and velocity
         public static bool QueueProjectileBirthAlign(
+            int slot,
             nint entityPtr,
             ReplayVector3 position,
             ReplayVector3 velocity)
             => entityPtr != 0 &&
                BotController_QueueProjectileBirthAlign(
+                   slot,
                    unchecked((ulong)entityPtr),
                    position.X,
                    position.Y,

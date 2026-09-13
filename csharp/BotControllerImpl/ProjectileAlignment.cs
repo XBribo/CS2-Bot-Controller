@@ -1,6 +1,5 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
-using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Utils;
 
 using BotControllerApi;
@@ -65,12 +64,19 @@ public partial class BotControllerPlugin
         _replayProjectiles.Clear();
         _nextReplayProjectile.Clear();
         _pendingProjectileCandidates.Clear();
-        BotController.ClearProjectileBirthAlign();
+        if (BotController.IsCompatible())
+            BotController.ClearProjectileBirthAlign();
     }
 
     // Tracks grenade projectiles when the engine finishes spawning them
     private void OnProjectileEntitySpawned(CEntityInstance entity)
     {
+        if (!_managedRuntimeEnabled)
+            return;
+
+        if (_recordedProjectiles.Count == 0 && _replayProjectiles.Count == 0)
+            return;
+
         if (!ReplayProjectileMatcher.TryGetKind(entity.DesignerName, out ReplayProjectileKind kind, out int weaponDefIndex))
             return;
 
@@ -87,6 +93,12 @@ public partial class BotControllerPlugin
     // Retries candidates whose thrower or birth vectors were not ready at spawn time
     private void ProcessPendingProjectileCandidates()
     {
+        if (!_managedRuntimeEnabled)
+            return;
+
+        if (_pendingProjectileCandidates.Count == 0 && _replayProjectiles.Count == 0)
+            return;
+
         for (int i = _pendingProjectileCandidates.Count - 1; i >= 0; --i)
         {
             PendingProjectileCandidate candidate = _pendingProjectileCandidates[i];
@@ -188,6 +200,7 @@ public partial class BotControllerPlugin
         }
 
         if (!BotController.QueueProjectileBirthAlign(
+                slot,
                 projectile.Handle,
                 expected.InitialPosition,
                 expected.InitialVelocity))
@@ -239,41 +252,51 @@ public partial class BotControllerPlugin
     }
 
     // Captures smoke detonation position for the latest recorded smoke
-    [GameEventHandler]
     public HookResult OnSmokegrenadeDetonate(EventSmokegrenadeDetonate @event, GameEventInfo info)
     {
+        if (!_managedRuntimeEnabled)
+            return HookResult.Continue;
+
         CaptureProjectileDetonation(@event.Userid, ReplayProjectileKind.Smoke, @event.X, @event.Y, @event.Z);
         return HookResult.Continue;
     }
 
     // Captures flash detonation position for the latest recorded flash
-    [GameEventHandler]
     public HookResult OnFlashbangDetonate(EventFlashbangDetonate @event, GameEventInfo info)
     {
+        if (!_managedRuntimeEnabled)
+            return HookResult.Continue;
+
         CaptureProjectileDetonation(@event.Userid, ReplayProjectileKind.Flash, @event.X, @event.Y, @event.Z);
         return HookResult.Continue;
     }
 
     // Captures HE detonation position for the latest recorded grenade
-    [GameEventHandler]
     public HookResult OnHegrenadeDetonate(EventHegrenadeDetonate @event, GameEventInfo info)
     {
+        if (!_managedRuntimeEnabled)
+            return HookResult.Continue;
+
         CaptureProjectileDetonation(@event.Userid, ReplayProjectileKind.He, @event.X, @event.Y, @event.Z);
         return HookResult.Continue;
     }
 
     // Captures fire detonation position for the latest recorded fire grenade
-    [GameEventHandler]
     public HookResult OnMolotovDetonate(EventMolotovDetonate @event, GameEventInfo info)
     {
+        if (!_managedRuntimeEnabled)
+            return HookResult.Continue;
+
         CaptureProjectileDetonation(@event.Userid, ReplayProjectileKind.Molotov, @event.X, @event.Y, @event.Z);
         return HookResult.Continue;
     }
 
     // Captures decoy detonation position for the latest recorded decoy
-    [GameEventHandler]
     public HookResult OnDecoyDetonate(EventDecoyDetonate @event, GameEventInfo info)
     {
+        if (!_managedRuntimeEnabled)
+            return HookResult.Continue;
+
         CaptureProjectileDetonation(@event.Userid, ReplayProjectileKind.Decoy, @event.X, @event.Y, @event.Z);
         return HookResult.Continue;
     }

@@ -351,6 +351,8 @@ void Shutdown()
 
     g_prepared = false;
     g_enabled.store(false, std::memory_order_release);
+    g_runtimeRequested = false;
+    g_metaPaused = false;
 }
 
 } // namespace cs2bc::runtime

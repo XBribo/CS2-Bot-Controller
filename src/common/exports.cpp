@@ -3,6 +3,7 @@
 #include "dispatch.h"
 #include "MotionRecorder.h"
 #include "InputInjector.h"
+#include "BotController.h"
 #include "BuyControllerState.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
@@ -416,7 +417,7 @@ extern "C" BC_EXPORT int BotController_GetLastOwnerSlot() { return cs2bc::input_
 
 extern "C" BC_EXPORT int BotController_IsLiveBotSlot(int slot)
 {
-    if (!cs2bc::runtime::IsEnabled()) return 0;
+    if (!RuntimeEnabled()) return 0;
 
     return cs2bc::bot_controller_hooks::IsLiveBotSlot(slot) ? 1 : 0;
 }

@@ -23,6 +23,9 @@ public sealed class ReplayDriver
 
     public bool IsActive => _active.Count > 0;
 
+    // Drops all tracked replay slots when the runtime session ends.
+    public void Clear() => _active.Clear();
+
     public void Tick()
     {
         if (_active.Count == 0) return;

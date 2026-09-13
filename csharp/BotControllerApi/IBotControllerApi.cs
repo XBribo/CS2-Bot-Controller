@@ -4,7 +4,18 @@ namespace BotControllerApi
 {
     public interface IBotControllerApi
     {
+        // Managed cross-plugin contract version. This is independent of native ABI.
+        int ApiVersion => 1;
+
         int AbiVersion { get; }
+
+        bool RuntimePrepared => false;
+
+        bool RuntimeEnabled => false;
+
+        bool SetRuntimeEnabled(bool enabled) => false;
+
+        bool IsLiveBotSlot(int slot) => false;
 
         // ---- locks ----
 

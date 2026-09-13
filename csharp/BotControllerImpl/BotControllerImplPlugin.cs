@@ -29,32 +29,45 @@ public partial class BotControllerPlugin : BasePlugin
 
     private readonly ReplayDriver _driver = new();
     private readonly Dictionary<int, string> _recordingFiles = new();
+    private BotControllerApiImpl? _api;
 
     // Loads the managed plugin and publishes its shared API
     public override void Load(bool hotReload)
     {
         Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
-        if (!BotController.IsCompatible())
+        if (!BotController.TryGetAbiVersion(out int abiVersion))
         {
-            Server.PrintToConsole("[BotController] BotController ABI mismatch; disabled.");
+            Server.PrintToConsole("[BotController] BotController native module is unavailable; disabled.");
             return;
         }
 
+        if (!BotController.IsCompatible())
+        {
+            Server.PrintToConsole($"[BotController] BotController ABI mismatch; got {abiVersion}, expected 21.");
+            return;
+        }
+
+        _nativeCompatible = BotController.RuntimePrepared;
+        if (!_nativeCompatible)
+            Server.PrintToConsole("[BotController] BotController runtime is not prepared; runtime controls are unavailable.");
+
         // Publish the cross-plugin API
         // Consumers: BotControllerCapability.Cap.Get().
+        _api = new BotControllerApiImpl(this);
         Capabilities.RegisterPluginCapability(
-            BotControllerCapability.Cap, () => new BotControllerApiImpl());
+            BotControllerCapability.Cap, () => _api!);
 
         Directory.CreateDirectory(RecordingsDir);
-        RegisterListener<Listeners.OnTick>(_driver.Tick);
-        RegisterListener<Listeners.OnTick>(ProcessPendingProjectileCandidates);
-        RegisterListener<Listeners.OnEntitySpawned>(OnProjectileEntitySpawned);
+        BotController.SetRuntimeEnabled(false);
     }
 
-    // Clears projectile alignment state during managed plugin unload
+    // Clears native and managed runtime state during plugin unload
     public override void Unload(bool hotReload)
     {
-        ClearAllProjectileState();
+        DisableManagedRuntime();
+        if (BotController.IsCompatible())
+            BotController.SetRuntimeEnabled(false);
+        _api = null;
     }
 
     private string RecordingsDir => Path.Combine(ModuleDirectory, "recordings");
@@ -93,11 +106,18 @@ public partial class BotControllerPlugin : BasePlugin
         return null;
     }
 
+    // Validates a bot against both CounterStrikeSharp and the native hook cache.
+    internal static bool TryGetLiveBot(int slot, out CCSPlayerController? bot)
+    {
+        bot = ControllerForSlot(slot);
+        return bot is { IsValid: true, IsBot: true } &&
+               BotController.IsLiveBotSlot(slot);
+    }
+
     // Registers the live bot pawn pointer required by the current native replay path.
     private static bool RegisterReplayPawnForSlot(int slot)
     {
-        var player = ControllerForSlot(slot);
-        if (player is not { IsValid: true } ||
+        if (!TryGetLiveBot(slot, out CCSPlayerController? player) ||
             player.PlayerPawn is not { IsValid: true, Value.IsValid: true })
             return false;
 
@@ -110,6 +130,11 @@ public partial class BotControllerPlugin : BasePlugin
     public void OnRecord(CCSPlayerController? player, CommandInfo cmd)
     {
         if (player == null || !player.IsValid) return;
+        if (!RuntimeEnabled)
+        {
+            cmd.ReplyToCommand("[BotController] Runtime is currently disabled.");
+            return;
+        }
         string? fileName = cmd.ArgCount >= 2 ? cmd.GetArg(1) : null;
         if (cmd.ArgCount > 2 ||
             !TryGetRecordingFile(fileName, player.SteamID, out string file))
@@ -152,6 +177,11 @@ public partial class BotControllerPlugin : BasePlugin
     public void OnReplay(CCSPlayerController? player, CommandInfo cmd)
     {
         if (player == null || !player.IsValid) return;
+        if (!RuntimeEnabled)
+        {
+            cmd.ReplyToCommand("[BotController] Runtime is currently disabled.");
+            return;
+        }
         string? fileName = cmd.ArgCount >= 3 ? cmd.GetArg(2) : null;
         if (cmd.ArgCount > 3 ||
             !int.TryParse(cmd.GetArg(1), out int botSlot) ||
@@ -174,6 +204,12 @@ public partial class BotControllerPlugin : BasePlugin
         }
         if (rec.Tickrate != Tickrate)
             cmd.ReplyToCommand($"[BotController] WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+
+        if (!TryGetLiveBot(botSlot, out _))
+        {
+            cmd.ReplyToCommand("[BotController] Target slot is not a live bot.");
+            return;
+        }
 
         PrepareProjectileReplay(botSlot, rec);
         if (BotController.LoadReplayExtended(
