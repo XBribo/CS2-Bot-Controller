@@ -65,6 +65,7 @@ inline int g_entAbsVelocity = -1;
 inline int g_entBodyComponent = -1;
 inline int g_bodySceneNode = -1;
 inline int g_nodeAbsOrigin = -1;
+inline int g_nodeAbsRotation = -1;
 
 // ---- CCSPlayerPawn ----
 

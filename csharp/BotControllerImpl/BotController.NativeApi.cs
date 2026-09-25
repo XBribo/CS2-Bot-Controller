@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 21;
+        private const int ExpectedAbiVersion = 22;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;

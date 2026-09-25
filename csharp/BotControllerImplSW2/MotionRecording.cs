@@ -54,6 +54,14 @@ public static class MotionStore
         if (recording.Commands.Length != recording.Ticks.Length)
             throw new InvalidDataException("Recording commands must match the tick count.");
 
+        const uint eventDrop = 1U << 0;
+        const uint dropReleasePose = 1U << 3;
+        foreach (ReplayTick tick in recording.Ticks)
+        {
+            if ((tick.EventFlags & eventDrop) != 0 && (tick.EventDropVectorFlags & dropReleasePose) == 0)
+                throw new InvalidDataException("Recording lacks the required drop release pose.");
+        }
+
         const uint commandFieldWeaponSelectDef = 1U << 8;
         foreach (ReplayCommandFrame command in recording.Commands)
         {

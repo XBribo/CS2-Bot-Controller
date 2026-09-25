@@ -65,6 +65,13 @@ namespace BotControllerApi
         public float EventDropVelocityX;
         public float EventDropVelocityY;
         public float EventDropVelocityZ;
+        public float EventDropReleaseX;
+        public float EventDropReleaseY;
+        public float EventDropReleaseZ;
+        public float EventDropReleaseQuatX;
+        public float EventDropReleaseQuatY;
+        public float EventDropReleaseQuatZ;
+        public float EventDropReleaseQuatW;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

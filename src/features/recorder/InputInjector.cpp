@@ -808,6 +808,14 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     }
 
     // PlayerRunCommand is hooked lazily from the first live movement-services vtable.
+    char dropReleaseError[256]{};
+    void* outerDrop = gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::OuterDrop", dropReleaseError, sizeof(dropReleaseError));
+    void* buildTransform =
+        outerDrop ? gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::BuildTransform", dropReleaseError, sizeof(dropReleaseError))
+                  : nullptr;
+    if (!motion_recorder::InstallDropReleasePose(outerDrop, buildTransform))
+        BC_LOG_WARN("Drop release pose unavailable (%s); drop replay requires this hook\n",
+                    dropReleaseError[0] ? dropReleaseError : "hook installation failed");
     g_installed = true;
     g_status = "ok";
     return true;

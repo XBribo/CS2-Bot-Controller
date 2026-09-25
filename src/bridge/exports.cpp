@@ -36,7 +36,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
 }
 
 // ABI 21 keeps the native command-based projectile replay path without birth alignment exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 21; }
+extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)

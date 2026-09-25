@@ -40,13 +40,20 @@ struct ReplayTick
     uint32_t numSubtick; // subtick moves for this tick, 0..36
     uint32_t eventFlags; // ReplayEventFlags bitmask
     int32_t eventWeaponDefIndex; // active item captured for the event, -1 = none
-    uint32_t eventDropVectorFlags; // ReplayDropVectorFlags bitmask
-    float eventDropTargetX;
+    uint32_t eventDropVectorFlags; // ReplayDropVectorFlags bitmask, including ReplayDropBodyYaw
+    float eventDropTargetX; // body yaw when ReplayDropBodyYaw is set and target is absent
     float eventDropTargetY;
     float eventDropTargetZ;
     float eventDropVelocityX;
     float eventDropVelocityY;
     float eventDropVelocityZ;
+    float eventDropReleaseX;
+    float eventDropReleaseY;
+    float eventDropReleaseZ;
+    float eventDropReleaseQuatX;
+    float eventDropReleaseQuatY;
+    float eventDropReleaseQuatZ;
+    float eventDropReleaseQuatW;
 };
 
 enum ReplayEventFlags : uint32_t // NOLINT(performance-enum-size)
@@ -60,6 +67,8 @@ enum ReplayDropVectorFlags : uint32_t // NOLINT(performance-enum-size)
     ReplayDropVectorNone = 0,
     ReplayDropVectorTarget = 1U << 0,
     ReplayDropVectorVelocity = 1U << 1,
+    ReplayDropBodyYaw = 1U << 2, // target[0] stores scene-node absolute yaw when target is absent
+    ReplayDropReleasePose = 1U << 3,
 };
 
 struct ReplayDropEvent
@@ -68,6 +77,8 @@ struct ReplayDropEvent
     uint32_t vectorFlags;
     float target[3];
     float velocity[3];
+    float releasePosition[3];
+    float releaseQuaternion[4];
 };
 
 struct SubtickMove
@@ -119,7 +130,7 @@ struct ReplayMovementExtra
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
 static_assert(sizeof(ReplayMovementExtra) == 48);
-static_assert(sizeof(ReplayTick) == 228);
+static_assert(sizeof(ReplayTick) == 256);
 
 namespace motion_recorder {
 constexpr int kMaxSlots = 64;
@@ -235,6 +246,8 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
 
 // Reports whether the weapon drop hook is available.
 bool DropHookReady();
+// Installs the Windows release-pose capture and replay hooks.
+bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
 // ---- replay write hooks ----
 // PlayerRunCommand (pre): seed pawn state consumed by weapon and grenade logic

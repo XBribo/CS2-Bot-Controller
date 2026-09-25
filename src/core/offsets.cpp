@@ -102,6 +102,8 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
         if (!ResolveRequired(*field.target, field.className, field.fieldName, errorOut, errorOutLen)) return false;
     }
 
+    g_nodeAbsRotation = schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
+
     int attributeManager = -1;
     int item = -1;
     int itemDefinitionIndex = -1;

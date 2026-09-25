@@ -90,13 +90,47 @@ thread_local std::vector<DropFrame> g_dropFrames;
 void* g_addrDropWeapon = nullptr;
 std::atomic<bool> g_dropHookTried{ false };
 std::atomic<bool> g_dropHookReady{ false };
+hooks::NativeHook<char, void*, void*, int, const float*> g_hookDropReleaseOuter;
+hooks::NativeHook<char, void*, void*> g_hookDropReleaseBuilder;
+struct DropReleaseFrame
+{
+    int slot{ -1 };
+    int defIndex{ -1 };
+    void* weapon{ nullptr };
+    void* droppedWeapon{ nullptr };
+    bool haveReleasePose{ false };
+    float releasePosition[3]{};
+    float releaseQuaternion[4]{};
+};
+thread_local std::vector<DropReleaseFrame> g_dropReleaseFrames;
+struct ReplayDropOverride
+{
+    int slot;
+    void* weapon;
+    ReplayDropEvent event;
+};
+thread_local std::vector<ReplayDropOverride> g_replayDropEvents;
 constexpr int kMolotovDef = 46;
 constexpr int kIncendiaryDef = 48;
 
 bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
+// Rejects missing or corrupted engine release transforms before replay consumes them.
+bool ValidReleasePose(const float* position, const float* quaternion)
+{
+    for (int i = 0; i < 3; ++i)
+        if (!std::isfinite(position[i])) return false;
+    float norm = 0.0F;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!std::isfinite(quaternion[i])) return false;
+        norm += quaternion[i] * quaternion[i];
+    }
+    return norm > 0.5F && norm < 1.5F;
+}
 static int ReplayWeaponSelectForDef(int slot, int recordedDef);
 // Publishes the frame's pawn state before the native drop command reads it.
-bool PrepareReplayDropPawn(int slot, void* services);
+bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& event);
+void* ResolveSceneNode(void* entity);
 
 // Returns whether an item definition is either faction's fire grenade
 bool IsFireGrenadeDef(int defIndex) { return defIndex == kMolotovDef || defIndex == kIncendiaryDef; }
@@ -152,6 +186,25 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
     {
         recordedEvent.weaponDefIndex =
             weapon_locker_hooks::WeaponDefForEntityIndex(weaponServices, weapon_locker_hooks::WeaponEntIndex(weapon));
+        if (recordedEvent.weaponDefIndex < 0) recordedEvent.weaponDefIndex = weaponDefIndex;
+        void* node = ResolveSceneNode(pawn);
+        float bodyAngles[3]{};
+        if (node && tg::g_nodeAbsRotation >= 0 && TryReadMemory(node, tg::g_nodeAbsRotation, bodyAngles, sizeof(bodyAngles)) &&
+            std::isfinite(bodyAngles[1]))
+        {
+            recordedEvent.vectorFlags |= ReplayDropBodyYaw;
+            recordedEvent.target[0] = bodyAngles[1];
+        }
+        if (!g_dropReleaseFrames.empty())
+        {
+            const DropReleaseFrame& frame = g_dropReleaseFrames.back();
+            if (frame.droppedWeapon == weapon && frame.haveReleasePose)
+            {
+                recordedEvent.vectorFlags |= ReplayDropReleasePose;
+                std::copy_n(frame.releasePosition, 3, recordedEvent.releasePosition);
+                std::copy_n(frame.releaseQuaternion, 4, recordedEvent.releaseQuaternion);
+            }
+        }
     }
     g_dropFrames.push_back({ weaponServices, weapon, recordingSlot, weaponDefIndex, recordedEvent });
     return { KHook::Action::Ignore };
@@ -235,6 +288,78 @@ void* ResolveSceneNode(void* entity)
     return GuardedRead(body, tg::g_bodySceneNode, node) ? node : nullptr;
 }
 
+// Tracks the source item while the engine may split a stacked grenade into a new entity.
+KHook::Return<char> DropReleaseOuterPre(void* weaponServices, void* weapon, int, const float*) noexcept
+{
+    DropReleaseFrame frame{};
+    frame.weapon = weapon;
+    frame.defIndex = weapon_locker_hooks::ReadDefIndex(weapon);
+    void* pawn = nullptr;
+    if (weaponServices) GuardedRead(weaponServices, tg::g_servicesPawn, pawn);
+    frame.slot = RecordingSlotForWeaponServices(weaponServices, pawn);
+    if (!ValidSlot(frame.slot))
+    {
+        frame.slot = -1;
+        for (int slot = 0; slot < kMaxSlots; ++slot)
+        {
+            if (IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices)
+            {
+                frame.slot = slot;
+                break;
+            }
+        }
+    }
+    g_dropReleaseFrames.push_back(frame);
+    return { KHook::Action::Ignore };
+}
+
+// Balances the per-thread drop frame after the native outer call returns.
+KHook::Return<char> DropReleaseOuterPost(void*, void*, int, const float*) noexcept
+{
+    if (!g_dropReleaseFrames.empty()) g_dropReleaseFrames.pop_back();
+    return { KHook::Action::Ignore };
+}
+
+// Associates the transform builder with the actual item, including split grenades.
+KHook::Return<char> DropReleaseBuilderPre(void* weapon, void*) noexcept
+{
+    if (!g_dropReleaseFrames.empty())
+    {
+        DropReleaseFrame& frame = g_dropReleaseFrames.back();
+        if (frame.slot >= 0 && weapon_locker_hooks::ReadDefIndex(weapon) == frame.defIndex) frame.droppedWeapon = weapon;
+    }
+    return { KHook::Action::Ignore };
+}
+
+// Captures the release pose on recording or applies it to the matching replay drop.
+KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexcept
+{
+    if (g_dropReleaseFrames.empty()) return { KHook::Action::Ignore };
+    DropReleaseFrame& frame = g_dropReleaseFrames.back();
+    if (frame.slot < 0 || frame.droppedWeapon != weapon) return { KHook::Action::Ignore };
+    float output[8]{};
+    const bool readable = transform && TryReadMemoryGuarded(transform, 0, output, sizeof(output));
+    if (readable && IsRecording(frame.slot) && ValidReleasePose(output, output + 4))
+    {
+        std::copy_n(output, 3, frame.releasePosition);
+        std::copy_n(output + 4, 4, frame.releaseQuaternion);
+        frame.haveReleasePose = true;
+    }
+    else if (readable && IsReplaying(frame.slot) && !g_replayDropEvents.empty())
+    {
+        const ReplayDropOverride& override = g_replayDropEvents.back();
+        const ReplayDropEvent& event = override.event;
+        if (override.slot == frame.slot && override.weapon == frame.weapon && (event.vectorFlags & ReplayDropReleasePose) != 0)
+        {
+            std::copy_n(event.releasePosition, 3, output);
+            std::copy_n(event.releaseQuaternion, 4, output + 4);
+            if (!TryWriteMemoryGuarded(transform, 0, output, sizeof(output)))
+                BC_LOG_WARN("Drop release pose override failed for slot %d\n", frame.slot);
+        }
+    }
+    return { KHook::Action::Ignore };
+}
+
 // Read a MovementSnapshot from live engine state (services -> pawn).
 bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 {
@@ -258,6 +383,20 @@ bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 // ---- recording ----
 
 } // namespace
+
+// Installs the release-pose hooks used by both recording and replay.
+bool InstallDropReleasePose(void* outerDrop, void* buildTransform)
+{
+    if (!outerDrop || !buildTransform) return false;
+    if (!g_hookDropReleaseBuilder.Install(buildTransform, &DropReleaseBuilderPre, &DropReleaseBuilderPost) ||
+        !g_hookDropReleaseOuter.Install(outerDrop, &DropReleaseOuterPre, &DropReleaseOuterPost))
+    {
+        g_hookDropReleaseOuter.Remove();
+        g_hookDropReleaseBuilder.Remove();
+        return false;
+    }
+    return true;
+}
 
 bool StartRecord(int slot)
 {
@@ -427,6 +566,13 @@ void OnCapturePost(int slot, void* services, void* cmd)
         t.eventDropVelocityX = r.pendingDropEvent.velocity[0];
         t.eventDropVelocityY = r.pendingDropEvent.velocity[1];
         t.eventDropVelocityZ = r.pendingDropEvent.velocity[2];
+        t.eventDropReleaseX = r.pendingDropEvent.releasePosition[0];
+        t.eventDropReleaseY = r.pendingDropEvent.releasePosition[1];
+        t.eventDropReleaseZ = r.pendingDropEvent.releasePosition[2];
+        t.eventDropReleaseQuatX = r.pendingDropEvent.releaseQuaternion[0];
+        t.eventDropReleaseQuatY = r.pendingDropEvent.releaseQuaternion[1];
+        t.eventDropReleaseQuatZ = r.pendingDropEvent.releaseQuaternion[2];
+        t.eventDropReleaseQuatW = r.pendingDropEvent.releaseQuaternion[3];
         for (const auto& sm : r.pendingSubs)
             r.subs.push_back(sm);
         r.ticks.push_back(t);
@@ -514,6 +660,13 @@ bool LoadReplay(int slot,
         for (int i = 0; i < tickCount; ++i)
         {
             if (ticks[i].numSubtick > kMaxSubtickPerTick) return false;
+            if ((ticks[i].eventFlags & ReplayEventDrop) != 0)
+            {
+                const float position[3] = { ticks[i].eventDropReleaseX, ticks[i].eventDropReleaseY, ticks[i].eventDropReleaseZ };
+                const float quaternion[4] = { ticks[i].eventDropReleaseQuatX, ticks[i].eventDropReleaseQuatY,
+                                              ticks[i].eventDropReleaseQuatZ, ticks[i].eventDropReleaseQuatW };
+                if ((ticks[i].eventDropVectorFlags & ReplayDropReleasePose) == 0 || !ValidReleasePose(position, quaternion)) return false;
+            }
             stagedOffsets[static_cast<size_t>(i)] = static_cast<uint32_t>(totalSubticks);
             totalSubticks += ticks[i].numSubtick;
             if (totalSubticks > subCountValue) return false;
@@ -845,6 +998,15 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
     const ReplayTick& tick = p.ticks[cur];
     if ((tick.eventFlags & ReplayEventDrop) == 0) return false;
     event.weaponDefIndex = tick.eventWeaponDefIndex;
+    event.vectorFlags = tick.eventDropVectorFlags;
+    event.target[0] = tick.eventDropTargetX;
+    event.releasePosition[0] = tick.eventDropReleaseX;
+    event.releasePosition[1] = tick.eventDropReleaseY;
+    event.releasePosition[2] = tick.eventDropReleaseZ;
+    event.releaseQuaternion[0] = tick.eventDropReleaseQuatX;
+    event.releaseQuaternion[1] = tick.eventDropReleaseQuatY;
+    event.releaseQuaternion[2] = tick.eventDropReleaseQuatZ;
+    event.releaseQuaternion[3] = tick.eventDropReleaseQuatW;
     return true;
 }
 
@@ -852,7 +1014,9 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event)
 {
     const int weaponDefIndex = event.weaponDefIndex;
-    if (!ValidSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady()) return false;
+    if (!ValidSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady() ||
+        !g_hookDropReleaseBuilder.Active() || (event.vectorFlags & ReplayDropReleasePose) == 0)
+        return false;
 
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
     void* ws = nullptr;
@@ -868,8 +1032,10 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
     CCommand command;
     if (!command.Tokenize("drop")) return false;
 
-    if (!PrepareReplayDropPawn(slot, services)) return false;
+    if (!PrepareReplayDropPawn(slot, services, event)) return false;
+    g_replayDropEvents.push_back({ slot, weapon, event });
     dispatch::g_gameClients->ClientCommand(CPlayerSlot(slot), command);
+    g_replayDropEvents.pop_back();
     return true;
 }
 
@@ -934,7 +1100,7 @@ void WriteReplayViewHistory(void* services, void* pawn, float pitch, float yaw)
 }
 
 // Restores drop inputs without consuming the command's initial-position or seeded state.
-bool PrepareReplayDropPawn(int slot, void* services)
+bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& event)
 {
     MovementSnapshot pre{};
     if (!services || !ReplayCommandViewSnapshot(slot, pre)) return false;
@@ -948,8 +1114,14 @@ bool PrepareReplayDropPawn(int slot, void* services)
     // Teleport updates engine spatial state even for a stationary or first-frame drop.
     const float position[3] = { pre.originX, pre.originY, pre.originZ };
     const float velocity[3] = { pre.velX, pre.velY, pre.velZ };
+    // Align grounded idle body facing with the recorded drop pose before the native bone read.
+    const bool alignStationaryBody = (pre.entityFlags & tg::kFlOnGround) != 0 && std::fabs(pre.velX) < 0.01F && std::fabs(pre.velY) < 0.01F;
+    const bool hasRecordedBodyYaw = (event.vectorFlags & ReplayDropBodyYaw) != 0 && std::isfinite(event.target[0]);
+    const float bodyYaw = hasRecordedBodyYaw ? event.target[0] : pre.yaw;
+    const float angles[3] = { 0.0F, NormalizeReplayYaw(bodyYaw), 0.0F };
+    const float* teleportAngles = alignStationaryBody ? angles : nullptr;
     using TeleportFn = void(BC_FASTCALL*)(void*, const float*, const float*, const float*);
-    reinterpret_cast<TeleportFn>(target)(pawn, position, nullptr, velocity);
+    reinterpret_cast<TeleportFn>(target)(pawn, position, teleportAngles, velocity);
     if (!IsReplaying(slot)) return false;
     pawn = input_injector::ResolveReplayPawn(slot, services);
     if (!pawn) return false;
@@ -1076,6 +1248,8 @@ void OnReplayCommit(int slot, void* services, bool simulated)
 
 void ClearAll()
 {
+    g_hookDropReleaseOuter.Remove();
+    g_hookDropReleaseBuilder.Remove();
     g_dropHookReady.store(false, std::memory_order_release);
     g_hookDropWeapon.Remove();
     g_addrDropWeapon = nullptr;
