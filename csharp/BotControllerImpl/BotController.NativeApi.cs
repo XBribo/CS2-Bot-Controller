@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 21), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 22), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -88,12 +88,24 @@ namespace BotControllerApi
             int slot, [Out] ReplayTick[] ticks, int maxTicks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CopyRecordedTicksRange(
+            int slot, int start, [Out] ReplayTick[] ticks, int maxTicks);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CopyRecordedSubticks(
             int slot, [Out] SubtickMove[] subs, int maxSubticks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CopyRecordedSubticksRange(
+            int slot, int start, [Out] SubtickMove[] subs, int maxSubticks);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CopyRecordedCommands(
             int slot, [Out] ReplayCommandFrame[] commands, int maxCommands);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CopyRecordedCommandsRange(
+            int slot, int start, [Out] ReplayCommandFrame[] commands, int maxCommands);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_LoadReplay(
@@ -249,6 +261,24 @@ namespace BotControllerApi
         public static bool StopRecord(int slot) => BotController_StopRecord(slot) == 0;
 
         public static int RecordedTickCount(int slot) => BotController_GetRecordedTickCount(slot);
+
+        // Copies one fixed-size range from a stopped recording.
+        public static int CopyRecordedTicksRange(int slot, int start, ReplayTick[] ticks)
+            => BotController_CopyRecordedTicksRange(slot, start, ticks, ticks.Length);
+
+        // Copies one fixed-size subtick range from a stopped recording.
+        public static int CopyRecordedSubticksRange(int slot, int start, SubtickMove[] subs)
+            => BotController_CopyRecordedSubticksRange(slot, start, subs, subs.Length);
+
+        // Copies one fixed-size command range from a stopped recording.
+        public static int CopyRecordedCommandsRange(int slot, int start, ReplayCommandFrame[] commands)
+            => BotController_CopyRecordedCommandsRange(slot, start, commands, commands.Length);
+
+        // Reports the size of the stopped recording's subtick buffer.
+        public static int RecordedSubtickCount(int slot) => BotController_GetRecordedSubtickCount(slot);
+
+        // Reports the size of the stopped recording's command buffer.
+        public static int RecordedCommandCount(int slot) => BotController_GetRecordedCommandCount(slot);
 
         // Pull a slot's recorded ticks + subticks out of native memory.
         public static (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)

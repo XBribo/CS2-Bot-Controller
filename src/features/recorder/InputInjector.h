@@ -24,8 +24,11 @@ const char* Status();
 // Requires the frame-boundary and command hooks; logs unavailable capabilities.
 bool RecorderReady();
 
-// Registers the authoritative replay pawn supplied by the managed plugin.
+// Registers the authoritative pawn supplied by the managed plugin for recording or replay.
 bool SetReplayPawn(int slot, void* pawn);
+
+// Caches validated services at registration so the first active tick has a frame boundary.
+void PrimeSlotServices(int slot, void* services);
 
 // Clears the registered replay pawn for a slot.
 void ClearReplayPawn(int slot);

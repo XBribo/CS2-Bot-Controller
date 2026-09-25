@@ -50,7 +50,11 @@ bool SetReplayPawn(int slot, void* pawn)
     int ownerSlot = ControllerSlotForPawn(pawn);
     if (ownerSlot >= 0 && ownerSlot != slot) return false;
 
+    void* services = nullptr;
+    if (!GuardedRead(pawn, tg::g_pawnMovementServices, services) || !services || ServicesToPawnField(services) != pawn) return false;
+
     g_slotPawns[slot].store(pawn, std::memory_order_release);
+    PrimeSlotServices(slot, services);
     return true;
 }
 

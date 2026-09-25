@@ -587,40 +587,46 @@ void OnCapturePost(int slot, void* services, void* cmd)
     }
 }
 
-int CopyTicks(int slot, ReplayTick* out, int maxTicks)
+int CopyTicks(int slot, ReplayTick* out, int maxTicks) { return CopyTicksRange(slot, 0, out, maxTicks); }
+
+// Copies one bounded range without locking for the full recording length.
+int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks)
 {
-    if (!ValidSlot(slot) || !out || maxTicks <= 0) return 0;
+    if (!ValidSlot(slot) || start < 0 || !out || maxTicks <= 0) return 0;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    int n = static_cast<int>(r.ticks.size());
-    n = std::min(n, maxTicks);
+    int n = std::min(maxTicks, std::max(0, static_cast<int>(r.ticks.size()) - start));
     for (int i = 0; i < n; ++i)
-        out[i] = r.ticks[i];
+        out[i] = r.ticks[start + i];
     return n;
 }
 
-int CopySubticks(int slot, SubtickMove* out, int maxSubticks)
+int CopySubticks(int slot, SubtickMove* out, int maxSubticks) { return CopySubticksRange(slot, 0, out, maxSubticks); }
+
+// Copies one bounded subtick range from the stopped recording.
+int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks)
 {
-    if (!ValidSlot(slot) || !out || maxSubticks <= 0) return 0;
+    if (!ValidSlot(slot) || start < 0 || !out || maxSubticks <= 0) return 0;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    int n = static_cast<int>(r.subs.size());
-    n = std::min(n, maxSubticks);
+    int n = std::min(maxSubticks, std::max(0, static_cast<int>(r.subs.size()) - start));
     for (int i = 0; i < n; ++i)
-        out[i] = r.subs[i];
+        out[i] = r.subs[start + i];
     return n;
 }
 
 // Copies captured command frames into a caller-owned buffer
-int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands)
+int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands) { return CopyCommandsRange(slot, 0, out, maxCommands); }
+
+// Copies one bounded command range from the stopped recording.
+int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands)
 {
-    if (!ValidSlot(slot) || !out || maxCommands <= 0) return 0;
+    if (!ValidSlot(slot) || start < 0 || !out || maxCommands <= 0) return 0;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    int n = static_cast<int>(r.commands.size());
-    n = std::min(n, maxCommands);
+    int n = std::min(maxCommands, std::max(0, static_cast<int>(r.commands.size()) - start));
     for (int i = 0; i < n; ++i)
-        out[i] = r.commands[i];
+        out[i] = r.commands[start + i];
     return n;
 }
 

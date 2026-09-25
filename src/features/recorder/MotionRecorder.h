@@ -192,8 +192,11 @@ void SetCurrentDef(int slot, int defIndex);
 
 // Copy recorded data out to caller buffers; returns elements written.
 int CopyTicks(int slot, ReplayTick* out, int maxTicks);
+int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks);
 int CopySubticks(int slot, SubtickMove* out, int maxSubticks);
+int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks);
 int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands);
+int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands);
 
 // ---- replay ----
 // Load all parallel replay arrays into a slot's replay buffer

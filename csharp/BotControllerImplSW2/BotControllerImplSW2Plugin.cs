@@ -7,6 +7,7 @@
 // Also exposes IBotControllerApi via IInterfaceManager for cross-plugin use.
 
 using System.IO;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
@@ -34,6 +35,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     private readonly ReplayDriver _driver = new();
     private readonly Dictionary<int, string> _recordingFiles = new();
+    private readonly HashSet<int> _savingSlots = new();
+    private readonly Dictionary<int, object> _loadingSlots = new();
+    private readonly HashSet<int> _cancelledLoads = new();
+    private readonly ConcurrentQueue<Action> _completedJobs = new();
     private bool _nativeApiChecked;
     private bool _nativeApiAvailable;
 
@@ -208,7 +213,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         Directory.CreateDirectory(RecordingsDir);
 
         // Hook the server tick for replay driver
-        Core.Event.OnTick += _driver.Tick;
+        Core.Event.OnTick += OnTick;
     }
 
     // Unhooks replay ticking during plugin unload.
@@ -216,11 +221,26 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         if (_nativeApiAvailable)
         {
-            Core.Event.OnTick -= _driver.Tick;
+            Core.Event.OnTick -= OnTick;
         }
     }
 
     // ---- Helpers ----
+
+    // Applies completed file jobs on the game thread before replay bookkeeping.
+    private void OnTick()
+    {
+        while (_completedJobs.TryDequeue(out Action? completion)) completion();
+        _driver.Tick();
+    }
+
+    // Reports an asynchronous result only to the player who issued the command.
+    private void NotifyPlayer(int slot, ulong steamId, string message)
+    {
+        var player = Core.PlayerManager.GetPlayer(slot);
+        if (player is { IsValid: true } && player.SteamID == steamId)
+            player.SendMessage(MessageType.Chat, Tag(message));
+    }
 
     // Returns the plugin-local recordings directory.
     private string RecordingsDir => Path.Combine(Core.PluginPath, "recordings");
@@ -256,8 +276,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private static string Tag(string msg) =>
         $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
 
-    // Registers the live bot pawn pointer required by the current native replay path.
-    private bool RegisterReplayPawnForSlot(int slot)
+    // Registers the live pawn before the first recording or replay frame.
+    private bool RegisterPawnForSlot(int slot)
     {
         var player = Core.PlayerManager.GetPlayer(slot);
         var pawn = player?.PlayerPawn;
@@ -286,13 +306,13 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
                 return true;
 
             Logger.LogWarning(
-                "[BotController] BotController ABI mismatch; expected a compatible native module, got ABI {AbiVersion}.",
+                "[BotController] BotController ABI mismatch; got ABI {AbiVersion}.",
                 BotController.AbiVersion);
             return false;
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "[BotController] Failed to initialize native BotController API.");
+            Logger.LogWarning(ex, "[BotController] Failed to initialize BotController API.");
             return false;
         }
     }
@@ -305,6 +325,11 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         var player = context.Sender;
         if (player == null || !player.IsValid) return;
+        if (_savingSlots.Contains(player.Slot))
+        {
+            context.Reply(Tag("Previous recording is still saving."));
+            return;
+        }
 
         string? fileName = context.Args.Length >= 1 ? context.Args[0] : null;
         if (context.Args.Length > 1 ||
@@ -313,7 +338,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             context.Reply(Tag("Usage: !record [fileName]"));
             return;
         }
-        if (!BotController.StartRecord(player.Slot))
+        if (!RegisterPawnForSlot(player.Slot) || !BotController.StartRecord(player.Slot))
         {
             context.Reply(Tag("Failed to start recording."));
             return;
@@ -328,6 +353,11 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         var player = context.Sender;
         if (player == null || !player.IsValid) return;
+        if (_savingSlots.Contains(player.Slot))
+        {
+            context.Reply(Tag("Recording is still saving."));
+            return;
+        }
 
         BotController.StopRecord(player.Slot);
 
@@ -335,10 +365,31 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             !TryGetRecordingFile(null, player.SteamID, out file))
             return;
 
-        int saved = MotionStore.SaveToFile(player.Slot, file, Tickrate);
-        context.Reply(saved > 0
-            ? Tag($"Saved {saved} ticks.")
-            : Tag("Nothing recorded."));
+        int slot = player.Slot;
+        ulong steamId = player.SteamID;
+        _savingSlots.Add(slot);
+        context.Reply(Tag("Saving recording..."));
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                int saved = MotionStore.SaveToFile(slot, file, Tickrate);
+                _completedJobs.Enqueue(() =>
+                {
+                    _savingSlots.Remove(slot);
+                    NotifyPlayer(slot, steamId, saved > 0 ? $"Saved {saved} ticks." : "Nothing recorded.");
+                });
+            }
+            catch (Exception ex)
+            {
+                _completedJobs.Enqueue(() =>
+                {
+                    _savingSlots.Remove(slot);
+                    Logger.LogError(ex, "Recording save failed.");
+                    NotifyPlayer(slot, steamId, "Recording save failed.");
+                });
+            }
+        });
     }
 
     // Loads the invoking player's recording and starts replay on a target bot slot.
@@ -362,31 +413,50 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             return;
         }
 
-        MotionRecording rec = MotionStore.LoadFromFile(file);
-        if (rec.Ticks.Length == 0)
+        if (_loadingSlots.ContainsKey(botSlot))
         {
-            context.Reply(Tag("Recording is empty."));
+            context.Reply(Tag("Replay is still loading on that slot."));
             return;
         }
-        if (rec.Tickrate != Tickrate)
-            context.Reply(Tag($"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}."));
-
-        if (BotController.LoadReplay(
-                botSlot,
-                rec.Ticks,
-                rec.Subticks,
-                rec.Commands,
-                Array.Empty<ReplayMovementExtra>()) &&
-            RegisterReplayPawnForSlot(botSlot) &&
-            BotController.StartReplay(botSlot))
+        int requesterSlot = player.Slot;
+        ulong requesterSteamId = player.SteamID;
+        object token = new();
+        _loadingSlots.Add(botSlot, token);
+        context.Reply(Tag("Loading replay..."));
+        _ = Task.Run(() =>
         {
-            _driver.Track(botSlot);
-            context.Reply(Tag($"Replaying on bot slot {botSlot}."));
-        }
-        else
-        {
-            context.Reply(Tag("Failed to start replay."));
-        }
+            try
+            {
+                MotionRecording rec = MotionStore.LoadFromFile(file);
+                bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
+                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                _completedJobs.Enqueue(() =>
+                {
+                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
+                    _loadingSlots.Remove(botSlot);
+                    if (_cancelledLoads.Remove(botSlot)) return;
+                    if (rec.Tickrate != Tickrate)
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+                    if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
+                    {
+                        _driver.Track(botSlot);
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
+                    }
+                    else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
+                });
+            }
+            catch (Exception ex)
+            {
+                _completedJobs.Enqueue(() =>
+                {
+                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
+                    _loadingSlots.Remove(botSlot);
+                    if (_cancelledLoads.Remove(botSlot)) return;
+                    Logger.LogError(ex, "Replay load failed.");
+                    NotifyPlayer(requesterSlot, requesterSteamId, "Replay load failed.");
+                });
+            }
+        });
     }
 
     // Stops replay on a target bot slot and releases the bot lock.
@@ -397,6 +467,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         if (player == null || !player.IsValid) return;
 
         if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int botSlot)) return;
+
+        if (_loadingSlots.ContainsKey(botSlot)) _cancelledLoads.Add(botSlot);
 
         BotController.StopReplay(botSlot);
         _driver.Release(botSlot);

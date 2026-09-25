@@ -112,6 +112,7 @@ std::array<std::vector<UsercmdMovement>, kMaxSlots> g_usercmdMovements{};
 std::array<uint64_t, kMaxSlots> g_injectedHeldMasks{};
 std::array<uint64_t, kMaxSlots> g_movementHeldMasks{};
 std::mutex g_usercmdInjectionMutex;
+std::atomic<uint64_t> g_usercmdWorkSlots{ 0 };
 std::atomic<int64_t> g_nextUsercmdInjectionId{ 1 };
 std::atomic<int64_t> g_nextUsercmdSuppressionId{ 1 };
 std::atomic<int64_t> g_nextUsercmdMovementId{ 1 };
@@ -120,6 +121,16 @@ bool IsThrowableUtilityDef(int def) { return def >= 43 && def <= 48; }
 
 // Reports whether a slot can index the fixed replay state arrays.
 bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
+
+// Publishes whether a slot still has command overrides after a locked mutation.
+void RefreshUsercmdWorkSlot(int slot)
+{
+    const uint64_t bit = uint64_t{ 1 } << slot;
+    if (!g_usercmdInjections[slot].empty() || !g_usercmdSuppressions[slot].empty() || !g_usercmdMovements[slot].empty())
+        g_usercmdWorkSlots.fetch_or(bit, std::memory_order_release);
+    else
+        g_usercmdWorkSlots.fetch_and(~bit, std::memory_order_release);
+}
 
 float NormalizeDeg(float a)
 {
@@ -137,6 +148,12 @@ int64_t MonotonicMilliseconds()
 // Creates an independently cancellable usercmd button injection
 } // namespace
 
+// Seeds the active frame boundary from a pawn registered before recording starts.
+void PrimeSlotServices(int slot, void* services)
+{
+    if (ValidSlotIndex(slot)) g_slotServices[slot].store(services, std::memory_order_release);
+}
+
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
@@ -146,6 +163,7 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
     if (motion_recorder::IsReplaying(slot)) return -1;
     g_usercmdInjections[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .durationMs = durationMs, .phase = UsercmdInjectionPhase::PendingPress });
+    RefreshUsercmdWorkSlot(slot);
     return id;
 }
 
@@ -161,6 +179,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
     if (motion_recorder::IsReplaying(slot)) return -1;
     g_usercmdMovements[slot].push_back(
         { .id = id, .forwardMove = std::clamp(forwardMove, -1.0F, 1.0F), .leftMove = std::clamp(leftMove, -1.0F, 1.0F) });
+    RefreshUsercmdWorkSlot(slot);
     return id;
 }
 
@@ -191,6 +210,7 @@ bool CancelUsercmdMovement(int slot, int64_t movementId)
     {
         if (it->id != movementId) continue;
         movements.erase(it);
+        RefreshUsercmdWorkSlot(slot);
         return true;
     }
     return false;
@@ -210,6 +230,7 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
         if (it->phase == UsercmdInjectionPhase::PendingPress) injections.erase(it);
         else
             it->phase = UsercmdInjectionPhase::PendingRelease;
+        RefreshUsercmdWorkSlot(slot);
         return true;
     }
     return false;
@@ -225,6 +246,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
     if (motion_recorder::IsReplaying(slot)) return false;
     g_usercmdSuppressions[slot].push_back(
         { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false, .releasePending = true });
+    RefreshUsercmdWorkSlot(slot);
     return true;
 }
 
@@ -238,6 +260,7 @@ int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
     if (motion_recorder::IsReplaying(slot)) return -1;
     g_usercmdSuppressions[slot].push_back(
         { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true, .releasePending = true });
+    RefreshUsercmdWorkSlot(slot);
     return id;
 }
 
@@ -252,6 +275,7 @@ bool CancelUsercmdSuppression(int slot, int64_t suppressionId)
     {
         if (it->id != suppressionId) continue;
         suppressions.erase(it);
+        RefreshUsercmdWorkSlot(slot);
         return true;
     }
     return false;
@@ -266,6 +290,7 @@ void ClearUsercmdInjections(int slot)
     g_usercmdInjections[slot].clear();
     g_usercmdSuppressions[slot].clear();
     g_usercmdMovements[slot].clear();
+    RefreshUsercmdWorkSlot(slot);
     g_injectedHeldMasks[slot] = 0;
     g_movementHeldMasks[slot] = 0;
 }
@@ -373,6 +398,7 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 
         previousMask = g_injectedHeldMasks[slot];
         g_injectedHeldMasks[slot] = activeMask;
+        RefreshUsercmdWorkSlot(slot);
     }
 
     uint64_t pressedMask = activeMask & ~previousMask;
@@ -422,6 +448,7 @@ bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
             }
             ++it;
         }
+        RefreshUsercmdWorkSlot(slot);
     }
 
     if (suppressedMask == 0) return false;
@@ -463,6 +490,7 @@ void EnsureVtableHooks(void* services);
 KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
 {
     EnsureVtableHooks(services);
+    if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     void* validatedPawn = nullptr;
     int slot = pawn_binding::ServicesToSlot(services, &validatedPawn);
     if (slot >= 0 && slot < kMaxSlots)
@@ -645,6 +673,8 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
 // Records or injects the user command before native simulation.
 KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
 {
+    if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay() && g_usercmdWorkSlots.load(std::memory_order_acquire) == 0)
+        return { KHook::Action::Ignore };
     int slot = pawn_binding::ServicesToSlot(services);
     auto* boundary = FindPhysicsFrame(slot);
     bool recording = boundary && boundary->recording && motion_recorder::IsRecording(slot);
@@ -848,6 +878,7 @@ void Remove()
             movements.clear();
         g_injectedHeldMasks.fill(0);
         g_movementHeldMasks.fill(0);
+        g_usercmdWorkSlots.store(0, std::memory_order_release);
     }
     g_installed = false;
     g_status = "not_attempted";

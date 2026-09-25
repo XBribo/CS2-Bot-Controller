@@ -35,7 +35,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 21 keeps the native command-based projectile replay path without birth alignment exports.
+// ABI 22 keeps the native command-based projectile replay path without birth alignment exports.
 extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
 
 // Create an independently cancellable usercmd injection
@@ -204,15 +204,33 @@ extern "C" BC_EXPORT int BotController_CopyRecordedTicks(int slot, cs2bc::Replay
     return cs2bc::motion_recorder::CopyTicks(slot, out, maxTicks);
 }
 
+// Copies a bounded tick range for incremental serialization.
+extern "C" BC_EXPORT int BotController_CopyRecordedTicksRange(int slot, int start, cs2bc::ReplayTick* out, int maxTicks)
+{
+    return cs2bc::motion_recorder::CopyTicksRange(slot, start, out, maxTicks);
+}
+
 extern "C" BC_EXPORT int BotController_CopyRecordedSubticks(int slot, cs2bc::SubtickMove* out, int maxSubticks)
 {
     return cs2bc::motion_recorder::CopySubticks(slot, out, maxSubticks);
+}
+
+// Copies a bounded subtick range for incremental serialization.
+extern "C" BC_EXPORT int BotController_CopyRecordedSubticksRange(int slot, int start, cs2bc::SubtickMove* out, int maxSubticks)
+{
+    return cs2bc::motion_recorder::CopySubticksRange(slot, start, out, maxSubticks);
 }
 
 // Copies recorded command frames into a caller-owned buffer
 extern "C" BC_EXPORT int BotController_CopyRecordedCommands(int slot, cs2bc::ReplayCommandFrameData* out, int maxCommands)
 {
     return cs2bc::motion_recorder::CopyCommands(slot, out, maxCommands);
+}
+
+// Copies a bounded command range for incremental serialization.
+extern "C" BC_EXPORT int BotController_CopyRecordedCommandsRange(int slot, int start, cs2bc::ReplayCommandFrameData* out, int maxCommands)
+{
+    return cs2bc::motion_recorder::CopyCommandsRange(slot, start, out, maxCommands);
 }
 
 // Load replay buffers with optional per-tick command and movement data. 0 ok.

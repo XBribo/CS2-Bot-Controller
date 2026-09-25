@@ -32,19 +32,82 @@ public static class MotionStore
     // if nothing was recorded
     public static int SaveToFile(int slot, string path, int tickrate = 64)
     {
-        var (ticks, subs, commands) = BotController.GetRecordedMotionExtended(slot);
-        if (ticks.Length == 0) return -1;
-        var rec = new MotionRecording
+        int ticks = BotController.RecordedTickCount(slot);
+        if (ticks <= 0) return -1;
+        int subticks = BotController.RecordedSubtickCount(slot);
+        int commands = BotController.RecordedCommandCount(slot);
+        if (subticks < 0 || commands != ticks)
+            throw new InvalidDataException("Recording buffers are incomplete.");
+
+        string temporaryPath = path + "." + Path.GetRandomFileName() + ".tmp";
+        try
         {
-            Tickrate = tickrate,
-            Ticks = ticks,
-            Subticks = subs,
-            Commands = commands,
-        };
-        using var file = File.Create(path);
-        using var brotli = new BrotliStream(file, CompressionLevel.Optimal);
-        JsonSerializer.Serialize(brotli, rec, JsonOpts);
-        return ticks.Length;
+            using (var file = File.Create(temporaryPath))
+            using (var brotli = new BrotliStream(file, CompressionLevel.Optimal))
+            using (var writer = new Utf8JsonWriter(brotli))
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber(nameof(MotionRecording.Tickrate), tickrate);
+                WriteTicks(writer, slot, ticks);
+                WriteSubticks(writer, slot, subticks);
+                WriteCommands(writer, slot, commands);
+                writer.WriteEndObject();
+            }
+            File.Move(temporaryPath, path, true);
+            return ticks;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    // Copies and serializes ticks in bounded batches without a full managed snapshot.
+    private static void WriteTicks(Utf8JsonWriter writer, int slot, int total)
+    {
+        writer.WritePropertyName(nameof(MotionRecording.Ticks));
+        writer.WriteStartArray();
+        for (int start = 0; start < total;)
+        {
+            var batch = new ReplayTick[Math.Min(512, total - start)];
+            if (BotController.CopyRecordedTicksRange(slot, start, batch) != batch.Length)
+                throw new InvalidDataException("Recording ticks changed during save.");
+            foreach (ReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
+            start += batch.Length;
+        }
+        writer.WriteEndArray();
+    }
+
+    // Copies and serializes subticks in bounded batches.
+    private static void WriteSubticks(Utf8JsonWriter writer, int slot, int total)
+    {
+        writer.WritePropertyName(nameof(MotionRecording.Subticks));
+        writer.WriteStartArray();
+        for (int start = 0; start < total;)
+        {
+            var batch = new SubtickMove[Math.Min(512, total - start)];
+            if (BotController.CopyRecordedSubticksRange(slot, start, batch) != batch.Length)
+                throw new InvalidDataException("Recording subticks changed during save.");
+            foreach (SubtickMove subtick in batch) JsonSerializer.Serialize(writer, subtick, JsonOpts);
+            start += batch.Length;
+        }
+        writer.WriteEndArray();
+    }
+
+    // Copies and serializes commands in bounded batches.
+    private static void WriteCommands(Utf8JsonWriter writer, int slot, int total)
+    {
+        writer.WritePropertyName(nameof(MotionRecording.Commands));
+        writer.WriteStartArray();
+        for (int start = 0; start < total;)
+        {
+            var batch = new ReplayCommandFrame[Math.Min(512, total - start)];
+            if (BotController.CopyRecordedCommandsRange(slot, start, batch) != batch.Length)
+                throw new InvalidDataException("Recording commands changed during save.");
+            foreach (ReplayCommandFrame command in batch) JsonSerializer.Serialize(writer, command, JsonOpts);
+            start += batch.Length;
+        }
+        writer.WriteEndArray();
     }
 
     // Load a Brotli-compressed JSON recording from disk
