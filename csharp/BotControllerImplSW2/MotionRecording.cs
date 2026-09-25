@@ -1,5 +1,6 @@
-// Recording model and JSON load/save — framework-agnostic.
+// Recording model and Brotli-compressed JSON load/save — framework-agnostic.
 
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using BotControllerApi;
@@ -26,7 +27,7 @@ public static class MotionStore
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
-    // Save a slot's recorded motion to a JSON file. Returns tick count, or -1
+    // Save a slot's recorded motion to a compressed JSON file. Returns tick count, or -1
     // if nothing was recorded
     public static int SaveToFile(int slot, string path, int tickrate = 64)
     {
@@ -39,16 +40,20 @@ public static class MotionStore
             Subticks = subs,
             Commands = commands,
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(rec, JsonOpts));
+        using var file = File.Create(path);
+        using var brotli = new BrotliStream(file, CompressionLevel.Optimal);
+        JsonSerializer.Serialize(brotli, rec, JsonOpts);
         return ticks.Length;
     }
 
-    // Load a JSON recording from disk
+    // Load a Brotli-compressed JSON recording from disk
     public static MotionRecording LoadFromFile(string path)
     {
+        using var file = File.OpenRead(path);
+        using var brotli = new BrotliStream(file, CompressionMode.Decompress);
         MotionRecording recording = JsonSerializer.Deserialize<MotionRecording>(
-            File.ReadAllText(path), JsonOpts)
-            ?? throw new InvalidDataException("Recording JSON is empty.");
+            brotli, JsonOpts)
+            ?? throw new InvalidDataException("Recording is empty.");
         if (recording.Ticks is null || recording.Subticks is null || recording.Commands is null)
             throw new InvalidDataException("Recording JSON is missing required data.");
         if (recording.Commands.Length != recording.Ticks.Length)

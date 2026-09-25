@@ -225,7 +225,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Returns the plugin-local recordings directory.
     private string RecordingsDir => Path.Combine(Core.PluginPath, "recordings");
 
-    // Resolves an optional recording name to a safe plugin-local JSON path
+    // Resolves an optional recording name to a safe plugin-local compressed JSON path
     private bool TryGetRecordingFile(string? fileName, ulong steamId, out string file)
     {
         string name = string.IsNullOrWhiteSpace(fileName)
@@ -239,8 +239,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             return false;
         }
 
-        if (name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-            name = name[..^5];
+        if (name.EndsWith(".json.br", StringComparison.OrdinalIgnoreCase))
+            name = name[..^8];
 
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -248,7 +248,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             return false;
         }
 
-        file = Path.Combine(RecordingsDir, $"{name}.json");
+        file = Path.Combine(RecordingsDir, $"{name}.json.br");
         return true;
     }
 
