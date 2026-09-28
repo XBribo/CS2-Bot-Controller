@@ -7,15 +7,18 @@
 #include "ccsbot_slot.h"
 #include "hooks.h"
 #include "core/log.h"
+#include "core/interfaces.h"
 #include "offsets.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <mutex>
+#include <limits>
 #include <vector> // NOLINT(misc-include-cleaner)
 
 #include <convar.h>
@@ -56,7 +59,9 @@ struct RecordState
 struct ReplayState
 {
     std::atomic<bool> playing{ false };
+    std::atomic<bool> holding{ false };
     std::atomic<bool> needsInitialTeleport{ false };
+    std::atomic<bool> needsMovementExtra{ false };
     std::atomic<bool> loop{ false };
     std::vector<ReplayTick> ticks;
     std::vector<SubtickMove> subs;
@@ -64,6 +69,8 @@ struct ReplayState
     std::vector<ReplayMovementExtra> movementExtras;
     std::vector<uint32_t> subOffset; // prefix sum, size ticks.size()+1
     std::atomic<int> cursor{ 0 };
+    int startCursor{ 0 };
+    int holdBeforeCursor{ -1 };
     std::atomic<int> lastAppliedDef{ -1 };
     int lastEventCursor{ -1 };
     int lastFinalViewCursor{ -1 }; // guards camera reads after the simulation cursor advances
@@ -632,6 +639,53 @@ int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxC
 
 // ---- replay ----
 
+namespace {
+// Keeps complete engine planes intact; legacy held-only frames use the adjacent-state encoding.
+void ReplayButtonsAt(const ReplayState& replay, int cursor, uint64_t& b0, uint64_t& b1, uint64_t& b2)
+{
+    const ReplayCommandFrameData* command = static_cast<size_t>(cursor) < replay.commands.size() ? &replay.commands[cursor] : nullptr;
+    if (command && (command->fields & kCommandFieldButtons) != 0)
+    {
+        b0 = command->buttons;
+        b1 = command->buttons1;
+        b2 = command->buttons2;
+        return;
+    }
+    const MovementSnapshot& pre = replay.ticks[cursor].pre;
+    b0 = pre.buttons;
+    b1 = pre.buttons1;
+    b2 = pre.buttons2;
+    if (b1 != 0 || b2 != 0) return;
+    uint64_t previousHeld = 0;
+    if (cursor > 0)
+    {
+        const auto* previous = static_cast<size_t>(cursor - 1) < replay.commands.size() ? &replay.commands[cursor - 1] : nullptr;
+        previousHeld = previous && (previous->fields & kCommandFieldButtons) != 0 ? previous->buttons : replay.ticks[cursor - 1].pre.buttons;
+    }
+    b1 = b0 ^ previousHeld;
+    b2 = 0;
+}
+
+// Rejects malformed selected subtick fractions while leaving absent fields unrestricted.
+bool ValidReplayFraction(float fraction) { return std::isfinite(fraction) && fraction >= 0.0F && fraction < 1.0F; }
+
+// Validates the presence mask and selected data before replacing any loaded buffer.
+bool ValidMovementExtra(const ReplayMovementExtra& extra)
+{
+    const uint32_t fields = extra.fields;
+    if ((fields & ~ReplayMovementExtraAll) != 0) return false;
+    if (fields == 0) return true;
+    if (extra.sourcePlayerTick < 0 || !std::isfinite(extra.sourceTickrate) || extra.sourceTickrate <= 0.0F) return false;
+    if ((fields & ReplayMovementExtraJumpPressedTime) != 0 && !std::isfinite(extra.jumpPressedTime)) return false;
+    if ((fields & ReplayMovementExtraLastDuckTime) != 0 && !std::isfinite(extra.lastDuckTime)) return false;
+    if ((fields & ReplayMovementExtraLastActualJumpPress) != 0 && !ValidReplayFraction(extra.lastActualJumpPressFrac)) return false;
+    if ((fields & ReplayMovementExtraLastUsableJumpPress) != 0 && !ValidReplayFraction(extra.lastUsableJumpPressFrac)) return false;
+    if ((fields & ReplayMovementExtraLastLanded) != 0 && !ValidReplayFraction(extra.lastLandedFrac)) return false;
+    return (fields & ReplayMovementExtraLastLandedVelocity) == 0 ||
+           (std::isfinite(extra.lastLandedVelocityX) && std::isfinite(extra.lastLandedVelocityY) && std::isfinite(extra.lastLandedVelocityZ));
+}
+} // namespace
+
 // Validate, stage, and atomically replace all replay buffers
 bool LoadReplay(int slot,
                 const ReplayTick* ticks,
@@ -665,6 +719,7 @@ bool LoadReplay(int slot,
         uint64_t totalSubticks = 0;
         for (int i = 0; i < tickCount; ++i)
         {
+            if (movementExtraCount > 0 && !ValidMovementExtra(movementExtras[i])) return false;
             if (ticks[i].numSubtick > kMaxSubtickPerTick) return false;
             if ((ticks[i].eventFlags & ReplayEventDrop) != 0)
             {
@@ -697,6 +752,10 @@ bool LoadReplay(int slot,
         p.movementExtras.swap(stagedMovementExtras);
         p.subOffset.swap(stagedOffsets);
         p.cursor.store(0, std::memory_order_relaxed);
+        p.startCursor = 0;
+        p.holdBeforeCursor = -1;
+        p.holding.store(false, std::memory_order_release);
+        p.needsMovementExtra.store(false, std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
@@ -708,7 +767,9 @@ bool LoadReplay(int slot,
     }
 }
 
-bool StartReplay(int slot, bool loop)
+namespace {
+// Shares range validation and initialization while preserving a held replay's physical state.
+bool StartReplayRange(int slot, bool loop, int startIndex, int holdBeforeIndex)
 {
     if (!ValidSlot(slot) || !input_injector::ReplayReady()) return false;
     if (tg::g_vtIdxTeleport < 0)
@@ -719,33 +780,91 @@ bool StartReplay(int slot, bool loop)
     ReplayState& p = g_rep[slot];
     {
         std::scoped_lock lk(p.mu);
-        if (p.ticks.empty()) return false;
-    }
-    p.cursor.store(0, std::memory_order_relaxed);
-    p.lastAppliedDef.store(-1, std::memory_order_relaxed);
-    {
-        std::scoped_lock lk(p.mu);
+        const int total = static_cast<int>(p.ticks.size());
+        if (startIndex < 0 || startIndex >= total ||
+            (holdBeforeIndex != -1 && (holdBeforeIndex <= startIndex || holdBeforeIndex > total)))
+            return false;
+        const bool resumesHold = holdBeforeIndex == -1 && p.playing.load(std::memory_order_acquire) &&
+                                 p.holding.load(std::memory_order_acquire) &&
+                                 p.cursor.load(std::memory_order_relaxed) == startIndex;
+        p.cursor.store(startIndex, std::memory_order_relaxed);
+        // Releasing a pre-roll hold continues the same replay, including its original loop start.
+        if (!resumesHold)
+        {
+            p.startCursor = startIndex;
+            p.lastFinalViewCursor = -1;
+            p.needsInitialTeleport.store(true, std::memory_order_release);
+        }
+        p.holdBeforeCursor = holdBeforeIndex;
+        // A resumed hold only rebases history; its engine-generated pose is not teleported.
+        p.needsMovementExtra.store(!p.movementExtras.empty(), std::memory_order_release);
+        p.holding.store(false, std::memory_order_release);
+        p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
-        p.lastFinalViewCursor = -1;
+        p.loop.store(loop, std::memory_order_relaxed);
+        g_replayingSlots.fetch_or(uint64_t{ 1 } << slot, std::memory_order_release);
+        p.playing.store(true, std::memory_order_release);
     }
-    p.loop.store(loop, std::memory_order_relaxed);
-    p.needsInitialTeleport.store(true, std::memory_order_release);
-    g_replayingSlots.fetch_or(uint64_t{ 1 } << slot, std::memory_order_release);
-    p.playing.store(true, std::memory_order_release);
     input_injector::ClearUsercmdInjections(slot);
     return true;
+}
+} // namespace
+
+// Preserves the original start-from-zero API.
+bool StartReplay(int slot, bool loop) { return StartReplayAt(slot, loop, 0); }
+
+// Starts or resumes replay at an inclusive input index.
+bool StartReplayAt(int slot, bool loop, int startIndex) { return StartReplayRange(slot, loop, startIndex, -1); }
+
+// Stops consuming input before the exclusive boundary while keeping the pawn under replay control.
+bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+{
+    if (holdBeforeIndex < 0) return false;
+    return StartReplayRange(slot, loop, startIndex, holdBeforeIndex);
 }
 
 bool StopReplay(int slot)
 {
     if (!ValidSlot(slot)) return false;
     g_rep[slot].playing.store(false, std::memory_order_release);
+    g_rep[slot].holding.store(false, std::memory_order_release);
+    g_rep[slot].needsMovementExtra.store(false, std::memory_order_release);
     g_replayingSlots.fetch_and(~(uint64_t{ 1 } << slot), std::memory_order_release);
     input_injector::ClearReplayPawn(slot);
     return true;
 }
 
+// Releases vector capacities as well as stopping replay; recorded buffers are unaffected.
+bool ReleaseReplayBuffer(int slot)
+{
+    if (!ValidSlot(slot)) return false;
+    ReplayState& p = g_rep[slot];
+    std::scoped_lock lk(p.mu);
+    StopReplay(slot);
+    std::vector<ReplayTick>{}.swap(p.ticks);
+    std::vector<SubtickMove>{}.swap(p.subs);
+    std::vector<ReplayCommandFrameData>{}.swap(p.commands);
+    std::vector<ReplayMovementExtra>{}.swap(p.movementExtras);
+    std::vector<uint32_t>{}.swap(p.subOffset);
+    p.cursor.store(0, std::memory_order_relaxed);
+    p.startCursor = 0;
+    p.holdBeforeCursor = -1;
+    p.loop.store(false, std::memory_order_relaxed);
+    p.needsInitialTeleport.store(false, std::memory_order_release);
+    p.needsMovementExtra.store(false, std::memory_order_release);
+    p.lastAppliedDef.store(-1, std::memory_order_relaxed);
+    p.lastEventCursor = -1;
+    p.lastFinalViewCursor = -1;
+    return true;
+}
+
 bool IsReplaying(int slot) { return ValidSlot(slot) && g_rep[slot].playing.load(std::memory_order_acquire); }
+
+// Allows the input hook to suppress execution without replaying the last command.
+bool IsReplayHolding(int slot)
+{
+    return IsReplaying(slot) && g_rep[slot].holding.load(std::memory_order_acquire);
+}
 
 // Skips replay-only work without dereferencing engine objects.
 bool HasAnyReplay() { return g_replayingSlots.load(std::memory_order_acquire) != 0; }
@@ -766,6 +885,26 @@ int ReplayTotal(int slot)
     return static_cast<int>(p.ticks.size());
 }
 
+// Reports the last completed tick only while replay owns the slot.
+bool GetReplaySlotState(int slot, ReplaySlotState& out)
+{
+    out = { 0, -1, 0, -1, -1, 0 };
+    if (!ValidSlot(slot)) return false;
+    ReplayState& p = g_rep[slot];
+    std::scoped_lock lk(p.mu);
+    out.playing = p.playing.load(std::memory_order_acquire) ? 1 : 0;
+    out.cursor = p.cursor.load(std::memory_order_relaxed);
+    out.total = static_cast<int32_t>(p.ticks.size());
+    if (!out.playing) return true;
+    const int index = std::max(out.cursor - 1, p.startCursor);
+    if (index >= out.total) return true;
+    const auto& tick = p.ticks[index];
+    out.currentTickIndex = index;
+    out.weaponDefIndex = tick.weaponDefIndex;
+    out.numSubtick = static_cast<int32_t>(tick.numSubtick);
+    return true;
+}
+
 // cursor points at the NEXT tick; the one just applied is cursor-1.
 bool CurrentReplayTick(int slot, ReplayTick& out)
 {
@@ -775,7 +914,7 @@ bool CurrentReplayTick(int slot, ReplayTick& out)
     std::scoped_lock lk(p.mu);
     int total = static_cast<int>(p.ticks.size());
     int idx = p.cursor.load(std::memory_order_relaxed) - 1;
-    idx = std::max(idx, 0);
+    idx = std::max(idx, p.startCursor);
     if (idx >= total) return false;
     out = p.ticks[idx];
     return true;
@@ -798,32 +937,17 @@ bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
         std::scoped_lock lk(p.mu);
         const int total = static_cast<int>(p.ticks.size());
         const int cur = p.cursor.load(std::memory_order_relaxed);
+        if (p.holding.load(std::memory_order_acquire)) return false;
         if (cur < 0 || cur >= total || p.subOffset.size() != p.ticks.size() + 1) return false;
 
         out.tick = p.ticks[static_cast<size_t>(cur)];
         recordedDef = out.tick.weaponDefIndex;
         recordedWeaponChanged = cur > 0 && !ReplayWeaponDefsMatch(p.ticks[static_cast<size_t>(cur - 1)].weaponDefIndex, recordedDef);
         out.commandView = out.tick.pre;
-        out.buttons0 = out.tick.pre.buttons;
-        out.buttons1 = out.tick.pre.buttons1;
-        out.buttons2 = out.tick.pre.buttons2;
+        ReplayButtonsAt(p, cur, out.buttons0, out.buttons1, out.buttons2);
 
         const ReplayCommandFrameData* command =
             static_cast<size_t>(cur) < p.commands.size() ? &p.commands[static_cast<size_t>(cur)] : nullptr;
-        const bool hasCommandButtons = command && (command->fields & kCommandFieldButtons) != 0;
-        if (hasCommandButtons)
-        {
-            out.buttons0 = command->buttons;
-            out.buttons1 = command->buttons1;
-            out.buttons2 = command->buttons2;
-        }
-        else if (out.buttons1 == 0 && out.buttons2 == 0)
-        {
-            const uint64_t heldPrev = cur > 0 ? p.ticks[static_cast<size_t>(cur - 1)].pre.buttons : 0;
-            out.buttons1 = out.buttons0 & ~heldPrev;
-            out.buttons2 = heldPrev & ~out.buttons0;
-        }
-
         if (command)
         {
             out.commandFields = command->fields;
@@ -856,7 +980,9 @@ bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
     // Replay requests
     if (out.rawWeaponSelect > 0)
     {
-        void* weapon = FindReplayWeaponByDef(weapon_locker_hooks::WsForSlot(slot), out.rawWeaponSelect);
+        // Recorded entity indices cannot identify entities in the live replay server.
+        const int requestedDef = (out.commandFields & kCommandFieldWeaponSelectDef) != 0 ? out.rawWeaponSelect : recordedDef;
+        void* weapon = FindReplayWeaponByDef(weapon_locker_hooks::WsForSlot(slot), requestedDef);
         if (weapon) out.weaponSelect = weapon_locker_hooks::WeaponEntIndex(weapon);
     }
     else if (p.needsInitialTeleport.load(std::memory_order_acquire) || recordedWeaponChanged)
@@ -902,6 +1028,7 @@ int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut)
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return -1;
     std::scoped_lock lk(p.mu);
+    if (p.holding.load(std::memory_order_acquire)) return 0;
     int total = static_cast<int>(p.ticks.size());
     int idx = p.cursor.load(std::memory_order_relaxed);
     if (idx < 0 || idx >= total) return -1;
@@ -920,19 +1047,15 @@ bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
+    if (p.holding.load(std::memory_order_acquire))
+    {
+        b0 = b1 = b2 = 0;
+        return true;
+    }
     int total = static_cast<int>(p.ticks.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
     if (cur < 0 || cur >= total) return false;
-    const MovementSnapshot& pre = p.ticks[cur].pre;
-    b0 = pre.buttons;
-    b1 = pre.buttons1;
-    b2 = pre.buttons2;
-    if (b1 == 0 && b2 == 0)
-    {
-        uint64_t heldPrev = (cur > 0) ? p.ticks[cur - 1].pre.buttons : 0;
-        b1 = b0 & ~heldPrev;
-        b2 = heldPrev & ~b0;
-    }
+    ReplayButtonsAt(p, cur, b0, b1, b2);
     return true;
 }
 
@@ -1015,6 +1138,7 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
     if (!p.playing.load(std::memory_order_acquire)) return false;
 
     std::scoped_lock lk(p.mu);
+    if (p.holding.load(std::memory_order_acquire)) return false;
     int cur = p.cursor.load(std::memory_order_relaxed);
     if (cur < 0 || static_cast<size_t>(cur) >= p.ticks.size() || p.lastEventCursor == cur) return false;
     p.lastEventCursor = cur;
@@ -1067,6 +1191,87 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
 bool DropHookReady() { return g_dropHookReady.load(std::memory_order_acquire); }
 
 namespace {
+
+struct MovementExtraWrite
+{
+    uint32_t field;
+    int offset;
+    uint32_t bits;
+};
+
+// Preserves inactive tick sentinels and checks the live-clock translation for overflow.
+bool RebaseMovementExtraTick(int32_t& tick, int32_t sourceTick, int32_t liveTick)
+{
+    if (tick <= 0) return true;
+    const int64_t mapped = static_cast<int64_t>(tick) - sourceTick + liveTick;
+    if (mapped < std::numeric_limits<int32_t>::min() || mapped > std::numeric_limits<int32_t>::max()) return false;
+    tick = static_cast<int32_t>(mapped);
+    return true;
+}
+
+// Preserves inactive second-based sentinels while translating active times to the command clock.
+bool RebaseMovementExtraTime(float& time, double sourceTime, double liveTime)
+{
+    if (time <= 0.0F) return true;
+    const double mapped = static_cast<double>(time) - sourceTime + liveTime;
+    if (!std::isfinite(mapped) || std::fabs(mapped) > std::numeric_limits<float>::max()) return false;
+    time = static_cast<float>(mapped);
+    return true;
+}
+
+// Prepares every selected value and Schema target before initial teleport or history mutation.
+bool PrepareMovementExtraWrites(int slot, ReplayMovementExtra extra, std::array<MovementExtraWrite, 11>& writes)
+{
+    writes = {};
+    if (extra.fields == 0) return true;
+    constexpr uint32_t timeFields = ReplayMovementExtraJumpPressedTime | ReplayMovementExtraLastDuckTime |
+                                    ReplayMovementExtraLastActualJumpPress | ReplayMovementExtraLastUsableJumpPress | ReplayMovementExtraLastLanded;
+    if ((extra.fields & timeFields) != 0)
+    {
+        int32_t liveTick = 0;
+        const float interval = interfaces::TickInterval();
+        if (!input_injector::ReadReplayTickBase(slot, liveTick) || !std::isfinite(interval) || interval <= 0.0F ||
+            std::fabs(static_cast<double>(extra.sourceTickrate) * interval - 1.0) > 0.0001)
+        {
+            BC_LOG_WARN("Cannot restore movement history for slot %d: player clock unavailable or tickrates differ\n", slot);
+            return false;
+        }
+        const double sourceTime = static_cast<double>(extra.sourcePlayerTick) / extra.sourceTickrate;
+        const double liveTime = static_cast<double>(liveTick) * interval;
+        if (((extra.fields & ReplayMovementExtraJumpPressedTime) != 0 && !RebaseMovementExtraTime(extra.jumpPressedTime, sourceTime, liveTime)) ||
+            ((extra.fields & ReplayMovementExtraLastDuckTime) != 0 && !RebaseMovementExtraTime(extra.lastDuckTime, sourceTime, liveTime)) ||
+            ((extra.fields & ReplayMovementExtraLastActualJumpPress) != 0 && !RebaseMovementExtraTick(extra.lastActualJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
+            ((extra.fields & ReplayMovementExtraLastUsableJumpPress) != 0 && !RebaseMovementExtraTick(extra.lastUsableJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
+            ((extra.fields & ReplayMovementExtraLastLanded) != 0 && !RebaseMovementExtraTick(extra.lastLandedTick, extra.sourcePlayerTick, liveTick)))
+        {
+            BC_LOG_WARN("Cannot restore movement history for slot %d: clock translation overflow\n", slot);
+            return false;
+        }
+    }
+    writes = {{
+        { ReplayMovementExtraJumpPressedTime, tg::g_servicesJumpPressedTime, std::bit_cast<uint32_t>(extra.jumpPressedTime) },
+        { ReplayMovementExtraLastDuckTime, tg::g_servicesLastDuckTime, std::bit_cast<uint32_t>(extra.lastDuckTime) },
+        { ReplayMovementExtraLastActualJumpPress, tg::g_servicesLastActualJumpPressTick, std::bit_cast<uint32_t>(extra.lastActualJumpPressTick) },
+        { ReplayMovementExtraLastActualJumpPress, tg::g_servicesLastActualJumpPressFrac, std::bit_cast<uint32_t>(extra.lastActualJumpPressFrac) },
+        { ReplayMovementExtraLastUsableJumpPress, tg::g_servicesLastUsableJumpPressTick, std::bit_cast<uint32_t>(extra.lastUsableJumpPressTick) },
+        { ReplayMovementExtraLastUsableJumpPress, tg::g_servicesLastUsableJumpPressFrac, std::bit_cast<uint32_t>(extra.lastUsableJumpPressFrac) },
+        { ReplayMovementExtraLastLanded, tg::g_servicesLastLandedTick, std::bit_cast<uint32_t>(extra.lastLandedTick) },
+        { ReplayMovementExtraLastLanded, tg::g_servicesLastLandedFrac, std::bit_cast<uint32_t>(extra.lastLandedFrac) },
+        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityX, std::bit_cast<uint32_t>(extra.lastLandedVelocityX) },
+        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityY, std::bit_cast<uint32_t>(extra.lastLandedVelocityY) },
+        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityZ, std::bit_cast<uint32_t>(extra.lastLandedVelocityZ) },
+    }};
+    for (auto& write : writes)
+    {
+        write.field &= extra.fields;
+        if (write.field != 0 && write.offset < 0)
+        {
+            BC_LOG_WARN("Cannot restore movement history for slot %d: Schema field unavailable for mask 0x%x\n", slot, write.field);
+            return false;
+        }
+    }
+    return true;
+}
 
 // Restores duck and ladder state through guarded field writes.
 void WriteMovementServiceState(void* services, const MovementSnapshot& s)
@@ -1142,7 +1347,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
 }
 } // namespace
 
-// Initializes movement only at start/loop; later commands leave physical state to the engine.
+// Initializes at start/seek/loop, or rebases history after a hold; subsequent movement is engine-owned.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView)
 {
     if (!ValidSlot(slot) || !services || !IsReplaying(slot)) return false;
@@ -1153,7 +1358,23 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
         StopReplay(slot);
         return false;
     }
-    if (g_rep[slot].needsInitialTeleport.exchange(false, std::memory_order_acq_rel))
+    ReplayState& p = g_rep[slot];
+    std::array<MovementExtraWrite, 11> extraWrites{};
+    if (p.needsMovementExtra.exchange(false, std::memory_order_acq_rel))
+    {
+        ReplayMovementExtra extra{};
+        {
+            std::scoped_lock lk(p.mu);
+            const int cur = p.cursor.load(std::memory_order_relaxed);
+            if (cur >= 0 && static_cast<size_t>(cur) < p.movementExtras.size()) extra = p.movementExtras[cur];
+        }
+        if (!PrepareMovementExtraWrites(slot, extra, extraWrites))
+        {
+            StopReplay(slot);
+            return false;
+        }
+    }
+    if (p.needsInitialTeleport.exchange(false, std::memory_order_acq_rel))
     {
         // Publish the initial origin through the engine even when movement is idle.
         void** vtable = nullptr;
@@ -1184,6 +1405,15 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
         {
             const uint32_t mask = tg::kFlOnGround | tg::kFlDucking;
             WriteField(pawn, tg::g_entFlags, (flags & ~mask) | (tick.pre.entityFlags & mask));
+        }
+    }
+    for (const auto& write : extraWrites)
+    {
+        if (write.field != 0 && !WriteField(services, write.offset, write.bits))
+        {
+            BC_LOG_WARN("Cannot restore movement history for slot %d: field write failed\n", slot);
+            StopReplay(slot);
+            return false;
         }
     }
     if (!WriteLocalViewAnglesToPawn(pawn, commandView.pitch, commandView.yaw))
@@ -1245,13 +1475,21 @@ void OnReplayCommit(int slot, void* services, bool simulated)
     if (!ValidSlot(slot) || !services || !simulated || !IsReplaying(slot)) return;
     ReplayState& p = g_rep[slot];
     std::scoped_lock lk(p.mu);
+    if (p.holding.load(std::memory_order_acquire)) return;
     const int total = static_cast<int>(p.ticks.size());
     const int next = p.cursor.load(std::memory_order_relaxed) + 1;
+    if (p.holdBeforeCursor >= 0 && next >= p.holdBeforeCursor)
+    {
+        p.cursor.store(p.holdBeforeCursor, std::memory_order_relaxed);
+        p.holding.store(true, std::memory_order_release);
+        return;
+    }
     if (next >= total && p.loop.load(std::memory_order_relaxed) && total > 0)
     {
         // Prepare the next pass immediately, without an unowned command between loops.
-        p.cursor.store(0, std::memory_order_relaxed);
+        p.cursor.store(p.startCursor, std::memory_order_relaxed);
         p.needsInitialTeleport.store(true, std::memory_order_release);
+        p.needsMovementExtra.store(!p.movementExtras.empty(), std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
@@ -1273,6 +1511,10 @@ void ClearAll()
     {
         g_rec[i].recording.store(false, std::memory_order_release);
         g_rep[i].playing.store(false, std::memory_order_release);
+        g_rep[i].holding.store(false, std::memory_order_release);
+        g_rep[i].needsInitialTeleport.store(false, std::memory_order_release);
+        g_rep[i].needsMovementExtra.store(false, std::memory_order_release);
+        g_rep[i].loop.store(false, std::memory_order_relaxed);
         {
             std::scoped_lock lk(g_rec[i].mu);
             g_rec[i].ticks.clear();
@@ -1294,6 +1536,8 @@ void ClearAll()
             g_rep[i].commands.clear();
             g_rep[i].movementExtras.clear();
             g_rep[i].subOffset.clear();
+            g_rep[i].startCursor = 0;
+            g_rep[i].holdBeforeCursor = -1;
             g_rep[i].lastEventCursor = -1;
             g_rep[i].lastFinalViewCursor = -1;
         }

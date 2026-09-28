@@ -39,6 +39,9 @@ void ClearReplayPawn(int slot);
 // Resolves and validates the pawn owning the supplied movement services.
 void* ResolveReplayPawn(int slot, void* services);
 
+// Reads the player tickbase from the replay's matching PhysicsSimulate controller.
+bool ReadReplayTickBase(int slot, int32_t& tickBase);
+
 // Creates an independently cancellable usercmd button injection
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs);
 

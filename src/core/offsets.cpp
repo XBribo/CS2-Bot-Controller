@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 
 namespace cs2bc::offsets {
 // Each offset: gamedata[name].offsets[platform], else keep code default
@@ -54,6 +55,24 @@ bool ResolveRequired(int& target, const char* className, const char* fieldName, 
 
     if (errorOut && errorOutLen > 0) std::snprintf(errorOut, errorOutLen, "Required Schema field missing: %s::%s", className, fieldName);
     return false;
+}
+
+// Resolves optional movement members across their possible declaring classes.
+int ResolveMovementField(const char* fieldName)
+{
+    for (const char* className : { "CCSPlayer_MovementServices", "CPlayer_MovementServices_Humanoid", "CPlayer_MovementServices" })
+    {
+        const int offset = schema::GetFieldOffset(className, fieldName);
+        if (offset >= 0) return offset;
+    }
+    return -1;
+}
+
+// Flattens an embedded ModernJump member only when both Schema offsets exist.
+int ResolveModernJumpField(int modernJump, const char* fieldName)
+{
+    const int offset = schema::GetFieldOffset("CCSPlayerModernJump", fieldName);
+    return modernJump >= 0 && offset >= 0 ? modernJump + offset : -1;
 }
 
 } // namespace
@@ -104,6 +123,21 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
     }
 
     g_nodeAbsRotation = schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
+
+    g_controllerTickBase = schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
+    if (g_controllerTickBase < 0) g_controllerTickBase = schema::GetFieldOffset("CCSPlayerController", "m_nTickBase");
+    g_servicesJumpPressedTime = ResolveMovementField("m_flJumpPressedTime");
+    g_servicesLastDuckTime = ResolveMovementField("m_flLastDuckTime");
+    const int modernJump = schema::GetFieldOffset("CCSPlayer_MovementServices", "m_ModernJump");
+    g_servicesLastActualJumpPressTick = ResolveModernJumpField(modernJump, "m_nLastActualJumpPressTick");
+    g_servicesLastActualJumpPressFrac = ResolveModernJumpField(modernJump, "m_flLastActualJumpPressFrac");
+    g_servicesLastUsableJumpPressTick = ResolveModernJumpField(modernJump, "m_nLastUsableJumpPressTick");
+    g_servicesLastUsableJumpPressFrac = ResolveModernJumpField(modernJump, "m_flLastUsableJumpPressFrac");
+    g_servicesLastLandedTick = ResolveModernJumpField(modernJump, "m_nLastLandedTick");
+    g_servicesLastLandedFrac = ResolveModernJumpField(modernJump, "m_flLastLandedFrac");
+    g_servicesLastLandedVelocityX = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityX");
+    g_servicesLastLandedVelocityY = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityY");
+    g_servicesLastLandedVelocityZ = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityZ");
 
     int attributeManager = -1;
     int item = -1;

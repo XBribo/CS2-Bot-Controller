@@ -35,9 +35,9 @@ namespace BotControllerApi
         public uint EntityFlags;
         public byte MoveType;
         public byte Pad0, Pad1, Pad2;
-        public ulong Buttons;        // states[0] (pressed)
-        public ulong Buttons1;       // states[1]
-        public ulong Buttons2;       // states[2]
+        public ulong Buttons;        // Engine states[0]: held.
+        public ulong Buttons1;       // states[1]: changed.
+        public ulong Buttons2;       // states[2]: pressed and released within the same command.
         public float DuckAmount;     // m_flDuckAmount (0=stand, 1=full crouch)
         public float DuckSpeed;      // m_flDuckSpeed
         public float LadderNormalX;  // m_vecLadderNormal
@@ -108,10 +108,24 @@ namespace BotControllerApi
         public byte Pad2;
     }
 
+    // Tick/fraction pairs and landing velocity are restored as complete groups.
+    [Flags]
+    public enum ReplayMovementExtraFields : uint
+    {
+        None = 0,
+        JumpPressedTime = 1U << 0,
+        LastDuckTime = 1U << 1,
+        LastActualJumpPress = 1U << 2,
+        LastUsableJumpPress = 1U << 3,
+        LastLanded = 1U << 4,
+        LastLandedVelocity = 1U << 5,
+        All = (1U << 6) - 1,
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     public struct ReplayMovementExtra
     {
-        public uint Fields;
+        public uint Fields; // ReplayMovementExtraFields; absent fields are not restored
         public float JumpPressedTime;
         public float LastDuckTime;
         public int LastActualJumpPressTick;
@@ -123,6 +137,20 @@ namespace BotControllerApi
         public float LastLandedVelocityX;
         public float LastLandedVelocityY;
         public float LastLandedVelocityZ;
+        public int SourcePlayerTick; // Recorded pre-command player tickbase, not the demo tick.
+        public float SourceTickrate; // Must match the live engine rate; timestamps <= 0 are sentinels.
+    }
+
+    // Includes an idle slot's terminal cursor; Playing remains authoritative.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplaySlotState
+    {
+        public int Playing;
+        public int Cursor;
+        public int Total;
+        public int CurrentTickIndex;
+        public int WeaponDefIndex;
+        public int NumSubtick;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

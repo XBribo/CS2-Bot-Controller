@@ -48,6 +48,14 @@ namespace BotControllerApi
             SubtickMove[] subs,
             ReplayCommandFrame[] commands);
 
+        // Loads optional pre-command movement history with its recorded player clock.
+        bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras);
+
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
 
@@ -56,11 +64,23 @@ namespace BotControllerApi
 
         bool StartReplay(int slot, bool loop = false);
 
+        // Starts at an inclusive index, or resumes a hold at that index without reinitialization.
+        bool StartReplayAt(int slot, bool loop, int startIndex);
+
+        // Plays [startIndex, holdBeforeIndex), then retains replay ownership without consuming input.
+        bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
+
         bool StopReplay(int slot);
+
+        // Stops replay and frees all replay buffer allocations; recordings remain available.
+        bool ReleaseReplayBuffer(int slot);
 
         int ReplayCursor(int slot);
 
         int ReplayTotal(int slot);
+
+        // Reads aggregate state, including an idle slot's terminal cursor.
+        bool TryGetReplayState(int slot, out ReplaySlotState state);
 
         bool IsReplaying(int slot);
 

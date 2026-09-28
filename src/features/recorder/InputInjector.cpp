@@ -67,6 +67,7 @@ struct MovementFrame
     bool seeded = false;
     bool movementPrepared = false;
     bool finalViewPrepared = false;
+    void* controller = nullptr;
 };
 thread_local std::vector<MovementFrame> g_physicsFrames;
 bool g_installed = false;
@@ -690,6 +691,8 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
     auto* boundary = FindPhysicsFrame(slot);
     bool recording = boundary && boundary->recording && motion_recorder::IsRecording(slot);
     bool replaying = boundary && boundary->replaying && motion_recorder::IsReplaying(slot);
+    // A held boundary must not resimulate movement, attack edges, or the last command.
+    if (replaying && motion_recorder::IsReplayHolding(slot)) return { KHook::Action::Supersede };
     const auto [hasUsercmdInjection, hasUsercmdSuppression, hasUsercmdMovement] = replaying ? UsercmdWork{} : GetUsercmdWork(slot);
 
     if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement))
@@ -791,6 +794,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
     }
     // Publish ownership before engine callbacks can reenter.
     g_physicsFrames.push_back({ slot, services, recording, replaying });
+    g_physicsFrames.back().controller = controller;
 
     // pre: snapshot start-of-tick state once (before any subtick mover).
     if (recording) motion_recorder::OnCapturePre(slot, services, nullptr);
@@ -801,14 +805,14 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
 // Commits the recording and replay state for the matching simulation call.
 KHook::Return<void> PhysicsSimulatePost(void*) noexcept
 {
-    const auto [slot, services, recording, replaying, seeded, movementPrepared, finalViewPrepared] = g_physicsFrames.back();
+    const MovementFrame frame = g_physicsFrames.back();
     g_physicsFrames.pop_back();
 
     // post: snapshot end-of-tick state + commit one frame
-    if (recording) motion_recorder::OnCapturePost(slot, services, nullptr);
-    if (replaying)
+    if (frame.recording) motion_recorder::OnCapturePost(frame.slot, frame.services, nullptr);
+    if (frame.replaying)
     {
-        motion_recorder::OnReplayCommit(slot, services, seeded && movementPrepared && finalViewPrepared);
+        motion_recorder::OnReplayCommit(frame.slot, frame.services, frame.seeded && frame.movementPrepared && frame.finalViewPrepared);
     }
     return { KHook::Action::Ignore };
 }
@@ -854,6 +858,14 @@ void EnsureVtableHooks(void* services)
 }
 
 } // namespace
+
+// Uses the current command owner's simulation clock rather than server-global tickcount.
+bool ReadReplayTickBase(int slot, int32_t& tickBase)
+{
+    const auto* frame = FindPhysicsFrame(slot);
+    return frame && frame->replaying && frame->controller && ControllerToSlot(frame->controller) == slot &&
+           GuardedRead(frame->controller, tg::g_controllerTickBase, tickBase) && tickBase >= 0;
+}
 
 bool Install( // NOLINT(misc-use-internal-linkage)
     const nlohmann::json& gd,

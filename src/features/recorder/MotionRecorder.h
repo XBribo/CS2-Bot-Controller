@@ -16,9 +16,9 @@ struct MovementSnapshot
     uint32_t entityFlags; // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
     uint8_t moveType; // m_MoveType (MoveType_t)
     uint8_t pad[3]; // keep 4-byte alignment explicit
-    uint64_t buttons; // services button states[0] (pressed)
-    uint64_t buttons1; // states[1]
-    uint64_t buttons2; // states[2]
+    uint64_t buttons; // engine states[0]: held
+    uint64_t buttons1; // states[1]: changed
+    uint64_t buttons2; // states[2]: pressed and released within the same command
     float duckAmount; // m_flDuckAmount (0=stand, 1=full crouch)
     float duckSpeed; // m_flDuckSpeed
     float ladderNormalX; // m_vecLadderNormal (ladder anim facing)
@@ -111,9 +111,22 @@ struct ReplayCommandFrameData
     uint8_t pad[3];
 };
 
+// Presence applies to scalar times, tick/fraction pairs, or the complete landing velocity.
+enum ReplayMovementExtraFields : uint32_t // NOLINT(performance-enum-size)
+{
+    ReplayMovementExtraNone = 0,
+    ReplayMovementExtraJumpPressedTime = 1U << 0,
+    ReplayMovementExtraLastDuckTime = 1U << 1,
+    ReplayMovementExtraLastActualJumpPress = 1U << 2,
+    ReplayMovementExtraLastUsableJumpPress = 1U << 3,
+    ReplayMovementExtraLastLanded = 1U << 4,
+    ReplayMovementExtraLastLandedVelocity = 1U << 5,
+    ReplayMovementExtraAll = (1U << 6) - 1,
+};
+
 struct ReplayMovementExtra
 {
-    uint32_t fields;
+    uint32_t fields; // ReplayMovementExtraFields; absent fields are not restored
     float jumpPressedTime;
     float lastDuckTime;
     int32_t lastActualJumpPressTick;
@@ -125,12 +138,26 @@ struct ReplayMovementExtra
     float lastLandedVelocityX;
     float lastLandedVelocityY;
     float lastLandedVelocityZ;
+    int32_t sourcePlayerTick; // recorded pre-command player tickbase, not the demo tick
+    float sourceTickrate; // must match the live engine rate; timestamps <= 0 retain sentinel semantics
+};
+
+// Retains the terminal cursor when idle so callers can distinguish completion from an early stop.
+struct ReplaySlotState
+{
+    int32_t playing;
+    int32_t cursor;
+    int32_t total;
+    int32_t currentTickIndex;
+    int32_t weaponDefIndex;
+    int32_t numSubtick;
 };
 #pragma pack(pop)
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
-static_assert(sizeof(ReplayMovementExtra) == 48);
+static_assert(sizeof(ReplayMovementExtra) == 56);
 static_assert(sizeof(ReplayTick) == 256);
+static_assert(sizeof(ReplaySlotState) == 24);
 
 namespace motion_recorder {
 constexpr int kMaxSlots = 64;
@@ -210,12 +237,22 @@ bool LoadReplay(int slot,
                 const ReplayMovementExtra* movementExtras,
                 int movementExtraCount) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
+// Starts at an inclusive tick index, or resumes a hold at that index.
+bool StartReplayAt(int slot, bool loop, int startIndex);
+// Plays [startIndex, holdBeforeIndex), then retains replay ownership without consuming input.
+bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
 bool StopReplay(int slot); // stop + clear injection
+// Stops replay and releases all loaded replay buffer allocations.
+bool ReleaseReplayBuffer(int slot);
 bool IsReplaying(int slot);
+// Reports whether replay is retaining its completed boundary without simulating commands.
+bool IsReplayHolding(int slot);
 // Reports whether any slot has an active replay.
 bool HasAnyReplay();
 int ReplayCursor(int slot); // current tick index, <0 if idle
 int ReplayTotal(int slot); // loaded tick count
+// Reads one consistent replay state, including an idle slot's terminal cursor.
+bool GetReplaySlotState(int slot, ReplaySlotState& out);
 
 // Current tick being applied this server tick
 bool CurrentReplayTick(int slot, ReplayTick& out);

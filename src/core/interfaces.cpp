@@ -16,6 +16,7 @@ ISchemaSystem* g_schemaSystem = nullptr;
 namespace cs2bc::interfaces {
 namespace {
 void* g_serverInterface = nullptr;
+ISource2ServerConfig* g_serverConfig = nullptr;
 }
 // Acquires engine services without registering commands or installing hooks.
 bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
@@ -50,6 +51,8 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
 
     // Server-side command executor for issuing bot "buy" commands.
     cs2bc::dispatch::g_gameClients = static_cast<ISource2GameClients*>(g_serverInterface);
+    // Movement history needs the actual engine interval, not a recorded-rate assumption.
+    g_serverConfig = static_cast<ISource2ServerConfig*>(ismm->GetServerFactory()(INTERFACEVERSION_SERVERCONFIG, nullptr));
 
     // NetworkMessages lets the C ABI send recorded voice frames to clients.
     auto* networkMessages = static_cast<INetworkMessages*>(ismm->GetEngineFactory()(NETWORKMESSAGES_INTERFACE_VERSION, nullptr));
@@ -65,6 +68,9 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
 
     return true;
 }
+// Reads the engine-owned interval without caching it across map or rate changes.
+float TickInterval() { return g_serverConfig ? g_serverConfig->GetTickInterval() : 0.0F; }
+
 // Releases interface consumers after native callbacks have been removed.
 void Reset()
 {
@@ -73,6 +79,7 @@ void Reset()
     cs2bc::voice_sender::SetInterfaces(nullptr, nullptr);
     cs2bc::commands::g_engine = nullptr;
     g_serverInterface = nullptr;
+    g_serverConfig = nullptr;
     g_schemaSystem = nullptr;
 }
 } // namespace cs2bc::interfaces

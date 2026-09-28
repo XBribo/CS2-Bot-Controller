@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 22), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 23), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 22;
+        private const int ExpectedAbiVersion = 23;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -120,17 +120,33 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartReplay(int slot, int loop);
 
+        // Starts or resumes at an inclusive replay index.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayAt(int slot, int loop, int startIndex);
+
+        // Holds playback before an exclusive replay index.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayUntil(int slot, int loop, int startIndex, int holdBeforeIndex);
+
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetReplayPawn(int slot, ulong pawnPtr);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StopReplay(int slot);
 
+        // Stops playback and releases all replay buffer allocations.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_ReleaseReplayBuffer(int slot);
+
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayCursor(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayTotal(int slot);
+
+        // Reads the terminal cursor and completed-tick metadata in one native call.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetReplaySlotState(int slot, out ReplaySlotState state);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayTick(int slot, out ReplayTick tick);
@@ -337,6 +353,7 @@ namespace BotControllerApi
             ReplayCommandFrame[] commands,
             ReplayMovementExtra[] movementExtras)
             => ticks is { Length: > 0 }
+               && IsCompatible()
                && BotController_LoadReplay(
                    slot,
                    ticks,
@@ -356,6 +373,14 @@ namespace BotControllerApi
         public static bool StartReplay(int slot, bool loop = false)
             => BotController_StartReplay(slot, loop ? 1 : 0) == 0;
 
+        // Starts at an inclusive index, or resumes at the held boundary without reinitializing movement.
+        public static bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController_StartReplayAt(slot, loop ? 1 : 0, startIndex) == 0;
+
+        // Plays [startIndex, holdBeforeIndex), then holds input and retains replay ownership.
+        public static bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController_StartReplayUntil(slot, loop ? 1 : 0, startIndex, holdBeforeIndex) == 0;
+
         // Registers the current native pawn before replay starts.
         public static bool SetReplayPawn(int slot, nint pawn)
             => pawn != 0 &&
@@ -363,9 +388,16 @@ namespace BotControllerApi
 
         public static bool StopReplay(int slot) => BotController_StopReplay(slot) == 0;
 
+        // Stops replay and frees its loaded buffers without affecting recorded motion.
+        public static bool ReleaseReplayBuffer(int slot) => BotController_ReleaseReplayBuffer(slot) == 0;
+
         public static int ReplayCursor(int slot) => BotController_GetReplayCursor(slot);
 
         public static int ReplayTotal(int slot) => BotController_GetReplayTotal(slot);
+
+        // Includes terminal state after natural completion or an explicit stop.
+        public static bool TryGetReplayState(int slot, out ReplaySlotState state)
+            => BotController_GetReplaySlotState(slot, out state) == 0;
 
         public static bool IsReplaying(int slot) => BotController_GetReplayCursor(slot) >= 0;
 

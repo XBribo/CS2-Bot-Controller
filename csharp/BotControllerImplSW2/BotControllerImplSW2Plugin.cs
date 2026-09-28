@@ -84,6 +84,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             ReplayCommandFrame[] commands)
             => BotController.LoadReplay(
                 slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+        // Loads optional pre-command movement history with its recorded player clock.
+        public bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ReplayMovementExtra[] movementExtras)
+            => BotController.LoadReplay(slot, ticks, subs, commands, movementExtras);
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
@@ -91,12 +99,22 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         // Starts replay for a bot slot.
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
+        // Starts or resumes replay at an inclusive index.
+        public bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController.StartReplayAt(slot, loop, startIndex);
+        // Holds input before the exclusive boundary while retaining replay ownership.
+        public bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController.StartReplayUntil(slot, loop, startIndex, holdBeforeIndex);
         // Stops replay for a bot slot.
         public bool StopReplay(int slot) => BotController.StopReplay(slot);
+        // Stops replay and releases its buffer allocations.
+        public bool ReleaseReplayBuffer(int slot) => BotController.ReleaseReplayBuffer(slot);
         // Returns the current replay cursor for a slot.
         public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);
         // Returns the total replay length for a slot.
         public int ReplayTotal(int slot) => BotController.ReplayTotal(slot);
+        // Reads aggregate replay state without losing the terminal cursor.
+        public bool TryGetReplayState(int slot, out ReplaySlotState state) => BotController.TryGetReplayState(slot, out state);
         // Reports whether a slot is actively replaying.
         public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
         // Returns the current replay tick when one is available.

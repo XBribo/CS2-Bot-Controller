@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -35,8 +36,30 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 22 keeps the native command-based projectile replay path without birth alignment exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
+// ABI 23 extends ReplayMovementExtra to 56 bytes with a recorded player clock.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
+
+// Export availability, not runtime hook readiness: replay/weapon/buy/voice and buffer release.
+extern "C" BC_EXPORT uint64_t BotController_GetCapabilities() { return 0x155FULL; }
+
+// Reports packed bridge layouts; the caller must first check the ABI major version.
+extern "C" BC_EXPORT int BotController_GetAbiInfo(void* out, int size)
+{
+#pragma pack(push, 4)
+    struct AbiInfo
+    {
+        int32_t major, minor, snapshotSize, tickSize, subtickSize, slotStateSize, maxSlots;
+        uint64_t capabilities;
+        int32_t reserved0, reserved1;
+    };
+#pragma pack(pop)
+    static_assert(sizeof(AbiInfo) == 44);
+    if (!out || size < static_cast<int>(sizeof(AbiInfo))) return -1;
+    const AbiInfo info{ 23, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
+                        sizeof(cs2bc::ReplaySlotState), cs2bc::motion_recorder::kMaxSlots, BotController_GetCapabilities(), 0, 0 };
+    std::memcpy(out, &info, sizeof(info));
+    return 0;
+}
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
@@ -274,6 +297,18 @@ extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
     return cs2bc::motion_recorder::StartReplay(slot, loop != 0) ? 0 : -1;
 }
 
+// Starts at an inclusive tick index, or resumes the held boundary at that index.
+extern "C" BC_EXPORT int BotController_StartReplayAt(int slot, int loop, int startIndex)
+{
+    return cs2bc::motion_recorder::StartReplayAt(slot, loop != 0, startIndex) ? 0 : -1;
+}
+
+// Holds before the exclusive end index without releasing replay ownership.
+extern "C" BC_EXPORT int BotController_StartReplayUntil(int slot, int loop, int startIndex, int holdBeforeIndex)
+{
+    return cs2bc::motion_recorder::StartReplayUntil(slot, loop != 0, startIndex, holdBeforeIndex) ? 0 : -1;
+}
+
 // Registers the managed plugin's authoritative pawn pointer for replay.
 extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
 {
@@ -283,11 +318,23 @@ extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
 
 extern "C" BC_EXPORT int BotController_StopReplay(int slot) { return cs2bc::motion_recorder::StopReplay(slot) ? 0 : -1; }
 
+// Stops a slot and releases its loaded replay allocations, leaving recordings intact.
+extern "C" BC_EXPORT int BotController_ReleaseReplayBuffer(int slot)
+{
+    return cs2bc::motion_recorder::ReleaseReplayBuffer(slot) ? 0 : -1;
+}
+
 // Current replay tick index, or <0 if the slot is not replaying.
 extern "C" BC_EXPORT int BotController_GetReplayCursor(int slot) { return cs2bc::motion_recorder::ReplayCursor(slot); }
 
 // Total ticks loaded in a slot's replay buffer.
 extern "C" BC_EXPORT int BotController_GetReplayTotal(int slot) { return cs2bc::motion_recorder::ReplayTotal(slot); }
+
+// Includes the terminal cursor even when legacy GetReplayCursor returns -1 for an idle slot.
+extern "C" BC_EXPORT int BotController_GetReplaySlotState(int slot, cs2bc::ReplaySlotState* out)
+{
+    return out && cs2bc::motion_recorder::GetReplaySlotState(slot, *out) ? 0 : -1;
+}
 
 // Copy the tick currently being replayed (for C# to drive weapon/fire).
 // Returns 0 on success, -1 if the slot isn't replaying.

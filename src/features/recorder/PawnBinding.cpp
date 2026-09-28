@@ -37,8 +37,11 @@ bool PawnOwnsServices(void* pawn, void* services)
 // Registers a readable pawn whose current owner matches the requested slot.
 bool SetReplayPawn(int slot, void* pawn)
 {
-    if (!ValidSlotIndex(slot) || motion_recorder::IsReplaying(slot)) return false;
-    g_slotPawns[slot].store(nullptr, std::memory_order_release);
+    if (!ValidSlotIndex(slot)) return false;
+    const bool replaying = motion_recorder::IsReplaying(slot);
+    // Resume/start callers may revalidate the same pawn without replacing an active owner.
+    if (replaying && g_slotPawns[slot].load(std::memory_order_acquire) != pawn) return false;
+    if (!replaying) g_slotPawns[slot].store(nullptr, std::memory_order_release);
     if (!pawn) return false;
 
     void* identity = nullptr;

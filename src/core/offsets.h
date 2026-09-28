@@ -102,10 +102,10 @@ inline int g_weaponItemDefIndex = -1;
 
 // m_pawn (CCSPlayerPawn*)
 inline int g_servicesPawn = 56;
-// m_nButtons.m_pButtonStates[0..2] — engine button state block (CInButtonState)
-inline int g_servicesButtons = -1; // states[0] (pressed)
-inline int g_servicesButtons1 = -1; // states[1]
-inline int g_servicesButtons2 = -1; // states[2]
+// m_nButtons.m_pButtonStates[0..2] — engine button state planes (CInButtonState)
+inline int g_servicesButtons = -1; // states[0]: held
+inline int g_servicesButtons1 = -1; // states[1]: changed
+inline int g_servicesButtons2 = -1; // states[2]: pressed and released in the same command
 // Previous command view angles consumed by PlayerRunCommand
 inline int g_servicesOldViewAngles = -1;
 
@@ -116,6 +116,20 @@ inline int g_servicesDuckAmount = -1; // float m_flDuckAmount
 inline int g_servicesDuckSpeed = -1; // float m_flDuckSpeed
 inline int g_servicesDesiresDuck = -1; // bool m_bDesiresDuck
 inline int g_servicesDucking = -1; // bool m_bDucking
+
+// Optional movement history; a replay requesting an unavailable field is rejected.
+inline int g_controllerTickBase = -1; // CBasePlayerController::m_nTickBase
+inline int g_servicesJumpPressedTime = -1; // m_flJumpPressedTime (historical engine member)
+inline int g_servicesLastDuckTime = -1; // m_flLastDuckTime
+inline int g_servicesLastActualJumpPressTick = -1; // m_ModernJump.m_nLastActualJumpPressTick
+inline int g_servicesLastActualJumpPressFrac = -1; // m_ModernJump.m_flLastActualJumpPressFrac
+inline int g_servicesLastUsableJumpPressTick = -1; // m_ModernJump.m_nLastUsableJumpPressTick
+inline int g_servicesLastUsableJumpPressFrac = -1; // m_ModernJump.m_flLastUsableJumpPressFrac
+inline int g_servicesLastLandedTick = -1; // m_ModernJump.m_nLastLandedTick
+inline int g_servicesLastLandedFrac = -1; // m_ModernJump.m_flLastLandedFrac
+inline int g_servicesLastLandedVelocityX = -1; // m_ModernJump.m_flLastLandedVelocityX
+inline int g_servicesLastLandedVelocityY = -1; // m_ModernJump.m_flLastLandedVelocityY
+inline int g_servicesLastLandedVelocityZ = -1; // m_ModernJump.m_flLastLandedVelocityZ
 
 // ---- CMoveData  ----
 
