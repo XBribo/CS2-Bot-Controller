@@ -91,6 +91,14 @@
     },
     "comment": "Engine eye-angle"
   },
+  "CBasePlayerPawn::GetEyeAngles": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 81 EC ? ? ? ? 48 8B F9 48 8B DA 48 8B 89 ? ? ? ? 48 85 C9",
+      "linux": "55 48 89 E5 41 54 53 48 89 FB 48 83 C4 ? 48 8B BF ? ? ? ? 48 85 FF"
+    },
+    "comment": "Eye-angle getter used by normal camera and network publication; Linux returns angles by value."
+  },
   "CCSPlayer_MovementServices::ProcessMovement": {
     "signatures": {
       "library": "server",
@@ -248,6 +256,13 @@
       "linux": 26
     },
     "comment": "CCSPlayer_MovementServices vtable index."
+  },
+  "vtidx::SetupMove": {
+    "offsets": {
+      "windows": 34,
+      "linux": 35
+    },
+    "comment": "CCSPlayer_MovementServices::SetupMove input boundary."
   },
   "vtidx::FinishMove": {
     "offsets": {

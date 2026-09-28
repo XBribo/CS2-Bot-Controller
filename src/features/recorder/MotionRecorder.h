@@ -223,6 +223,8 @@ bool CurrentReplayTick(int slot, ReplayTick& out);
 bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out);
 // Command view angles for the tick currently being simulated.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
+// Final view read by the engine; retains the completed tick across cursor advancement.
+bool ReplaySpectatorView(int slot, MovementSnapshot& out);
 // Copy the current tick's subtick moves into out
 // Returns count, or -1 if not replaying.
 int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut);
@@ -252,10 +254,14 @@ bool DropHookReady();
 // Installs the Windows release-pose capture and replay hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
-// ---- replay write hooks ----
-// PlayerRunCommand (pre): seed pawn state consumed by weapon and grenade logic
-void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick);
-// PhysicsSimulate (post): restore the end snapshot and advance the cursor.
+// ---- replay input hooks ----
+// PlayerRunCommand (pre): initialize once, then supply weapon/grenade command view.
+bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView);
+// SetupMove (post): supply pre kinematics to CMoveData.
+bool OnReplaySetupMove(int slot, void* moveData);
+// FinishMove (post): supply final view before the command's network publication.
+bool OnReplayFinalView(int slot, void* services);
+// PhysicsSimulate (post): advance after simulation without overwriting its output.
 void OnReplayCommit(int slot, void* services, bool simulated);
 
 void ClearAll(); // wipe all record + replay buffers

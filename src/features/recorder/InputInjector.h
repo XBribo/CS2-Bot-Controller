@@ -1,4 +1,4 @@
-// KHook for CS2 movement functions (ProcessMovement / PhysicsSimulate / PlayerRunCommand)
+// KHook for CS2 command boundaries and engine movement input/output.
 
 #pragma once
 
@@ -23,6 +23,9 @@ const char* Status();
 
 // Requires the frame-boundary and command hooks; logs unavailable capabilities.
 bool RecorderReady();
+
+// Also requires SetupMove and FinishMove for engine-owned replay movement.
+bool ReplayReady();
 
 // Registers the authoritative pawn supplied by the managed plugin for recording or replay.
 bool SetReplayPawn(int slot, void* pawn);

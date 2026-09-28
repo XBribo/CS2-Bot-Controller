@@ -50,7 +50,7 @@ inline int g_buyDoneBuying = 0x18;
 inline int g_entIdentity = -1;
 // CEntityIdentity -> m_EHandle (low 15 bits = entity index)
 inline int g_entIdentityEHandle = 0x10;
-// m_MoveType (MoveType_t, 1 byte) — restored each replay tick
+// m_MoveType (MoveType_t, 1 byte) — restored at replay initialization
 inline int g_entMoveType = -1;
 // m_nActualMoveType (MoveType_t, 1 byte) — networked move type
 inline int g_entActualMoveType = -1;
@@ -85,7 +85,7 @@ inline int g_pawnViewAngle = -1;
 inline int g_pawnViewAnglePrevious = -1;
 // Embedded server view-angle change vector
 inline int g_pawnServerViewAngleChanges = -1;
-// m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
+// m_angEyeAngles (QAngle) — networked view publish
 inline int g_pawnEyeAngles = -1;
 
 // ---- CCSPlayer_WeaponServices ----
@@ -128,9 +128,11 @@ inline int g_moveAbsOrigin = 200;
 
 #ifdef _WIN32
 inline int g_vtIdxPlayerRunCommand = 25;
+inline int g_vtIdxSetupMove = 34;
 inline int g_vtIdxFinishMove = 38;
 #else
 inline int g_vtIdxPlayerRunCommand = 26;
+inline int g_vtIdxSetupMove = 35;
 inline int g_vtIdxFinishMove = 39;
 #endif
 // Controller setup immediately preceding queued client commands.

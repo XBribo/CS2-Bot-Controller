@@ -21,8 +21,8 @@ void* UpdateAddress();
 void* UpkeepAddress();
 void* UpdateLookAnglesAddress();
 
-// Publishes replay-owned eye angles through the current engine path.
-bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw);
+// Reports whether the engine view hooks required by replay are installed.
+bool ReplayViewReady();
 
 // Last CCSBot* seen in Update for this slot, or nullptr. Used to read
 // the bot's BotProfile by slot.
