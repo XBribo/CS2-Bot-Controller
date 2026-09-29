@@ -61,20 +61,18 @@ struct ReplayState
     std::atomic<bool> playing{ false };
     std::atomic<bool> holding{ false };
     std::atomic<bool> needsInitialTeleport{ false };
-    std::atomic<bool> needsMovementExtra{ false };
+    std::atomic<bool> needsHistory{ false };
     std::atomic<bool> loop{ false };
-    std::vector<ReplayTick> ticks;
+    std::vector<ReplayFrameData> frames;
     std::vector<SubtickMove> subs;
-    std::vector<ReplayCommandFrameData> commands;
-    std::vector<ReplayMovementExtra> movementExtras;
-    std::vector<uint32_t> subOffset; // prefix sum, size ticks.size()+1
+    std::vector<uint32_t> subOffset; // prefix sum, size frames.size()+1
     std::atomic<int> cursor{ 0 };
     int startCursor{ 0 };
     int holdBeforeCursor{ -1 };
     std::atomic<int> lastAppliedDef{ -1 };
     int lastEventCursor{ -1 };
     int lastFinalViewCursor{ -1 }; // guards camera reads after the simulation cursor advances
-    std::mutex mu; // guards ticks/subs/subOffset
+    std::mutex mu; // guards frames/subs/subOffset
 };
 
 namespace {
@@ -643,7 +641,7 @@ namespace {
 // Keeps complete engine planes intact; legacy held-only frames use the adjacent-state encoding.
 void ReplayButtonsAt(const ReplayState& replay, int cursor, uint64_t& b0, uint64_t& b1, uint64_t& b2)
 {
-    const ReplayCommandFrameData* command = static_cast<size_t>(cursor) < replay.commands.size() ? &replay.commands[cursor] : nullptr;
+    const ReplayCommandFrameData* command = &replay.frames[cursor].input;
     if (command && (command->fields & kCommandFieldButtons) != 0)
     {
         b0 = command->buttons;
@@ -651,7 +649,7 @@ void ReplayButtonsAt(const ReplayState& replay, int cursor, uint64_t& b0, uint64
         b2 = command->buttons2;
         return;
     }
-    const MovementSnapshot& pre = replay.ticks[cursor].pre;
+    const MovementSnapshot& pre = replay.frames[cursor].tick.pre;
     b0 = pre.buttons;
     b1 = pre.buttons1;
     b2 = pre.buttons2;
@@ -659,8 +657,8 @@ void ReplayButtonsAt(const ReplayState& replay, int cursor, uint64_t& b0, uint64
     uint64_t previousHeld = 0;
     if (cursor > 0)
     {
-        const auto* previous = static_cast<size_t>(cursor - 1) < replay.commands.size() ? &replay.commands[cursor - 1] : nullptr;
-        previousHeld = previous && (previous->fields & kCommandFieldButtons) != 0 ? previous->buttons : replay.ticks[cursor - 1].pre.buttons;
+        const auto* previous = &replay.frames[cursor - 1].input;
+        previousHeld = previous && (previous->fields & kCommandFieldButtons) != 0 ? previous->buttons : replay.frames[cursor - 1].tick.pre.buttons;
     }
     b1 = b0 ^ previousHeld;
     b2 = 0;
@@ -670,92 +668,69 @@ void ReplayButtonsAt(const ReplayState& replay, int cursor, uint64_t& b0, uint64
 bool ValidReplayFraction(float fraction) { return std::isfinite(fraction) && fraction >= 0.0F && fraction < 1.0F; }
 
 // Validates the presence mask and selected data before replacing any loaded buffer.
-bool ValidMovementExtra(const ReplayMovementExtra& extra)
+bool ValidReplayHistory(const ReplayHistoryData& extra)
 {
     const uint32_t fields = extra.fields;
-    if ((fields & ~ReplayMovementExtraAll) != 0) return false;
+    if ((fields & ~ReplayHistoryAll) != 0) return false;
     if (fields == 0) return true;
     if (extra.sourcePlayerTick < 0 || !std::isfinite(extra.sourceTickrate) || extra.sourceTickrate <= 0.0F) return false;
-    if ((fields & ReplayMovementExtraJumpPressedTime) != 0 && !std::isfinite(extra.jumpPressedTime)) return false;
-    if ((fields & ReplayMovementExtraLastDuckTime) != 0 && !std::isfinite(extra.lastDuckTime)) return false;
-    if ((fields & ReplayMovementExtraLastActualJumpPress) != 0 && !ValidReplayFraction(extra.lastActualJumpPressFrac)) return false;
-    if ((fields & ReplayMovementExtraLastUsableJumpPress) != 0 && !ValidReplayFraction(extra.lastUsableJumpPressFrac)) return false;
-    if ((fields & ReplayMovementExtraLastLanded) != 0 && !ValidReplayFraction(extra.lastLandedFrac)) return false;
-    return (fields & ReplayMovementExtraLastLandedVelocity) == 0 ||
+    if ((fields & ReplayHistoryJumpPressedTime) != 0 && !std::isfinite(extra.jumpPressedTime)) return false;
+    if ((fields & ReplayHistoryLastDuckTime) != 0 && !std::isfinite(extra.lastDuckTime)) return false;
+    if ((fields & ReplayHistoryLastActualJumpPress) != 0 && !ValidReplayFraction(extra.lastActualJumpPressFrac)) return false;
+    if ((fields & ReplayHistoryLastUsableJumpPress) != 0 && !ValidReplayFraction(extra.lastUsableJumpPressFrac)) return false;
+    if ((fields & ReplayHistoryLastLanded) != 0 && !ValidReplayFraction(extra.lastLandedFrac)) return false;
+    return (fields & ReplayHistoryLastLandedVelocity) == 0 ||
            (std::isfinite(extra.lastLandedVelocityX) && std::isfinite(extra.lastLandedVelocityY) && std::isfinite(extra.lastLandedVelocityZ));
 }
 } // namespace
 
-// Validate, stage, and atomically replace all replay buffers
-bool LoadReplay(int slot,
-                const ReplayTick* ticks,
-                int tickCount,
-                const SubtickMove* subs,
-                int subCount,
-                const ReplayCommandFrameData* commands,
-                int commandCount,
-                const ReplayMovementExtra* movementExtras,
-                int movementExtraCount) noexcept
+// Validate, stage, and atomically replace one frame buffer and its subtick storage.
+bool LoadReplay(int slot, float tickRate, const ReplayFrameData* frames, int frameCount,
+                const SubtickMove* subs, int subCount) noexcept
 {
     try
     {
-        if (!ValidSlot(slot) || !ticks || tickCount < 0 || subCount < 0 || (subCount > 0 && !subs) ||
-            (commandCount != 0 && commandCount != tickCount) || (commandCount > 0 && !commands) ||
-            (movementExtraCount != 0 && movementExtraCount != tickCount) || (movementExtraCount > 0 && !movementExtras))
-        {
-            return false;
-        }
-
+        if (!ValidSlot(slot) || !frames || frameCount <= 0 || !std::isfinite(tickRate) || tickRate < 0.0F ||
+            subCount < 0 || (subCount > 0 && !subs)) return false;
         ReplayState& p = g_rep[slot];
         if (p.playing.load(std::memory_order_acquire)) return false;
-
-        std::vector<ReplayTick> stagedTicks;
-        std::vector<SubtickMove> stagedSubs;
-        std::vector<ReplayCommandFrameData> stagedCommands;
-        std::vector<ReplayMovementExtra> stagedMovementExtras;
-        const auto subCountValue = static_cast<uint64_t>(subCount);
-        std::vector<uint32_t> stagedOffsets(static_cast<size_t>(tickCount) + 1, 0);
-
+        std::vector<uint32_t> stagedOffsets(static_cast<size_t>(frameCount) + 1, 0);
         uint64_t totalSubticks = 0;
-        for (int i = 0; i < tickCount; ++i)
+        for (int i = 0; i < frameCount; ++i)
         {
-            if (movementExtraCount > 0 && !ValidMovementExtra(movementExtras[i])) return false;
-            if (ticks[i].numSubtick > kMaxSubtickPerTick) return false;
-            if ((ticks[i].eventFlags & ReplayEventDrop) != 0)
+            auto history = frames[i].history;
+            history.sourceTickrate = tickRate;
+            if (!ValidReplayHistory(history)) return false;
+            const auto& tick = frames[i].tick;
+            if (tick.numSubtick > kMaxSubtickPerTick) return false;
+            if ((tick.eventFlags & ReplayEventDrop) != 0)
             {
-                const float position[3] = { ticks[i].eventDropReleaseX, ticks[i].eventDropReleaseY, ticks[i].eventDropReleaseZ };
-                const float quaternion[4] = { ticks[i].eventDropReleaseQuatX, ticks[i].eventDropReleaseQuatY,
-                                              ticks[i].eventDropReleaseQuatZ, ticks[i].eventDropReleaseQuatW };
-                if ((ticks[i].eventDropVectorFlags & ReplayDropReleasePose) == 0 || !ValidReleasePose(position, quaternion)) return false;
+                const float position[3] = { tick.eventDropReleaseX, tick.eventDropReleaseY, tick.eventDropReleaseZ };
+                const float quaternion[4] = { tick.eventDropReleaseQuatX, tick.eventDropReleaseQuatY,
+                                              tick.eventDropReleaseQuatZ, tick.eventDropReleaseQuatW };
+                if ((tick.eventDropVectorFlags & ReplayDropReleasePose) == 0 || !ValidReleasePose(position, quaternion)) return false;
             }
             stagedOffsets[static_cast<size_t>(i)] = static_cast<uint32_t>(totalSubticks);
-            totalSubticks += ticks[i].numSubtick;
-            if (totalSubticks > subCountValue) return false;
+            totalSubticks += tick.numSubtick;
+            if (totalSubticks > static_cast<uint64_t>(subCount)) return false;
         }
-        if (totalSubticks != subCountValue) return false;
-        stagedOffsets[static_cast<size_t>(tickCount)] = static_cast<uint32_t>(totalSubticks);
-
-        if (tickCount > 0) stagedTicks.assign(ticks, ticks + tickCount);
+        if (totalSubticks != static_cast<uint64_t>(subCount)) return false;
+        stagedOffsets[static_cast<size_t>(frameCount)] = static_cast<uint32_t>(totalSubticks);
+        std::vector<ReplayFrameData> stagedFrames(frames, frames + frameCount);
+        for (auto& frame : stagedFrames) frame.history.sourceTickrate = tickRate;
+        std::vector<SubtickMove> stagedSubs;
         if (subCount > 0) stagedSubs.assign(subs, subs + subCount);
-        if (commandCount > 0) stagedCommands.assign(commands, commands + commandCount);
-        if (movementExtraCount > 0)
-        {
-            stagedMovementExtras.assign(movementExtras, movementExtras + movementExtraCount);
-        }
 
         std::scoped_lock lk(p.mu);
         if (p.playing.load(std::memory_order_acquire)) return false;
-
-        p.ticks.swap(stagedTicks);
+        p.frames.swap(stagedFrames);
         p.subs.swap(stagedSubs);
-        p.commands.swap(stagedCommands);
-        p.movementExtras.swap(stagedMovementExtras);
         p.subOffset.swap(stagedOffsets);
         p.cursor.store(0, std::memory_order_relaxed);
         p.startCursor = 0;
         p.holdBeforeCursor = -1;
         p.holding.store(false, std::memory_order_release);
-        p.needsMovementExtra.store(false, std::memory_order_release);
+        p.needsHistory.store(false, std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
@@ -780,7 +755,7 @@ bool StartReplayRange(int slot, bool loop, int startIndex, int holdBeforeIndex)
     ReplayState& p = g_rep[slot];
     {
         std::scoped_lock lk(p.mu);
-        const int total = static_cast<int>(p.ticks.size());
+        const int total = static_cast<int>(p.frames.size());
         if (startIndex < 0 || startIndex >= total ||
             (holdBeforeIndex != -1 && (holdBeforeIndex <= startIndex || holdBeforeIndex > total)))
             return false;
@@ -797,7 +772,7 @@ bool StartReplayRange(int slot, bool loop, int startIndex, int holdBeforeIndex)
         }
         p.holdBeforeCursor = holdBeforeIndex;
         // A resumed hold only rebases history; its engine-generated pose is not teleported.
-        p.needsMovementExtra.store(!p.movementExtras.empty(), std::memory_order_release);
+        p.needsHistory.store(true, std::memory_order_release);
         p.holding.store(false, std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
@@ -828,7 +803,7 @@ bool StopReplay(int slot)
     if (!ValidSlot(slot)) return false;
     g_rep[slot].playing.store(false, std::memory_order_release);
     g_rep[slot].holding.store(false, std::memory_order_release);
-    g_rep[slot].needsMovementExtra.store(false, std::memory_order_release);
+    g_rep[slot].needsHistory.store(false, std::memory_order_release);
     g_replayingSlots.fetch_and(~(uint64_t{ 1 } << slot), std::memory_order_release);
     input_injector::ClearReplayPawn(slot);
     return true;
@@ -841,17 +816,15 @@ bool ReleaseReplayBuffer(int slot)
     ReplayState& p = g_rep[slot];
     std::scoped_lock lk(p.mu);
     StopReplay(slot);
-    std::vector<ReplayTick>{}.swap(p.ticks);
+    std::vector<ReplayFrameData>{}.swap(p.frames);
     std::vector<SubtickMove>{}.swap(p.subs);
-    std::vector<ReplayCommandFrameData>{}.swap(p.commands);
-    std::vector<ReplayMovementExtra>{}.swap(p.movementExtras);
     std::vector<uint32_t>{}.swap(p.subOffset);
     p.cursor.store(0, std::memory_order_relaxed);
     p.startCursor = 0;
     p.holdBeforeCursor = -1;
     p.loop.store(false, std::memory_order_relaxed);
     p.needsInitialTeleport.store(false, std::memory_order_release);
-    p.needsMovementExtra.store(false, std::memory_order_release);
+    p.needsHistory.store(false, std::memory_order_release);
     p.lastAppliedDef.store(-1, std::memory_order_relaxed);
     p.lastEventCursor = -1;
     p.lastFinalViewCursor = -1;
@@ -882,7 +855,7 @@ int ReplayTotal(int slot)
     if (!ValidSlot(slot)) return 0;
     ReplayState& p = g_rep[slot];
     std::scoped_lock lk(p.mu);
-    return static_cast<int>(p.ticks.size());
+    return static_cast<int>(p.frames.size());
 }
 
 // Reports the last completed tick only while replay owns the slot.
@@ -894,11 +867,11 @@ bool GetReplaySlotState(int slot, ReplaySlotState& out)
     std::scoped_lock lk(p.mu);
     out.playing = p.playing.load(std::memory_order_acquire) ? 1 : 0;
     out.cursor = p.cursor.load(std::memory_order_relaxed);
-    out.total = static_cast<int32_t>(p.ticks.size());
+    out.total = static_cast<int32_t>(p.frames.size());
     if (!out.playing) return true;
     const int index = std::max(out.cursor - 1, p.startCursor);
     if (index >= out.total) return true;
-    const auto& tick = p.ticks[index];
+    const auto& tick = p.frames[index].tick;
     out.currentTickIndex = index;
     out.weaponDefIndex = tick.weaponDefIndex;
     out.numSubtick = static_cast<int32_t>(tick.numSubtick);
@@ -912,15 +885,32 @@ bool CurrentReplayTick(int slot, ReplayTick& out)
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
+    int total = static_cast<int>(p.frames.size());
     int idx = p.cursor.load(std::memory_order_relaxed) - 1;
     idx = std::max(idx, p.startCursor);
     if (idx >= total) return false;
-    out = p.ticks[idx];
+    out = p.frames[idx].tick;
     return true;
 }
 
-// Assembles one complete PlayerRunCommand input frame from parallel replay buffers
+// Query one complete public frame without mixing cursor generations or losing presence.
+bool CurrentReplayFrame(int slot, ReplayFrameData& out, SubtickMove* subs, int maxSubticks)
+{
+    if (!ValidSlot(slot) || maxSubticks < 0) return false;
+    ReplayState& p = g_rep[slot];
+    std::scoped_lock lk(p.mu);
+    if (!p.playing.load(std::memory_order_acquire)) return false;
+    const int index = std::max(p.cursor.load(std::memory_order_relaxed) - 1, p.startCursor);
+    if (index < 0 || static_cast<size_t>(index) >= p.frames.size() || p.subOffset.size() != p.frames.size() + 1) return false;
+    const auto& tick = p.frames[index].tick;
+    if (tick.numSubtick > static_cast<uint32_t>(maxSubticks) || (tick.numSubtick > 0 && !subs)) return false;
+    out = p.frames[index];
+    if (tick.numSubtick > 0)
+        std::copy_n(p.subs.data() + p.subOffset[index], tick.numSubtick, subs);
+    return true;
+}
+
+// Assembles PlayerRunCommand input from one stored replay frame and its subticks.
 bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
 {
     out = {};
@@ -935,19 +925,19 @@ bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
     bool recordedWeaponChanged = false;
     {
         std::scoped_lock lk(p.mu);
-        const int total = static_cast<int>(p.ticks.size());
+        const int total = static_cast<int>(p.frames.size());
         const int cur = p.cursor.load(std::memory_order_relaxed);
         if (p.holding.load(std::memory_order_acquire)) return false;
-        if (cur < 0 || cur >= total || p.subOffset.size() != p.ticks.size() + 1) return false;
+        if (cur < 0 || cur >= total || p.subOffset.size() != p.frames.size() + 1) return false;
 
-        out.tick = p.ticks[static_cast<size_t>(cur)];
+        out.tick = p.frames[static_cast<size_t>(cur)].tick;
         recordedDef = out.tick.weaponDefIndex;
-        recordedWeaponChanged = cur > 0 && !ReplayWeaponDefsMatch(p.ticks[static_cast<size_t>(cur - 1)].weaponDefIndex, recordedDef);
+        recordedWeaponChanged = cur > 0 && !ReplayWeaponDefsMatch(p.frames[static_cast<size_t>(cur - 1)].tick.weaponDefIndex, recordedDef);
         out.commandView = out.tick.pre;
         ReplayButtonsAt(p, cur, out.buttons0, out.buttons1, out.buttons2);
 
         const ReplayCommandFrameData* command =
-            static_cast<size_t>(cur) < p.commands.size() ? &p.commands[static_cast<size_t>(cur)] : nullptr;
+            &p.frames[static_cast<size_t>(cur)].input;
         if (command)
         {
             out.commandFields = command->fields;
@@ -999,10 +989,10 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
+    int total = static_cast<int>(p.frames.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
     if (cur < 0 || cur >= total) return false;
-    out = p.ticks[cur].pre;
+    out = p.frames[cur].tick.pre;
     return true;
 }
 
@@ -1012,13 +1002,13 @@ bool ReplaySpectatorView(int slot, MovementSnapshot& out)
     if (!ValidSlot(slot) || !IsReplaying(slot)) return false;
     ReplayState& p = g_rep[slot];
     std::scoped_lock lk(p.mu);
-    const int total = static_cast<int>(p.ticks.size());
+    const int total = static_cast<int>(p.frames.size());
     const int cur = p.cursor.load(std::memory_order_relaxed);
     const int lastFinal = p.lastFinalViewCursor;
     int idx = cur;
     if (lastFinal >= 0 && lastFinal < total && (lastFinal == cur || lastFinal + 1 == cur || cur >= total)) idx = lastFinal;
     if (idx < 0 || idx >= total) return false;
-    out = p.ticks[static_cast<size_t>(idx)].post;
+    out = p.frames[static_cast<size_t>(idx)].tick.post;
     return true;
 }
 
@@ -1029,7 +1019,7 @@ int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut)
     if (!p.playing.load(std::memory_order_acquire)) return -1;
     std::scoped_lock lk(p.mu);
     if (p.holding.load(std::memory_order_acquire)) return 0;
-    int total = static_cast<int>(p.ticks.size());
+    int total = static_cast<int>(p.frames.size());
     int idx = p.cursor.load(std::memory_order_relaxed);
     if (idx < 0 || idx >= total) return -1;
     uint32_t begin = p.subOffset[idx];
@@ -1052,7 +1042,7 @@ bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b
         b0 = b1 = b2 = 0;
         return true;
     }
-    int total = static_cast<int>(p.ticks.size());
+    int total = static_cast<int>(p.frames.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
     if (cur < 0 || cur >= total) return false;
     ReplayButtonsAt(p, cur, b0, b1, b2);
@@ -1092,10 +1082,10 @@ int CurrentReplayWeaponDef(int slot)
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return -1;
     std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
+    int total = static_cast<int>(p.frames.size());
     int cur = p.cursor.load(std::memory_order_relaxed);
     if (cur < 0 || cur >= total) return -1;
-    return p.ticks[cur].weaponDefIndex;
+    return p.frames[cur].tick.weaponDefIndex;
 }
 
 // Resolves and applies the recorded weapon definition for one command frame
@@ -1140,10 +1130,10 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
     std::scoped_lock lk(p.mu);
     if (p.holding.load(std::memory_order_acquire)) return false;
     int cur = p.cursor.load(std::memory_order_relaxed);
-    if (cur < 0 || static_cast<size_t>(cur) >= p.ticks.size() || p.lastEventCursor == cur) return false;
+    if (cur < 0 || static_cast<size_t>(cur) >= p.frames.size() || p.lastEventCursor == cur) return false;
     p.lastEventCursor = cur;
 
-    const ReplayTick& tick = p.ticks[cur];
+    const ReplayTick& tick = p.frames[cur].tick;
     if ((tick.eventFlags & ReplayEventDrop) == 0) return false;
     event.weaponDefIndex = tick.eventWeaponDefIndex;
     event.vectorFlags = tick.eventDropVectorFlags;
@@ -1192,7 +1182,7 @@ bool DropHookReady() { return g_dropHookReady.load(std::memory_order_acquire); }
 
 namespace {
 
-struct MovementExtraWrite
+struct HistoryWrite
 {
     uint32_t field;
     int offset;
@@ -1200,7 +1190,7 @@ struct MovementExtraWrite
 };
 
 // Preserves inactive tick sentinels and checks the live-clock translation for overflow.
-bool RebaseMovementExtraTick(int32_t& tick, int32_t sourceTick, int32_t liveTick)
+bool RebaseHistoryTick(int32_t& tick, int32_t sourceTick, int32_t liveTick)
 {
     if (tick <= 0) return true;
     const int64_t mapped = static_cast<int64_t>(tick) - sourceTick + liveTick;
@@ -1210,7 +1200,7 @@ bool RebaseMovementExtraTick(int32_t& tick, int32_t sourceTick, int32_t liveTick
 }
 
 // Preserves inactive second-based sentinels while translating active times to the command clock.
-bool RebaseMovementExtraTime(float& time, double sourceTime, double liveTime)
+bool RebaseHistoryTime(float& time, double sourceTime, double liveTime)
 {
     if (time <= 0.0F) return true;
     const double mapped = static_cast<double>(time) - sourceTime + liveTime;
@@ -1220,12 +1210,12 @@ bool RebaseMovementExtraTime(float& time, double sourceTime, double liveTime)
 }
 
 // Prepares every selected value and Schema target before initial teleport or history mutation.
-bool PrepareMovementExtraWrites(int slot, ReplayMovementExtra extra, std::array<MovementExtraWrite, 11>& writes)
+bool PrepareHistoryWrites(int slot, ReplayHistoryData extra, std::array<HistoryWrite, 11>& writes)
 {
     writes = {};
     if (extra.fields == 0) return true;
-    constexpr uint32_t timeFields = ReplayMovementExtraJumpPressedTime | ReplayMovementExtraLastDuckTime |
-                                    ReplayMovementExtraLastActualJumpPress | ReplayMovementExtraLastUsableJumpPress | ReplayMovementExtraLastLanded;
+    constexpr uint32_t timeFields = ReplayHistoryJumpPressedTime | ReplayHistoryLastDuckTime |
+                                    ReplayHistoryLastActualJumpPress | ReplayHistoryLastUsableJumpPress | ReplayHistoryLastLanded;
     if ((extra.fields & timeFields) != 0)
     {
         int32_t liveTick = 0;
@@ -1238,28 +1228,28 @@ bool PrepareMovementExtraWrites(int slot, ReplayMovementExtra extra, std::array<
         }
         const double sourceTime = static_cast<double>(extra.sourcePlayerTick) / extra.sourceTickrate;
         const double liveTime = static_cast<double>(liveTick) * interval;
-        if (((extra.fields & ReplayMovementExtraJumpPressedTime) != 0 && !RebaseMovementExtraTime(extra.jumpPressedTime, sourceTime, liveTime)) ||
-            ((extra.fields & ReplayMovementExtraLastDuckTime) != 0 && !RebaseMovementExtraTime(extra.lastDuckTime, sourceTime, liveTime)) ||
-            ((extra.fields & ReplayMovementExtraLastActualJumpPress) != 0 && !RebaseMovementExtraTick(extra.lastActualJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
-            ((extra.fields & ReplayMovementExtraLastUsableJumpPress) != 0 && !RebaseMovementExtraTick(extra.lastUsableJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
-            ((extra.fields & ReplayMovementExtraLastLanded) != 0 && !RebaseMovementExtraTick(extra.lastLandedTick, extra.sourcePlayerTick, liveTick)))
+        if (((extra.fields & ReplayHistoryJumpPressedTime) != 0 && !RebaseHistoryTime(extra.jumpPressedTime, sourceTime, liveTime)) ||
+            ((extra.fields & ReplayHistoryLastDuckTime) != 0 && !RebaseHistoryTime(extra.lastDuckTime, sourceTime, liveTime)) ||
+            ((extra.fields & ReplayHistoryLastActualJumpPress) != 0 && !RebaseHistoryTick(extra.lastActualJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
+            ((extra.fields & ReplayHistoryLastUsableJumpPress) != 0 && !RebaseHistoryTick(extra.lastUsableJumpPressTick, extra.sourcePlayerTick, liveTick)) ||
+            ((extra.fields & ReplayHistoryLastLanded) != 0 && !RebaseHistoryTick(extra.lastLandedTick, extra.sourcePlayerTick, liveTick)))
         {
             BC_LOG_WARN("Cannot restore movement history for slot %d: clock translation overflow\n", slot);
             return false;
         }
     }
     writes = {{
-        { ReplayMovementExtraJumpPressedTime, tg::g_servicesJumpPressedTime, std::bit_cast<uint32_t>(extra.jumpPressedTime) },
-        { ReplayMovementExtraLastDuckTime, tg::g_servicesLastDuckTime, std::bit_cast<uint32_t>(extra.lastDuckTime) },
-        { ReplayMovementExtraLastActualJumpPress, tg::g_servicesLastActualJumpPressTick, std::bit_cast<uint32_t>(extra.lastActualJumpPressTick) },
-        { ReplayMovementExtraLastActualJumpPress, tg::g_servicesLastActualJumpPressFrac, std::bit_cast<uint32_t>(extra.lastActualJumpPressFrac) },
-        { ReplayMovementExtraLastUsableJumpPress, tg::g_servicesLastUsableJumpPressTick, std::bit_cast<uint32_t>(extra.lastUsableJumpPressTick) },
-        { ReplayMovementExtraLastUsableJumpPress, tg::g_servicesLastUsableJumpPressFrac, std::bit_cast<uint32_t>(extra.lastUsableJumpPressFrac) },
-        { ReplayMovementExtraLastLanded, tg::g_servicesLastLandedTick, std::bit_cast<uint32_t>(extra.lastLandedTick) },
-        { ReplayMovementExtraLastLanded, tg::g_servicesLastLandedFrac, std::bit_cast<uint32_t>(extra.lastLandedFrac) },
-        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityX, std::bit_cast<uint32_t>(extra.lastLandedVelocityX) },
-        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityY, std::bit_cast<uint32_t>(extra.lastLandedVelocityY) },
-        { ReplayMovementExtraLastLandedVelocity, tg::g_servicesLastLandedVelocityZ, std::bit_cast<uint32_t>(extra.lastLandedVelocityZ) },
+        { ReplayHistoryJumpPressedTime, tg::g_servicesJumpPressedTime, std::bit_cast<uint32_t>(extra.jumpPressedTime) },
+        { ReplayHistoryLastDuckTime, tg::g_servicesLastDuckTime, std::bit_cast<uint32_t>(extra.lastDuckTime) },
+        { ReplayHistoryLastActualJumpPress, tg::g_servicesLastActualJumpPressTick, std::bit_cast<uint32_t>(extra.lastActualJumpPressTick) },
+        { ReplayHistoryLastActualJumpPress, tg::g_servicesLastActualJumpPressFrac, std::bit_cast<uint32_t>(extra.lastActualJumpPressFrac) },
+        { ReplayHistoryLastUsableJumpPress, tg::g_servicesLastUsableJumpPressTick, std::bit_cast<uint32_t>(extra.lastUsableJumpPressTick) },
+        { ReplayHistoryLastUsableJumpPress, tg::g_servicesLastUsableJumpPressFrac, std::bit_cast<uint32_t>(extra.lastUsableJumpPressFrac) },
+        { ReplayHistoryLastLanded, tg::g_servicesLastLandedTick, std::bit_cast<uint32_t>(extra.lastLandedTick) },
+        { ReplayHistoryLastLanded, tg::g_servicesLastLandedFrac, std::bit_cast<uint32_t>(extra.lastLandedFrac) },
+        { ReplayHistoryLastLandedVelocity, tg::g_servicesLastLandedVelocityX, std::bit_cast<uint32_t>(extra.lastLandedVelocityX) },
+        { ReplayHistoryLastLandedVelocity, tg::g_servicesLastLandedVelocityY, std::bit_cast<uint32_t>(extra.lastLandedVelocityY) },
+        { ReplayHistoryLastLandedVelocity, tg::g_servicesLastLandedVelocityZ, std::bit_cast<uint32_t>(extra.lastLandedVelocityZ) },
     }};
     for (auto& write : writes)
     {
@@ -1359,16 +1349,16 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
         return false;
     }
     ReplayState& p = g_rep[slot];
-    std::array<MovementExtraWrite, 11> extraWrites{};
-    if (p.needsMovementExtra.exchange(false, std::memory_order_acq_rel))
+    std::array<HistoryWrite, 11> extraWrites{};
+    if (p.needsHistory.exchange(false, std::memory_order_acq_rel))
     {
-        ReplayMovementExtra extra{};
+        ReplayHistoryData extra{};
         {
             std::scoped_lock lk(p.mu);
             const int cur = p.cursor.load(std::memory_order_relaxed);
-            if (cur >= 0 && static_cast<size_t>(cur) < p.movementExtras.size()) extra = p.movementExtras[cur];
+            if (cur >= 0 && static_cast<size_t>(cur) < p.frames.size()) extra = p.frames[cur].history;
         }
-        if (!PrepareMovementExtraWrites(slot, extra, extraWrites))
+        if (!PrepareHistoryWrites(slot, extra, extraWrites))
         {
             StopReplay(slot);
             return false;
@@ -1435,8 +1425,8 @@ bool OnReplaySetupMove(int slot, void* moveData)
     {
         std::scoped_lock lk(p.mu);
         int cur = p.cursor.load(std::memory_order_relaxed);
-        if (cur < 0 || cur >= static_cast<int>(p.ticks.size())) return false;
-        pre = p.ticks[cur].pre;
+        if (cur < 0 || cur >= static_cast<int>(p.frames.size())) return false;
+        pre = p.frames[cur].tick.pre;
     }
     if (!WriteVector3(moveData, tg::g_moveVelocity, pre.velX, pre.velY, pre.velZ) ||
         !WriteVector3(moveData, tg::g_moveAbsOrigin, pre.originX, pre.originY, pre.originZ))
@@ -1456,8 +1446,8 @@ bool OnReplayFinalView(int slot, void* services)
     if (p.needsInitialTeleport.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
     const int cur = p.cursor.load(std::memory_order_relaxed);
-    if (cur < 0 || cur >= static_cast<int>(p.ticks.size())) return false;
-    const MovementSnapshot& post = p.ticks[cur].post;
+    if (cur < 0 || cur >= static_cast<int>(p.frames.size())) return false;
+    const MovementSnapshot& post = p.frames[cur].tick.post;
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
     if (!pawn || !WriteLocalViewAnglesToPawn(pawn, post.pitch, post.yaw))
     {
@@ -1476,7 +1466,7 @@ void OnReplayCommit(int slot, void* services, bool simulated)
     ReplayState& p = g_rep[slot];
     std::scoped_lock lk(p.mu);
     if (p.holding.load(std::memory_order_acquire)) return;
-    const int total = static_cast<int>(p.ticks.size());
+    const int total = static_cast<int>(p.frames.size());
     const int next = p.cursor.load(std::memory_order_relaxed) + 1;
     if (p.holdBeforeCursor >= 0 && next >= p.holdBeforeCursor)
     {
@@ -1489,7 +1479,7 @@ void OnReplayCommit(int slot, void* services, bool simulated)
         // Prepare the next pass immediately, without an unowned command between loops.
         p.cursor.store(p.startCursor, std::memory_order_relaxed);
         p.needsInitialTeleport.store(true, std::memory_order_release);
-        p.needsMovementExtra.store(!p.movementExtras.empty(), std::memory_order_release);
+        p.needsHistory.store(true, std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
@@ -1513,7 +1503,7 @@ void ClearAll()
         g_rep[i].playing.store(false, std::memory_order_release);
         g_rep[i].holding.store(false, std::memory_order_release);
         g_rep[i].needsInitialTeleport.store(false, std::memory_order_release);
-        g_rep[i].needsMovementExtra.store(false, std::memory_order_release);
+        g_rep[i].needsHistory.store(false, std::memory_order_release);
         g_rep[i].loop.store(false, std::memory_order_relaxed);
         {
             std::scoped_lock lk(g_rec[i].mu);
@@ -1531,10 +1521,8 @@ void ClearAll()
         }
         {
             std::scoped_lock lk(g_rep[i].mu);
-            g_rep[i].ticks.clear();
+            g_rep[i].frames.clear();
             g_rep[i].subs.clear();
-            g_rep[i].commands.clear();
-            g_rep[i].movementExtras.clear();
             g_rep[i].subOffset.clear();
             g_rep[i].startCursor = 0;
             g_rep[i].holdBeforeCursor = -1;

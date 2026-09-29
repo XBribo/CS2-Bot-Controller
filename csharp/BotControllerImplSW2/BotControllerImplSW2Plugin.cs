@@ -68,30 +68,12 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool StopRecord(int slot) => BotController.StopRecord(slot);
         // Returns the number of recorded ticks for a slot.
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
-        // Returns the recorded tick and subtick buffers for a slot.
-        public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers for a slot
-        public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
+        // Returns recording frames using the caller's captured tickrate.
+        public ReplayData GetRecordedMotion(int slot, float tickRate)
+            => BotController.GetRecordedMotion(slot, tickRate);
 
-        // Loads a replay buffer into a bot slot.
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
-        // Loads optional pre-command movement history with its recorded player clock.
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands,
-            ReplayMovementExtra[] movementExtras)
-            => BotController.LoadReplay(slot, ticks, subs, commands, movementExtras);
+        // Copies one unified frame sequence into the native replay buffer.
+        public bool LoadReplay(int slot, ReplayData replay) => BotController.LoadReplay(slot, replay);
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
@@ -117,9 +99,9 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool TryGetReplayState(int slot, out ReplaySlotState state) => BotController.TryGetReplayState(slot, out state);
         // Reports whether a slot is actively replaying.
         public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
-        // Returns the current replay tick when one is available.
-        public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
+        // Returns snapshots, input and subticks from the same native frame.
+        public bool TryGetReplayFrame(int slot, out ReplayFrame frame)
+            => BotController.TryGetReplayFrame(slot, out frame);
 
         // Switches the active weapon for a bot slot.
         public bool SwitchBotWeapon(int slot, int defIndex)
@@ -445,16 +427,15 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         {
             try
             {
-                MotionRecording rec = MotionStore.LoadFromFile(file);
-                bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                ReplayData rec = MotionStore.LoadFromFile(file);
+                bool loaded = BotController.LoadReplay(botSlot, rec);
                 _completedJobs.Enqueue(() =>
                 {
                     if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
                     _loadingSlots.Remove(botSlot);
                     if (_cancelledLoads.Remove(botSlot)) return;
-                    if (rec.Tickrate != Tickrate)
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+                    if (rec.TickRate != Tickrate)
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.TickRate}, server {Tickrate}.");
                     if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
                     {
                         _driver.Track(botSlot);

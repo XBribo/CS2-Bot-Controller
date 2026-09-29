@@ -9,12 +9,12 @@ using BotControllerApi;
 namespace BotControllerImpl;
 
 // Recorded motion plus the tickrate it was captured at
-public sealed class MotionRecording
+internal sealed class MotionRecording
 {
     public required int Tickrate { get; set; }
-    public required ReplayTick[] Ticks { get; set; }
+    public required NativeReplayTick[] Ticks { get; set; }
     public required SubtickMove[] Subticks { get; set; }
-    public required ReplayCommandFrame[] Commands { get; set; }
+    public required NativeReplayInput[] Commands { get; set; }
 }
 
 // File + capture-buffer on top of the native calls
@@ -69,10 +69,10 @@ public static class MotionStore
         writer.WriteStartArray();
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayTick[Math.Min(512, total - start)];
+            var batch = new NativeReplayTick[Math.Min(512, total - start)];
             if (BotController.CopyRecordedTicksRange(slot, start, batch) != batch.Length)
                 throw new InvalidDataException("Recording ticks changed during save.");
-            foreach (ReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
+            foreach (NativeReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
             start += batch.Length;
         }
         writer.WriteEndArray();
@@ -101,17 +101,17 @@ public static class MotionStore
         writer.WriteStartArray();
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayCommandFrame[Math.Min(512, total - start)];
+            var batch = new NativeReplayInput[Math.Min(512, total - start)];
             if (BotController.CopyRecordedCommandsRange(slot, start, batch) != batch.Length)
                 throw new InvalidDataException("Recording commands changed during save.");
-            foreach (ReplayCommandFrame command in batch) JsonSerializer.Serialize(writer, command, JsonOpts);
+            foreach (NativeReplayInput command in batch) JsonSerializer.Serialize(writer, command, JsonOpts);
             start += batch.Length;
         }
         writer.WriteEndArray();
     }
 
     // Load a Brotli-compressed JSON recording from disk
-    public static MotionRecording LoadFromFile(string path)
+    public static ReplayData LoadFromFile(string path)
     {
         using var file = File.OpenRead(path);
         using var brotli = new BrotliStream(file, CompressionMode.Decompress);
@@ -125,19 +125,19 @@ public static class MotionStore
 
         const uint eventDrop = 1U << 0;
         const uint dropReleasePose = 1U << 3;
-        foreach (ReplayTick tick in recording.Ticks)
+        foreach (NativeReplayTick tick in recording.Ticks)
         {
             if ((tick.EventFlags & eventDrop) != 0 && (tick.EventDropVectorFlags & dropReleasePose) == 0)
                 throw new InvalidDataException("Recording lacks the required drop release pose.");
         }
 
         const uint commandFieldWeaponSelectDef = 1U << 8;
-        foreach (ReplayCommandFrame command in recording.Commands)
+        foreach (NativeReplayInput command in recording.Commands)
         {
             if ((command.Fields & commandFieldWeaponSelectDef) == 0)
                 throw new InvalidDataException("Recording uses an unsupported command JSON format.");
         }
 
-        return recording;
+        return ReplayFrameCodec.FromRecording(recording.Tickrate, recording.Ticks, recording.Subticks, recording.Commands);
     }
 }

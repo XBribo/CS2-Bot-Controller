@@ -18,29 +18,13 @@ namespace BotControllerApi
         public bool StartRecord(int slot) => BotController.StartRecord(slot);
         public bool StopRecord(int slot) => BotController.StopRecord(slot);
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
-        public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers
-        public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
+        // Returns recording frames using the caller's captured tickrate.
+        public ReplayData GetRecordedMotion(int slot, float tickRate)
+            => BotController.GetRecordedMotion(slot, tickRate);
 
         // ---- replay ----
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
-        // Loads optional pre-command movement history with its recorded player clock.
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands,
-            ReplayMovementExtra[] movementExtras)
-            => BotController.LoadReplay(slot, ticks, subs, commands, movementExtras);
+        // Copies one unified frame sequence into the native replay buffer.
+        public bool LoadReplay(int slot, ReplayData replay) => BotController.LoadReplay(slot, replay);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
         // Registers the authoritative native pawn pointer for replay.
@@ -60,8 +44,9 @@ namespace BotControllerApi
         // Reads aggregate replay state without losing the terminal cursor.
         public bool TryGetReplayState(int slot, out ReplaySlotState state) => BotController.TryGetReplayState(slot, out state);
         public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
-        public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
+        // Returns snapshots, input and subticks from the same native frame.
+        public bool TryGetReplayFrame(int slot, out ReplayFrame frame)
+            => BotController.TryGetReplayFrame(slot, out frame);
 
         // ---- weapons ----
         public bool SwitchBotWeapon(int slot, int defIndex)

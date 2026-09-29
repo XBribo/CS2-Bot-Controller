@@ -32,29 +32,13 @@ namespace BotControllerApi
 
         int RecordedTickCount(int slot);
 
-        // Pull a slot's recorded ticks + subticks out of memory.
-        (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot);
-
-        // Pull aligned tick, subtick, and command-frame buffers out of memory
-        (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot);
+        // Pull a stopped recording into the same model used by replay producers.
+        ReplayData GetRecordedMotion(int slot, float tickRate);
 
         // ---- replay ----
 
-        // Load ticks, subticks, and aligned command frames into a replay buffer.
-        bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands);
-
-        // Loads optional pre-command movement history with its recorded player clock.
-        bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands,
-            ReplayMovementExtra[] movementExtras);
+        // Copies one complete replay; nullable fields preserve presence independently of value.
+        bool LoadReplay(int slot, ReplayData replay);
 
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -84,8 +68,8 @@ namespace BotControllerApi
 
         bool IsReplaying(int slot);
 
-        // The tick currently being replayed on this slot, for driving weapon/fire.
-        bool TryGetReplayTick(int slot, out ReplayTick tick);
+        // The complete frame currently being replayed, including input and subticks.
+        bool TryGetReplayFrame(int slot, out ReplayFrame frame);
 
         // ---- weapons ----
 

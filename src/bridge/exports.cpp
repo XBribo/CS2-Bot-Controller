@@ -6,8 +6,10 @@
 #include "BuyControllerState.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
+#include "core/interfaces.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -36,8 +38,8 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 23 extends ReplayMovementExtra to 56 bytes with a recorded player clock.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
+// ABI 24 loads and queries complete frames rather than public parallel arrays.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 24; }
 
 // Export availability, not runtime hook readiness: replay/weapon/buy/voice and buffer release.
 extern "C" BC_EXPORT uint64_t BotController_GetCapabilities() { return 0x155FULL; }
@@ -55,8 +57,9 @@ extern "C" BC_EXPORT int BotController_GetAbiInfo(void* out, int size)
 #pragma pack(pop)
     static_assert(sizeof(AbiInfo) == 44);
     if (!out || size < static_cast<int>(sizeof(AbiInfo))) return -1;
-    const AbiInfo info{ 23, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
-                        sizeof(cs2bc::ReplaySlotState), cs2bc::motion_recorder::kMaxSlots, BotController_GetCapabilities(), 0, 0 };
+    const AbiInfo info{ 24, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
+                        sizeof(cs2bc::ReplaySlotState), cs2bc::motion_recorder::kMaxSlots, BotController_GetCapabilities(),
+                        sizeof(cs2bc::ReplayFrameData), sizeof(cs2bc::ReplayCommandFrameData) };
     std::memcpy(out, &info, sizeof(info));
     return 0;
 }
@@ -256,21 +259,23 @@ extern "C" BC_EXPORT int BotController_CopyRecordedCommandsRange(int slot, int s
     return cs2bc::motion_recorder::CopyCommandsRange(slot, start, out, maxCommands);
 }
 
-// Load replay buffers with optional per-tick command and movement data. 0 ok.
+// Load one complete frame buffer for the SetupMove consumer. 0 ok.
 extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
-                                                  const cs2bc::ReplayTick* ticks,
-                                                  int tickCount,
+                                                  float tickRate,
+                                                  const cs2bc::ReplayFrameData* frames,
+                                                  int frameCount,
                                                   const cs2bc::SubtickMove* subs,
-                                                  int subCount,
-                                                  const cs2bc::ReplayCommandFrameData* commands,
-                                                  int commandCount,
-                                                  const cs2bc::ReplayMovementExtra* movementExtras,
-                                                  int movementExtraCount) noexcept
+                                                  int subCount) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, movementExtras,
-                                              movementExtraCount)
-               ? 0
-               : -1;
+    if (!std::isfinite(tickRate) || tickRate <= 0.0F) return -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, tickRate, frames, frameCount, subs, subCount) ? 0 : -1;
+}
+
+// Return a whole frame, preserving optional input/history and its own subticks.
+extern "C" BC_EXPORT int BotController_GetReplayFrame(int slot, cs2bc::ReplayFrameData* out,
+                                                       cs2bc::SubtickMove* subs, int maxSubticks)
+{
+    return out && cs2bc::motion_recorder::CurrentReplayFrame(slot, *out, subs, maxSubticks) ? 0 : -1;
 }
 
 // Move a slot's just-recorded buffers into another slot's replay buffer
@@ -289,7 +294,16 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
     int gotS = ns > 0 ? cs2bc::motion_recorder::CopySubticks(srcSlot, subs.data(), ns) : 0;
     int gotC = cs2bc::motion_recorder::CopyCommands(srcSlot, commands.data(), nc);
     if (gotT <= 0 || gotC != gotT) return -1;
-    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, nullptr, 0) ? 0 : -1;
+    std::vector<cs2bc::ReplayFrameData> frames(gotT);
+    for (int i = 0; i < gotT; ++i)
+    {
+        frames[i].tick = ticks[i];
+        frames[i].input = commands[i];
+        frames[i].history.sourcePlayerTick = -1;
+    }
+    const float interval = cs2bc::interfaces::TickInterval();
+    const float rate = interval > 0.0F ? 1.0F / interval : 0.0F;
+    return cs2bc::motion_recorder::LoadReplay(dstSlot, rate, frames.data(), gotT, subs.data(), gotS) ? 0 : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)

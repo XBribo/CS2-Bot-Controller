@@ -112,21 +112,21 @@ struct ReplayCommandFrameData
 };
 
 // Presence applies to scalar times, tick/fraction pairs, or the complete landing velocity.
-enum ReplayMovementExtraFields : uint32_t // NOLINT(performance-enum-size)
+enum ReplayHistoryFields : uint32_t // NOLINT(performance-enum-size)
 {
-    ReplayMovementExtraNone = 0,
-    ReplayMovementExtraJumpPressedTime = 1U << 0,
-    ReplayMovementExtraLastDuckTime = 1U << 1,
-    ReplayMovementExtraLastActualJumpPress = 1U << 2,
-    ReplayMovementExtraLastUsableJumpPress = 1U << 3,
-    ReplayMovementExtraLastLanded = 1U << 4,
-    ReplayMovementExtraLastLandedVelocity = 1U << 5,
-    ReplayMovementExtraAll = (1U << 6) - 1,
+    ReplayHistoryNone = 0,
+    ReplayHistoryJumpPressedTime = 1U << 0,
+    ReplayHistoryLastDuckTime = 1U << 1,
+    ReplayHistoryLastActualJumpPress = 1U << 2,
+    ReplayHistoryLastUsableJumpPress = 1U << 3,
+    ReplayHistoryLastLanded = 1U << 4,
+    ReplayHistoryLastLandedVelocity = 1U << 5,
+    ReplayHistoryAll = (1U << 6) - 1,
 };
 
-struct ReplayMovementExtra
+struct ReplayHistoryData
 {
-    uint32_t fields; // ReplayMovementExtraFields; absent fields are not restored
+    uint32_t fields; // ReplayHistoryFields; absent fields are not restored
     float jumpPressedTime;
     float lastDuckTime;
     int32_t lastActualJumpPressTick;
@@ -142,6 +142,14 @@ struct ReplayMovementExtra
     float sourceTickrate; // must match the live engine rate; timestamps <= 0 retain sentinel semantics
 };
 
+// Private packed transport for one public ReplayFrame; subticks are flattened only at the bridge.
+struct ReplayFrameData
+{
+    ReplayTick tick;
+    ReplayCommandFrameData input;
+    ReplayHistoryData history;
+};
+
 // Retains the terminal cursor when idle so callers can distinguish completion from an early stop.
 struct ReplaySlotState
 {
@@ -155,7 +163,8 @@ struct ReplaySlotState
 #pragma pack(pop)
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
-static_assert(sizeof(ReplayMovementExtra) == 56);
+static_assert(sizeof(ReplayHistoryData) == 56);
+static_assert(sizeof(ReplayFrameData) == 380);
 static_assert(sizeof(ReplayTick) == 256);
 static_assert(sizeof(ReplaySlotState) == 24);
 
@@ -226,16 +235,9 @@ int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands);
 int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands);
 
 // ---- replay ----
-// Load all parallel replay arrays into a slot's replay buffer
-bool LoadReplay(int slot,
-                const ReplayTick* ticks,
-                int tickCount,
-                const SubtickMove* subs,
-                int subCount,
-                const ReplayCommandFrameData* commands,
-                int commandCount,
-                const ReplayMovementExtra* movementExtras,
-                int movementExtraCount) noexcept;
+// Load complete frames; a zero rate is only allowed for native recordings without history.
+bool LoadReplay(int slot, float tickRate, const ReplayFrameData* frames, int frameCount,
+                const SubtickMove* subs, int subCount) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
 // Starts at an inclusive tick index, or resumes a hold at that index.
 bool StartReplayAt(int slot, bool loop, int startIndex);
@@ -256,6 +258,8 @@ bool GetReplaySlotState(int slot, ReplaySlotState& out);
 
 // Current tick being applied this server tick
 bool CurrentReplayTick(int slot, ReplayTick& out);
+// Copies a complete completed/current frame and its subticks under the same slot lock.
+bool CurrentReplayFrame(int slot, ReplayFrameData& out, SubtickMove* subs, int maxSubticks);
 // Assemble all replay input fields for the next simulated tick
 bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out);
 // Command view angles for the tick currently being simulated.

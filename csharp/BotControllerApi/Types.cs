@@ -1,6 +1,10 @@
 // Shared data types for the BotController API.
 
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("BotControllerImpl")]
+[assembly: InternalsVisibleTo("BotControllerImplSW2")]
 
 namespace BotControllerApi
 {
@@ -27,7 +31,7 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct MovementSnapshot
+    internal struct NativeMovementSnapshot
     {
         public float OriginX, OriginY, OriginZ;
         public float VelX, VelY, VelZ;
@@ -50,10 +54,10 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayTick
+    internal struct NativeReplayTick
     {
-        public MovementSnapshot Pre;
-        public MovementSnapshot Post;
+        public NativeMovementSnapshot Pre;
+        public NativeMovementSnapshot Post;
         public int WeaponDefIndex;
         public uint NumSubtick;
         public uint EventFlags;
@@ -87,7 +91,7 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayCommandFrame
+    internal struct NativeReplayInput
     {
         public float ForwardMove;
         public float LeftMove;
@@ -108,24 +112,10 @@ namespace BotControllerApi
         public byte Pad2;
     }
 
-    // Tick/fraction pairs and landing velocity are restored as complete groups.
-    [Flags]
-    public enum ReplayMovementExtraFields : uint
-    {
-        None = 0,
-        JumpPressedTime = 1U << 0,
-        LastDuckTime = 1U << 1,
-        LastActualJumpPress = 1U << 2,
-        LastUsableJumpPress = 1U << 3,
-        LastLanded = 1U << 4,
-        LastLandedVelocity = 1U << 5,
-        All = (1U << 6) - 1,
-    }
-
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayMovementExtra
+    internal struct NativeReplayHistory
     {
-        public uint Fields; // ReplayMovementExtraFields; absent fields are not restored
+        public uint Fields; // Private presence mask; absent groups are not restored.
         public float JumpPressedTime;
         public float LastDuckTime;
         public int LastActualJumpPressTick;
@@ -139,6 +129,15 @@ namespace BotControllerApi
         public float LastLandedVelocityZ;
         public int SourcePlayerTick; // Recorded pre-command player tickbase, not the demo tick.
         public float SourceTickrate; // Must match the live engine rate; timestamps <= 0 are sentinels.
+    }
+
+    // Private native transport; callers only construct ReplayData/ReplayFrame.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct ReplayFrameData
+    {
+        public NativeReplayTick Tick;
+        public NativeReplayInput Input;
+        public NativeReplayHistory History;
     }
 
     // Includes an idle slot's terminal cursor; Playing remains authoritative.
