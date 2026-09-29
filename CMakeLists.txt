@@ -333,6 +333,11 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         _alloca=alloca
         strcmpi=strcasecmp
     )
+    # spdlog is a separate static library (FetchContent above). It needs the same pre-C++11 std::string ABI as
+    # BotController, or every spdlog function that takes or returns a std::string stays unresolved in the .so.
+    target_compile_definitions(spdlog PUBLIC _GLIBCXX_USE_CXX11_ABI=0)
+    # Report unresolved symbols when linking instead of as a Metamod load failure.
+    target_link_options(BotController PRIVATE "LINKER:-z,defs")
     target_compile_options(
         BotController
         PRIVATE
