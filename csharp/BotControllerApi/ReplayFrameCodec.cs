@@ -42,7 +42,7 @@ internal static class ReplayFrameCodec
     }
 
     // Keep the legacy recording file shape private, but expose one frame per tick.
-    internal static ReplayData FromRecording(float tickRate, NativeReplayTick[] ticks, SubtickMove[] subs, NativeReplayInput[] commands)
+    internal static ReplayData FromRecording(float tickRate, ReplayTick[] ticks, SubtickMove[] subs, NativeReplayInput[] commands)
     {
         if (!float.IsFinite(tickRate) || tickRate <= 0 || commands.Length != ticks.Length)
             throw new InvalidDataException("Recording rate or command count is invalid.");
@@ -147,9 +147,9 @@ internal static class ReplayFrameCodec
     };
 
     // Encode one tick's boundaries and optional native drop release pose.
-    private static NativeReplayTick EncodeTick(ReplayFrame frame)
+    private static ReplayTick EncodeTick(ReplayFrame frame)
     {
-        var tick = new NativeReplayTick
+        var tick = new ReplayTick
         {
             Pre = EncodeSnapshot(frame.Pre), Post = EncodeSnapshot(frame.Post),
             WeaponDefIndex = frame.WeaponDefIndex, NumSubtick = (uint)frame.Subticks.Length
@@ -180,7 +180,7 @@ internal static class ReplayFrameCodec
     }
 
     // Decode drop presence instead of interpreting an all-zero tail as an event.
-    private static ReplayDrop? DecodeDrop(NativeReplayTick tick) => (tick.EventFlags & 1) == 0 ? null : new()
+    private static ReplayDrop? DecodeDrop(ReplayTick tick) => (tick.EventFlags & 1) == 0 ? null : new()
     {
         WeaponDefIndex = tick.EventWeaponDefIndex,
         Target = (tick.EventDropVectorFlags & 1) != 0 ? new Vector3(tick.EventDropTargetX, tick.EventDropTargetY, tick.EventDropTargetZ) : null,

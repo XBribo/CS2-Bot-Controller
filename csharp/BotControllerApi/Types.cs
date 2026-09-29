@@ -54,7 +54,7 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    internal struct NativeReplayTick
+    internal struct ReplayTick
     {
         public NativeMovementSnapshot Pre;
         public NativeMovementSnapshot Post;
@@ -135,7 +135,7 @@ namespace BotControllerApi
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     internal struct ReplayFrameData
     {
-        public NativeReplayTick Tick;
+        public ReplayTick Tick;
         public NativeReplayInput Input;
         public NativeReplayHistory History;
     }

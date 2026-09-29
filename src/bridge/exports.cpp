@@ -38,8 +38,8 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 24 loads and queries complete frames rather than public parallel arrays.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 24; }
+// ABI 23 loads and queries complete frames rather than public parallel arrays.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
 
 // Export availability, not runtime hook readiness: replay/weapon/buy/voice and buffer release.
 extern "C" BC_EXPORT uint64_t BotController_GetCapabilities() { return 0x155FULL; }
@@ -57,7 +57,7 @@ extern "C" BC_EXPORT int BotController_GetAbiInfo(void* out, int size)
 #pragma pack(pop)
     static_assert(sizeof(AbiInfo) == 44);
     if (!out || size < static_cast<int>(sizeof(AbiInfo))) return -1;
-    const AbiInfo info{ 24, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
+    const AbiInfo info{ 23, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
                         sizeof(cs2bc::ReplaySlotState), cs2bc::motion_recorder::kMaxSlots, BotController_GetCapabilities(),
                         sizeof(cs2bc::ReplayFrameData), sizeof(cs2bc::ReplayCommandFrameData) };
     std::memcpy(out, &info, sizeof(info));

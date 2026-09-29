@@ -12,7 +12,7 @@ namespace BotControllerImpl;
 internal sealed class MotionRecording
 {
     public required int Tickrate { get; set; }
-    public required NativeReplayTick[] Ticks { get; set; }
+    public required ReplayTick[] Ticks { get; set; }
     public required SubtickMove[] Subticks { get; set; }
     public required NativeReplayInput[] Commands { get; set; }
 }
@@ -69,10 +69,10 @@ public static class MotionStore
         writer.WriteStartArray();
         for (int start = 0; start < total;)
         {
-            var batch = new NativeReplayTick[Math.Min(512, total - start)];
+            var batch = new ReplayTick[Math.Min(512, total - start)];
             if (BotController.CopyRecordedTicksRange(slot, start, batch) != batch.Length)
                 throw new InvalidDataException("Recording ticks changed during save.");
-            foreach (NativeReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
+            foreach (ReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
             start += batch.Length;
         }
         writer.WriteEndArray();
@@ -125,7 +125,7 @@ public static class MotionStore
 
         const uint eventDrop = 1U << 0;
         const uint dropReleasePose = 1U << 3;
-        foreach (NativeReplayTick tick in recording.Ticks)
+        foreach (ReplayTick tick in recording.Ticks)
         {
             if ((tick.EventFlags & eventDrop) != 0 && (tick.EventDropVectorFlags & dropReleasePose) == 0)
                 throw new InvalidDataException("Recording lacks the required drop release pose.");
