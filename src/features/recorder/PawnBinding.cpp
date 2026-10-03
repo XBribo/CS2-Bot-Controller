@@ -67,6 +67,22 @@ void ClearReplayPawn(int slot)
     if (ValidSlotIndex(slot)) g_slotPawns[slot].store(nullptr, std::memory_order_release);
 }
 
+// Retires injected buttons without changing velocity, duck transitions or ladder contact.
+void ClearReplayInputState(int slot, void* services)
+{
+    if (!ValidSlotIndex(slot)) return;
+    void* pawn = services ? ServicesToPawnField(services) : g_slotPawns[slot].load(std::memory_order_acquire);
+    const auto owner = ReadPawnControllerHandles(pawn);
+    if (owner.controllerSlot != slot || owner.originalControllerIndex < 1 ||
+        owner.controllerHandle != owner.originalControllerHandle) return;
+    if (!services && !GuardedRead(pawn, tg::g_pawnMovementServices, services)) return;
+    if (!PawnOwnsServices(pawn, services) || ServicesToPawnField(services) != pawn) return;
+    WriteField(services, tg::g_servicesButtons, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesButtons1, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesButtons2, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesDesiresDuck, uint8_t{ 0 });
+}
+
 // Returns a registered pawn only when its movement-services link is current.
 void* ResolveReplayPawn(int slot, void* services)
 {

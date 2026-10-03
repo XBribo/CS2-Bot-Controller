@@ -13,6 +13,7 @@
 #include "PawnBinding.h"
 #include "ccsbot_slot.h"
 #include "core/memory_module.h"
+#include "core/cs2_sdk/schema.h"
 #include "MotionRecorder.h"
 #include "BotController.h"
 #include "usercmd.pb.h"
@@ -49,6 +50,9 @@ constexpr uint64_t kMovementButtonMask = kInForward | kInBack | kInMoveLeft | kI
 void* g_addrProcessMovement = nullptr;
 void* g_addrPlayerRunCommand = nullptr;
 void* g_addrPhysicsSimulate = nullptr;
+using SetMoveTypeFn = void(BC_FASTCALL*)(void*, uint8_t, uint8_t);
+SetMoveTypeFn g_setMoveType = nullptr;
+int g_moveCollideOffset = -1;
 
 hooks::NativeHook<void, void*, void*> g_hookProcessMovement;
 hooks::NativeHook<void, void*, void*> g_hookPlayerRunCommand;
@@ -588,7 +592,7 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
         command.leftHandDesired = pc->left_hand_desired() ? 1 : 0;
         command.fields |= motion_recorder::kCommandFieldLeftHand;
     }
-    motion_recorder::OnCaptureCommand(slot, command);
+    motion_recorder::OnCaptureCommand(slot, services, command);
 }
 
 // Applies one recorded command before the engine simulates it.
@@ -813,6 +817,7 @@ KHook::Return<void> PhysicsSimulatePost(void*) noexcept
     if (frame.replaying)
     {
         motion_recorder::OnReplayCommit(frame.slot, frame.services, frame.seeded && frame.movementPrepared && frame.finalViewPrepared);
+        if (!motion_recorder::IsReplaying(frame.slot)) ClearReplayInputState(frame.slot, frame.services);
     }
     return { KHook::Action::Ignore };
 }
@@ -860,11 +865,20 @@ void EnsureVtableHooks(void* services)
 } // namespace
 
 // Uses the current command owner's simulation clock rather than server-global tickcount.
-bool ReadReplayTickBase(int slot, int32_t& tickBase)
+bool ReadPlayerTickBase(int slot, int32_t& tickBase)
 {
     const auto* frame = FindPhysicsFrame(slot);
-    return frame && frame->replaying && frame->controller && ControllerToSlot(frame->controller) == slot &&
+    return frame && (frame->recording || frame->replaying) && frame->controller && ControllerToSlot(frame->controller) == slot &&
            GuardedRead(frame->controller, tg::g_controllerTickBase, tickBase) && tickBase >= 0;
+}
+
+// Preserves the live collision policy and lets the engine derive its internal movement mode.
+bool InitializeReplayMoveType(void* pawn, uint8_t moveType)
+{
+    uint8_t collide = 0;
+    if (!g_setMoveType || !GuardedRead(pawn, g_moveCollideOffset, collide)) return false;
+    g_setMoveType(pawn, moveType, collide);
+    return true;
 }
 
 bool Install( // NOLINT(misc-use-internal-linkage)
@@ -873,6 +887,13 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
+    char moveTypeError[256]{};
+    g_moveCollideOffset = schema::GetFieldOffset("CBaseEntity", "m_MoveCollide");
+    g_setMoveType = reinterpret_cast<SetMoveTypeFn>(gameconfig::ResolveSig(
+        gd, serverModule, "CBaseEntity::SetMoveType", moveTypeError, sizeof(moveTypeError)));
+    if (!g_setMoveType || g_moveCollideOffset < 0)
+        BC_LOG_WARN("Replay movement type setter unavailable (%s); replay is disabled\n",
+                    moveTypeError[0] ? moveTypeError : "m_MoveCollide unavailable");
     g_addrProcessMovement = gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
     if (!g_addrProcessMovement)
     {
@@ -930,6 +951,8 @@ void Remove()
     g_addrProcessMovement = nullptr;
     g_addrPlayerRunCommand = nullptr;
     g_addrPhysicsSimulate = nullptr;
+    g_setMoveType = nullptr;
+    g_moveCollideOffset = -1;
     g_physicsActive = false;
     g_subtickActive = false;
     g_vtHooksTried.store(false, std::memory_order_release);
@@ -966,6 +989,11 @@ bool RecorderReady()
 bool ReplayReady()
 {
     if (!RecorderReady()) return false;
+    if (!g_setMoveType || g_moveCollideOffset < 0)
+    {
+        BC_LOG_WARN("Cannot start replay: engine movement type setter unavailable\n");
+        return false;
+    }
     if (!bot_controller_hooks::ReplayViewReady())
     {
         BC_LOG_WARN("Cannot start replay: SetEyeAngles/GetEyeAngles hooks unavailable\n");

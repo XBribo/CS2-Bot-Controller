@@ -80,6 +80,12 @@ int LockTargetToEngineSlot(LockTarget t)
 
 bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 
+// Normalizes knife skins without treating the slot-sharing Zeus as a knife.
+bool IsKnifeDef(int def)
+{
+    return def == kKnifeDef || def == 41 || def == 42 || def == 59 || (def >= 500 && def < 600);
+}
+
 // ---- detours ----
 
 // Blocks automatic weapon selection while a lock or replay owns it.
@@ -119,6 +125,15 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     }
 
     WsBinding bind = LookupBindingForWs(ws);
+    if (bind.slot < 0 && motion_recorder::HasAnyReplay())
+    {
+        // AI can reach SelectItem before an equipment hook has populated the slot cache.
+        void* pawn = nullptr;
+        void* liveWs = nullptr;
+        if (GuardedRead(ws, tg::g_servicesPawn, pawn) && pawn &&
+            GuardedRead(pawn, tg::g_pawnWeaponServices, liveWs) && liveWs == ws)
+            bind = { ControllerSlotForPawn(pawn), pawn };
+    }
     if (bind.slot < 0) return { KHook::Action::Ignore };
 
     // Human took over this pawn -> current m_hController != bot slot
@@ -126,7 +141,16 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     int curSlot = ControllerSlotForPawn(bind.pawn);
     if (curSlot != bind.slot) return { KHook::Action::Ignore };
 
-    if (motion_recorder::IsReplaying(bind.slot)) return { KHook::Action::Ignore };
+    if (motion_recorder::IsReplaying(bind.slot))
+    {
+        const auto controllers = ReadPawnControllerHandles(bind.pawn);
+        if (controllers.controllerHandle != controllers.originalControllerHandle) return { KHook::Action::Ignore };
+        const int desired = motion_recorder::CurrentReplayWeaponDef(bind.slot);
+        const int selected = ReadDefIndex(weapon);
+        if (desired >= 0 && selected >= 0 && (motion_recorder::ReplayWeaponDefsMatch(desired, selected) ||
+            (IsKnifeDef(desired) && IsKnifeDef(selected)))) return { KHook::Action::Ignore };
+        return { KHook::Action::Supersede, 0 };
+    }
 
     LockTarget lt = weapon_locker_state::Get(bind.slot);
     if (lt == LockTarget::None) return { KHook::Action::Ignore };
@@ -239,6 +263,14 @@ void* GetSlotAddress() { return g_addrGetSlot; }
 
 bool WeaponHooksReady() { return g_installed && g_getSlot && g_hookSelectItem.Active(); }
 
+// Invokes the native chooser without re-entering the automatic-selection lock hook.
+bool EquipBestWeaponRaw(void* bot, bool mustEquip)
+{
+    if (!bot || !g_installed || !g_hookEquipBestWeapon.Active()) return false;
+    g_hookEquipBestWeapon.CallOriginal(bot, mustEquip ? 1 : 0);
+    return true;
+}
+
 int ReadDefIndex(void* weapon)
 {
     if (!weapon) return -1;
@@ -290,6 +322,26 @@ int ActiveWeaponDef(void* ws)
     uint32_t handle = 0;
     if (!ws || !SafeRead(ws, tg::g_wsActiveWeapon, handle) || handle == 0U || handle == 0xFFFFFFFFU) return -1;
     return WeaponDefForEntityIndex(ws, static_cast<int>(handle & 0x7FFFU));
+}
+
+// Compare serial-bearing handles so a second flashbang cannot supply the first one's state.
+void* ActiveWeapon(void* ws)
+{
+    uint32_t active = 0;
+    if (!ws || !g_getSlot || !SafeRead(ws, tg::g_wsActiveWeapon, active) || active == 0 || active == UINT32_MAX) return nullptr;
+    for (int slot = 0; slot <= 4; ++slot)
+    {
+        const unsigned int count = slot == 3 ? 8U : 1U;
+        for (unsigned int pos = 0; pos < count; ++pos)
+        {
+            void* weapon = g_getSlot(ws, slot, slot == 3 ? pos : 0xFFFFFFFFU);
+            void* identity = nullptr;
+            uint32_t handle = 0;
+            if (SafeRead(weapon, tg::g_entIdentity, identity) && identity &&
+                SafeRead(identity, tg::g_entIdentityEHandle, handle) && handle == active) return weapon;
+        }
+    }
+    return nullptr;
 }
 
 void* FindWeaponByDef(void* ws, int def)

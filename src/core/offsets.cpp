@@ -5,6 +5,7 @@
 #include "nlohmann/json.hpp"
 #include "core/cs2_sdk/schema.h"
 #include "core/memory_module.h"
+#include "features/recorder/ReplaySourceState.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -68,6 +69,17 @@ int ResolveMovementField(const char* fieldName)
     return -1;
 }
 
+// Resolves optional pawn members from their declaring class in the pawn hierarchy.
+int ResolvePawnField(const char* fieldName)
+{
+    for (const char* className : { "CCSPlayerPawn", "CCSPlayerPawnBase", "CBasePlayerPawn", "CBaseEntity" })
+    {
+        const int offset = schema::GetFieldOffset(className, fieldName);
+        if (offset >= 0) return offset;
+    }
+    return -1;
+}
+
 // Flattens an embedded ModernJump member only when both Schema offsets exist.
 int ResolveModernJumpField(int modernJump, const char* fieldName)
 {
@@ -124,10 +136,27 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
 
     g_nodeAbsRotation = schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
 
+    g_botEnemy = schema::GetFieldOffset("CCSBot", "m_enemy");
+    g_botEnemyVisible = schema::GetFieldOffset("CCSBot", "m_isEnemyVisible");
+    g_botVisibleEnemyParts = schema::GetFieldOffset("CCSBot", "m_visibleEnemyParts");
+    g_botNearbyEnemyCount = schema::GetFieldOffset("CCSBot", "m_nearbyEnemyCount");
+    g_botLastEnemyDead = schema::GetFieldOffset("CCSBot", "m_isLastEnemyDead");
+    g_botLastSawEnemyTimestamp = schema::GetFieldOffset("CCSBot", "m_lastSawEnemyTimestamp");
+    g_botFirstSawEnemyTimestamp = schema::GetFieldOffset("CCSBot", "m_firstSawEnemyTimestamp");
+    g_botCurrentEnemyAcquireTimestamp = schema::GetFieldOffset("CCSBot", "m_currentEnemyAcquireTimestamp");
+
     g_controllerTickBase = schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
     if (g_controllerTickBase < 0) g_controllerTickBase = schema::GetFieldOffset("CCSPlayerController", "m_nTickBase");
     g_servicesJumpPressedTime = ResolveMovementField("m_flJumpPressedTime");
     g_servicesLastDuckTime = ResolveMovementField("m_flLastDuckTime");
+    g_servicesStamina = ResolveMovementField("m_flStamina");
+    g_pawnVelocityModifier = ResolvePawnField("m_flVelocityModifier");
+    g_entGravityScale = ResolvePawnField("m_flGravityScale");
+    g_entGravityDisabled = ResolvePawnField("m_bGravityDisabled");
+    g_entFriction = ResolvePawnField("m_flFriction");
+    g_entBaseVelocity = ResolvePawnField("m_vecBaseVelocity");
+    g_pawnAimPunchServices = ResolvePawnField("m_pAimPunchServices");
+    replay_source_state::ResolveOffsets(schema::GetFieldOffset);
     const int modernJump = schema::GetFieldOffset("CCSPlayer_MovementServices", "m_ModernJump");
     g_servicesLastActualJumpPressTick = ResolveModernJumpField(modernJump, "m_nLastActualJumpPressTick");
     g_servicesLastActualJumpPressFrac = ResolveModernJumpField(modernJump, "m_flLastActualJumpPressFrac");

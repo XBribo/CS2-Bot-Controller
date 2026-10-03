@@ -51,6 +51,15 @@ namespace BotControllerApi
         // ---- weapons ----
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
+        // Queues a best-weapon choice for the current unlocked AI owner.
+        public bool RequestEquipBestWeapon(int slot)
+            => BotController.RequestEquipBestWeapon(slot);
+        // Reads the current AI owner's native perception snapshot.
+        public bool TryGetNativePerceptionState(int slot, out BotPerceptionState state)
+            => BotController.TryGetNativePerceptionState(slot, out state);
+        // Applies the shared replay-only native FOV policy.
+        public bool SetReplayNativeFovOverride(bool enabled)
+            => BotController.SetReplayNativeFovOverride(enabled);
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
         // Creates an independently cancellable native usercmd injection
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)

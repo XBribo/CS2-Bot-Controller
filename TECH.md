@@ -85,17 +85,6 @@ if (attackInjection > 0)
 
 ## Record And Replay
 
-The public load entry point is `LoadReplay(slot, ReplayData)`. `ReplayData`
-contains `TickRate` and `Frames`; each `ReplayFrame` owns `Pre`, `Input`, `Post`,
-`SourcePlayerTick`, `Subticks`, `WeaponDefIndex`, and an optional `Drop`.
-Movement history belongs to `Pre`, not a separate public Extra buffer.
-Nullable input/history values distinguish omission from explicit zero. Tick/fraction
-pairs, landing velocity, mouse deltas, and the three engine button planes are complete groups.
-`Post` remains output reference; optional history there is not accepted as playback input.
-The private packed frame is 380 bytes; `GetAbiInfo` reports its size in the first
-former reserved word and the 68-byte input size in the second. Internal recording
-DTOs keep the existing compressed JSON file layout unchanged.
-
 The native plugin records:
 
 - origin

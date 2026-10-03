@@ -11,20 +11,9 @@ internal static class ReplayFrameCodec
     {
         frames = [];
         subs = [];
-        if (!float.IsFinite(replay.TickRate) || replay.TickRate <= 0) return false;
-        long total = 0;
-        foreach (var frame in replay.Frames)
-        {
-            if (frame is null || frame.Subticks is null || frame.Subticks.Length > 36 ||
-                frame.SourcePlayerTick is < 0 || HasHistory(frame.Post) ||
-                (HasHistory(frame.Pre) && frame.SourcePlayerTick is null) ||
-                (frame.Drop?.Target is not null && frame.Drop.BodyYaw is not null))
-                return false;
-            total += frame.Subticks.Length;
-        }
-        if (total > int.MaxValue) return false;
+        if (!Validate(replay, out int total)) return false;
         frames = new ReplayFrameData[replay.Frames.Length];
-        subs = new SubtickMove[(int)total];
+        subs = new SubtickMove[total];
         int offset = 0;
         for (int i = 0; i < frames.Length; ++i)
         {
@@ -33,11 +22,51 @@ internal static class ReplayFrameCodec
             {
                 Tick = EncodeTick(frame),
                 Input = EncodeInput(frame.Input),
-                History = EncodeHistory(frame.Pre, frame.SourcePlayerTick, replay.TickRate)
+                History = EncodeHistory(frame.Pre, frame.SourcePlayerTick, replay.TickRate),
+                MovementFields = (frame.Pre.Stamina.HasValue ? 1U : 0) |
+                                 (frame.Pre.VelocityModifier.HasValue ? 2U : 0) |
+                                 (frame.Pre.GravityScale.HasValue ? 4U : 0) |
+                                 (frame.Pre.GravityDisabled.HasValue ? 8U : 0) |
+                                 (frame.Pre.Friction.HasValue ? 16U : 0) |
+                                 (frame.Pre.BaseVelocity.HasValue ? 32U : 0),
+                Stamina = frame.Pre.Stamina ?? 0,
+                VelocityModifier = frame.Pre.VelocityModifier ?? 0,
+                GravityScale = frame.Pre.GravityScale ?? 0,
+                GravityDisabled = frame.Pre.GravityDisabled == true ? (byte)1 : (byte)0,
+                Friction = frame.Pre.Friction ?? 0,
+                BaseVelocityX = frame.Pre.BaseVelocity?.X ?? 0,
+                BaseVelocityY = frame.Pre.BaseVelocity?.Y ?? 0,
+                BaseVelocityZ = frame.Pre.BaseVelocity?.Z ?? 0,
+                Source = ReplaySourceStateCodec.Encode(frame.Pre)
             };
             frame.Subticks.CopyTo(subs, offset);
             offset += frame.Subticks.Length;
         }
+        return true;
+    }
+
+    // Share frame-shape validation with disk loading without allocating native buffers.
+    internal static bool Validate(ReplayData replay, out int subtickCount)
+    {
+        subtickCount = 0;
+        if (replay.Frames is null || !float.IsFinite(replay.TickRate) || replay.TickRate <= 0) return false;
+        long total = 0;
+        foreach (var frame in replay.Frames)
+        {
+            if (frame is null || frame.Subticks is null || frame.Subticks.Length > 36 ||
+                frame.SourcePlayerTick is < 0 || HasHistory(frame.Post) || HasModifiers(frame.Post) ||
+                (HasHistory(frame.Pre) && frame.SourcePlayerTick is null) ||
+                (frame.Drop?.Target is not null && frame.Drop.BodyYaw is not null))
+                return false;
+            var source = ReplaySourceStateCodec.Encode(frame.Pre);
+            if (!ReplaySourceStateCodec.Validate(source) ||
+                ((source.Fields & ReplaySourceStateCodec.ClockFields) != 0 && frame.SourcePlayerTick is null) ||
+                ReplaySourceStateCodec.Encode(frame.Post).Fields != 0 || frame.Post.Weapon.HasValue)
+                return false;
+            total += frame.Subticks.Length;
+        }
+        if (total > int.MaxValue) return false;
+        subtickCount = (int)total;
         return true;
     }
 
@@ -65,6 +94,30 @@ internal static class ReplayFrameCodec
         return new ReplayData { TickRate = tickRate, Frames = frames };
     }
 
+    // Decode native recordings without discarding source state or reinterpreting its clock rate.
+    internal static ReplayData FromRecording(float tickRate, ReplayFrameData[] data, SubtickMove[] subs)
+    {
+        if (!float.IsFinite(tickRate) || tickRate <= 0)
+            throw new InvalidDataException("Recording rate is invalid.");
+        var frames = new ReplayFrame[data.Length];
+        int offset = 0;
+        for (int i = 0; i < data.Length; ++i)
+        {
+            var frame = data[i];
+            uint count = frame.Tick.NumSubtick;
+            if (count > 36 || count > subs.Length - offset)
+                throw new InvalidDataException("Recording subticks do not match its frames.");
+            if (frame.History.SourceTickrate > 0 &&
+                MathF.Abs(frame.History.SourceTickrate / tickRate - 1) > 0.0001F)
+                throw new InvalidDataException("Recording rate differs from its captured source clock.");
+            frames[i] = Decode(frame, subs.AsSpan(offset, (int)count).ToArray());
+            offset += (int)count;
+        }
+        if (offset != subs.Length)
+            throw new InvalidDataException("Recording has unclaimed subticks.");
+        return new ReplayData { TickRate = tickRate, Frames = frames };
+    }
+
     // Decode presence independently of zero, including the recorded clock and drop event.
     internal static ReplayFrame Decode(ReplayFrameData data, SubtickMove[] subticks)
     {
@@ -76,6 +129,14 @@ internal static class ReplayFrameCodec
         if ((history.Fields & 8) != 0) pre.LastUsableJumpPress = new(history.LastUsableJumpPressTick, history.LastUsableJumpPressFrac);
         if ((history.Fields & 16) != 0) pre.LastLanded = new(history.LastLandedTick, history.LastLandedFrac);
         if ((history.Fields & 32) != 0) pre.LastLandedVelocity = new Vector3(history.LastLandedVelocityX, history.LastLandedVelocityY, history.LastLandedVelocityZ);
+        if ((data.MovementFields & 1) != 0) pre.Stamina = data.Stamina;
+        if ((data.MovementFields & 2) != 0) pre.VelocityModifier = data.VelocityModifier;
+        if ((data.MovementFields & 4) != 0) pre.GravityScale = data.GravityScale;
+        if ((data.MovementFields & 8) != 0) pre.GravityDisabled = data.GravityDisabled != 0;
+        if ((data.MovementFields & 16) != 0) pre.Friction = data.Friction;
+        if ((data.MovementFields & 32) != 0) pre.BaseVelocity = new Vector3(data.BaseVelocityX, data.BaseVelocityY, data.BaseVelocityZ);
+        if (!ReplaySourceStateCodec.Validate(data.Source)) throw new InvalidDataException("Recording source state is invalid.");
+        ReplaySourceStateCodec.Decode(data.Source, ref pre);
         return new ReplayFrame
         {
             SourcePlayerTick = history.SourcePlayerTick >= 0 ? history.SourcePlayerTick : null,
@@ -89,6 +150,12 @@ internal static class ReplayFrameCodec
         => snapshot.JumpPressedTime.HasValue || snapshot.LastDuckTime.HasValue ||
            snapshot.LastActualJumpPress.HasValue || snapshot.LastUsableJumpPress.HasValue ||
            snapshot.LastLanded.HasValue || snapshot.LastLandedVelocity.HasValue;
+
+    // Modifiers have no source-clock dependency, but are also pre-command input only.
+    private static bool HasModifiers(MovementSnapshot snapshot)
+        => snapshot.Stamina.HasValue || snapshot.VelocityModifier.HasValue ||
+           snapshot.GravityScale.HasValue || snapshot.GravityDisabled.HasValue ||
+           snapshot.Friction.HasValue || snapshot.BaseVelocity.HasValue;
 
     // Preserve the accepted disk/native prefix without publishing padding or field masks.
     private static MovementSnapshot DecodeSnapshot(NativeMovementSnapshot value) => new()

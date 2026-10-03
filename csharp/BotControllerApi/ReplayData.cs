@@ -12,7 +12,6 @@ public sealed class ReplayData
 
 public sealed class ReplayFrame
 {
-    // Recorded pre-command player tickbase, not the demo's global tick.
     public int? SourcePlayerTick { get; init; }
     public MovementSnapshot Pre { get; init; }
     public ReplayInput Input { get; init; }
@@ -22,7 +21,7 @@ public sealed class ReplayFrame
     public ReplayDrop? Drop { get; init; }
 }
 
-// Optional history is restored from Pre; Post describes the recorded output.
+// Optional source state is restored from Pre; Post describes the recorded output.
 public struct MovementSnapshot
 {
     public float OriginX, OriginY, OriginZ;
@@ -41,9 +40,41 @@ public struct MovementSnapshot
     public ReplayTimestamp? LastUsableJumpPress;
     public ReplayTimestamp? LastLanded;
     public Vector3? LastLandedVelocity;
+    // Supplied modifiers are seeded at replay boundaries; null leaves engine state alone.
+    public float? Stamina, VelocityModifier, GravityScale, Friction;
+    public bool? GravityDisabled;
+    // External velocity is one complete vector, not the player's own VelXYZ.
+    public Vector3? BaseVelocity;
+    // Additional command inputs; nullable groups never invent missing engine state.
+    public float? DuckRoot, DuckView;
+    public bool? DuckOverride;
+    public ReplayTimestamp? LastJump;
+    public float? LastJumpVelocityZ;
+    public bool? UsingGroundTopology;
+    public float? GroundTopologySmoothing, FrictionStashedSpeed;
+    public bool? UseFrictionStashedSpeed;
+    public float? FrictionStashedUntilFraction, FallVelocity;
+    public int? LadderSurface, ShotsFired;
+    public bool? Scoped;
+    public Vector3? PredictableAngle, PredictableAngleVelocity, UnpredictableAngle;
+    public ReplayTimestamp? PredictableAngleTime;
+    public int? UnpredictableAngleTick;
+    public ReplayWeaponState? Weapon;
 }
 
 public readonly record struct ReplayTimestamp(int Tick, float Fraction);
+
+// Pre-command weapon state belongs to this item definition, not a source entity handle.
+// Ammunition and reload state remain owned by the live engine.
+public struct ReplayWeaponState
+{
+    public int DefIndex;
+    // Opaque recording-local identity, used only to distinguish instances of the same item.
+    public uint? InstanceId;
+    public ReplayTimestamp? NextPrimaryAttack, NextSecondaryAttack;
+    public float? RecoilIndex, AccuracyPenalty, LastShotTime, NextAttack;
+    public int? BurstShotsRemaining;
+}
 
 // The three CS2 button planes must be supplied or omitted together.
 public readonly record struct ReplayButtons(ulong Held, ulong Changed, ulong PressedAndReleased);

@@ -76,6 +76,15 @@ namespace BotControllerApi
         // Switch a bot to the weapon with this def index.
         bool SwitchBotWeapon(int slot, int defIndex);
 
+        // Queues one native AI weapon choice after Update; true means accepted, not already equipped.
+        bool RequestEquipBestWeapon(int slot);
+
+        // Reads native AI evidence only for the current bot/pawn incarnation.
+        bool TryGetNativePerceptionState(int slot, out BotPerceptionState state);
+
+        // Disables only the FOV cone during replay; native LOS and smoke checks remain authoritative.
+        bool SetReplayNativeFovOverride(bool enabled);
+
         // Def index of the bot's current active weapon. <0 if unresolved.
         int BotActiveWeaponDef(int slot);
 

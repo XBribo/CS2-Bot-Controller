@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BotController VERSION 0.7.0 LANGUAGES CXX)
+project(BotController VERSION 0.7.1 LANGUAGES CXX)
 
 # The base version lives here; -DPLUGIN_VERSION overrides it for a build.
 if(NOT DEFINED PLUGIN_VERSION)
@@ -210,6 +210,7 @@ add_library(
     src/features/recorder/InputInjector.cpp
     src/features/recorder/PawnBinding.cpp
     src/features/recorder/MotionRecorder.cpp
+    src/features/recorder/ReplaySourceState.cpp
     src/features/voice/VoiceSender.cpp
     src/features/profile/BotProfile.cpp
     src/core/memory_module.cpp

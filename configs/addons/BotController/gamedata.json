@@ -1,4 +1,12 @@
 {
+  "CBaseEntity::SetMoveType": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 41 0F B6 F0 0F B6 EA",
+      "linux": "55 48 89 E5 41 57 49 89 FF 41 56 41 55 41 54 53 89 D3 48 81 EC ? ? ? ? 40 38 B7 ? ? ? ? 0F 84 ? ? ? ? 4C 8B 25"
+    },
+    "comment": "Engine movement type setter; derives actual mode and runs physics change callbacks."
+  },
   "CBaseEntity_Teleport": {
     "offsets": {
       "windows": 165,
@@ -36,6 +44,38 @@
       "linux": "55 48 89 E5 41 57 41 56 41 55 41 54 53 89 F3 48 83 EC ? 48 63 77"
     },
     "comment": "Returns the weapon in engine slot N"
+  },
+  "CCSBot::IsVisiblePos": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8D 05",
+      "linux": "55 48 8D 05 ? ? ? ? 48 89 E5 41 57 4C 8D BD ? ? ? ? 41 56 41 55 41 54 49 89 CC 53 48 89 FB 48 8D 3D ? ? ? ? 48 81 EC ? ? ? ? 48 89 B5 ? ? ? ? 89 95"
+    },
+    "comment": "Native replay FOV override; preserves LOS and smoke."
+  },
+  "CCSBot::IsVisiblePlayer": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 08 44 88 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC 90 00 00 00",
+      "linux": "55 48 8D 05 ? ? ? ? 48 89 E5 41 57 4C 8D 7D ? 41 56 41 89 D6 41 55 4C 89 FA 41 54 49 89 FC 53 48 8D 3D ? ? ? ? 48 89 F3 48 8D 35"
+    },
+    "comment": "Player visibility overload for replay-only FOV override."
+  },
+  "CCSBot::LadderStateUpdate": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC 20 80 79 14 00 48 8B D9 74 ? 48 8B 01 C6 41 14 00 48 83 B8 78 4F 00 00 00 74 ?",
+      "linux": "80 7F 14 00 0F 84 ? ? ? ? 55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC ? 48 8B 07 C6 47 14 00 48 83 B8 ? ? ? ? 00 74 ? E8"
+    },
+    "comment": "AI ladder navigation wrapper; blocks mount Teleport during replay."
+  },
+  "CCSBot::InvalidatePath": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC 20 48 8B D9 C6 81 ? ? ? ? 00 48 C7 81 ? ? ? ? 00 00 00 00 48 81 C1 ? ? ? ? 48 8B 01 FF 50 08",
+      "linux": "55 48 8D BE ? ? ? ? 48 89 E5 53 48 89 F3 48 83 EC ? C6 86 ? ? ? ? 00 48 C7 86 ? ? ? ? 00 00 00 00 E8 ? ? ? ? C6 83 ? ? ? ? 00 C6 83 ? ? ? ? 00 48 8B 5D ? C9 C3"
+    },
+    "comment": "Retires suppressed AI navigation after replay without changing player physics. Linux uses the equivalent path-state exit with (unused state, bot); Windows takes (bot)."
   },
   "CCSBot::Update": {
     "signatures": {

@@ -30,6 +30,23 @@ namespace BotControllerApi
         Slot5 = 5,
     }
 
+    // Read-only native AI evidence; consumers own contact and handoff decisions.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct BotPerceptionState
+    {
+        public int Valid;
+        public uint EnemyHandle;
+        public int HasEnemy;
+        public int EnemyVisible;
+        public int VisibleEnemyParts;
+        public int NearbyEnemyCount;
+        public int LastEnemyDead;
+        public float LastSawEnemyTimestamp;
+        public float FirstSawEnemyTimestamp;
+        public float CurrentEnemyAcquireTimestamp;
+        public uint UpdateSerial;
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     internal struct NativeMovementSnapshot
     {
@@ -127,8 +144,24 @@ namespace BotControllerApi
         public float LastLandedVelocityX;
         public float LastLandedVelocityY;
         public float LastLandedVelocityZ;
-        public int SourcePlayerTick; // Recorded pre-command player tickbase, not the demo tick.
+        public int SourcePlayerTick;
         public float SourceTickrate; // Must match the live engine rate; timestamps <= 0 are sentinels.
+    }
+
+    // Private source-state scalars; vector and timestamp components have joint presence.
+    [System.Runtime.CompilerServices.InlineArray(36)]
+    internal struct NativeSourceValues
+    {
+        private uint _element0;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct NativeReplaySourceState
+    {
+        public ulong Fields;
+        public int WeaponDefIndex;
+        public uint WeaponInstanceId;
+        public NativeSourceValues Values;
     }
 
     // Private native transport; callers only construct ReplayData/ReplayFrame.
@@ -138,6 +171,13 @@ namespace BotControllerApi
         public ReplayTick Tick;
         public NativeReplayInput Input;
         public NativeReplayHistory History;
+        public uint MovementFields;
+        public float Stamina, VelocityModifier, GravityScale;
+        public byte GravityDisabled;
+        public byte Pad0, Pad1, Pad2;
+        public float Friction;
+        public float BaseVelocityX, BaseVelocityY, BaseVelocityZ;
+        public NativeReplaySourceState Source;
     }
 
     // Includes an idle slot's terminal cursor; Playing remains authoritative.

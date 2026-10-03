@@ -19,11 +19,13 @@
 #include <cstddef>
 #include <mutex>
 #include <limits>
+#include <utility>
 #include <vector> // NOLINT(misc-include-cleaner)
 
 #include <convar.h>
 #include <eiface.h>
 #include <playerslot.h>
+#include <entity2/entityinstance.h>
 
 namespace tg = cs2bc::offsets;
 
@@ -38,22 +40,19 @@ struct RecordState
     };
 
     std::atomic<bool> recording{ false };
-    std::vector<ReplayTick> ticks;
+    std::vector<ReplayFrameData> frames;
     std::vector<SubtickMove> subs;
-    std::vector<ReplayCommandFrameData> commands;
     // Subtick moves seen on PlayerRunCommand, awaiting the matching
     // PhysicsSimulate post that commits them to a tick.
     std::vector<SubtickMove> pendingSubs;
-    ReplayCommandFrameData pendingCommand{};
-    bool havePendingCommand{ false };
-    MovementSnapshot pendingPre{};
+    ReplayFrameData pendingFrame{ .history = { .sourcePlayerTick = -1 } };
     bool havePre{ false };
     uint32_t pendingEventFlags{ ReplayEventNone };
     ReplayDropEvent pendingDropEvent{ .weaponDefIndex = -1, .vectorFlags = ReplayDropVectorNone, .target = {}, .velocity = {} };
     std::vector<DropCandidate> pendingDropCandidates;
     std::atomic<void*> liveWs{ nullptr };
     std::atomic<int> currentDef{ -1 };
-    std::mutex mu; // guards ticks/subs/pending/pre
+    std::mutex mu; // guards frames/subs/pending/pre
 };
 
 struct ReplayState
@@ -72,6 +71,7 @@ struct ReplayState
     std::atomic<int> lastAppliedDef{ -1 };
     int lastEventCursor{ -1 };
     int lastFinalViewCursor{ -1 }; // guards camera reads after the simulation cursor advances
+    std::vector<std::pair<uint32_t, uint32_t>> restoredWeapons; // source instance -> live handle
     std::mutex mu; // guards frames/subs/subOffset
 };
 
@@ -385,6 +385,110 @@ bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
            ReadVector3(node, tg::g_nodeAbsOrigin, out.originX, out.originY, out.originZ);
 }
 
+// Optional floating-point state is present only after a finite guarded read.
+bool ReadSourceFloat(void* base, int offset, float& out)
+{
+    return SafeRead(base, offset, out) && std::isfinite(out);
+}
+
+// Capture tick/fraction pairs together, preserving inactive tick sentinels.
+bool ReadSourceTimestamp(void* services, int tickOffset, int fractionOffset, int32_t& tick, float& fraction)
+{
+    return SafeRead(services, tickOffset, tick) && ReadSourceFloat(services, fractionOffset, fraction) &&
+           fraction >= 0.0F && fraction < 1.0F;
+}
+
+// Resolve source targets from the current pawn; weapon state never targets a source handle.
+replay_source_state::Targets SourceTargets(void* pawn, void* services, int weaponDef)
+{
+    void* aim = nullptr;
+    void* ws = nullptr;
+    if (tg::g_pawnAimPunchServices >= 0) SafeRead(pawn, tg::g_pawnAimPunchServices, aim);
+    SafeRead(pawn, tg::g_pawnWeaponServices, ws);
+    void* weapon = weaponDef > 0 && ws ? FindReplayWeaponByDef(ws, weaponDef) : nullptr;
+    return { services, pawn, aim, weapon, ws };
+}
+
+// Read a serial-bearing weapon identity for one-shot restoration and respawn detection.
+bool WeaponInstance(void* weapon, uint32_t& handle)
+{
+    void* identity = nullptr;
+    return SafeRead(weapon, tg::g_entIdentity, identity) && identity &&
+           SafeRead(identity, tg::g_entIdentityEHandle, handle) && handle != 0 && handle != UINT32_MAX;
+}
+
+// Publish one initialized boundary, including nested movement/aim service state.
+void PublishSourceState(void* entity)
+{
+    if (!entity) return;
+    const NetworkStateChangedData changed(true);
+    reinterpret_cast<CEntityInstance*>(entity)->NetworkStateChanged(changed);
+}
+
+// Read source inputs at PlayerRunCommand-pre, using that command's player clock.
+void ReadSourceState(int slot, void* services, ReplayFrameData& frame)
+{
+    frame.history.sourcePlayerTick = -1;
+    void* pawn = input_injector::ResolveReplayPawn(slot, services);
+    if (!pawn) return;
+    const struct FloatRead
+    {
+        uint32_t field;
+        void* base;
+        int offset;
+        float* value;
+    } reads[] = {
+        { ReplayMovementStamina, services, tg::g_servicesStamina, &frame.stamina },
+        { ReplayMovementVelocityModifier, pawn, tg::g_pawnVelocityModifier, &frame.velocityModifier },
+        { ReplayMovementGravityScale, pawn, tg::g_entGravityScale, &frame.gravityScale },
+        { ReplayMovementFriction, pawn, tg::g_entFriction, &frame.friction },
+    };
+    for (const auto& read : reads)
+        if (ReadSourceFloat(read.base, read.offset, *read.value)) frame.movementFields |= read.field;
+    if (SafeRead(pawn, tg::g_entGravityDisabled, frame.gravityDisabled) && frame.gravityDisabled <= 1)
+        frame.movementFields |= ReplayMovementGravityDisabled;
+    if (ReadVector3(pawn, tg::g_entBaseVelocity, frame.baseVelocityX, frame.baseVelocityY, frame.baseVelocityZ) &&
+        std::isfinite(frame.baseVelocityX) && std::isfinite(frame.baseVelocityY) && std::isfinite(frame.baseVelocityZ))
+        frame.movementFields |= ReplayMovementBaseVelocity;
+
+    auto& history = frame.history;
+    const float interval = interfaces::TickInterval();
+    if (std::isfinite(interval) && interval > 0.0F && std::isfinite(1.0F / interval))
+        history.sourceTickrate = 1.0F / interval;
+    const bool haveClock = input_injector::ReadPlayerTickBase(slot, history.sourcePlayerTick) && history.sourceTickrate > 0.0F;
+    if (!haveClock) history.sourcePlayerTick = -1;
+    void* ws = nullptr;
+    SafeRead(pawn, tg::g_pawnWeaponServices, ws);
+    const int weaponDef = weapon_locker_hooks::ActiveWeaponDef(ws);
+    auto targets = SourceTargets(pawn, services, weaponDef);
+    targets[3] = weapon_locker_hooks::ActiveWeapon(ws);
+    uint32_t instance = 0;
+    if (!WeaponInstance(targets[3], instance)) targets[3] = nullptr;
+    replay_source_state::Capture(targets, weaponDef, instance, history.sourcePlayerTick, TryReadMemory, frame.source);
+    if (!haveClock)
+    {
+        history.sourcePlayerTick = -1;
+        return;
+    }
+    if (ReadSourceFloat(services, tg::g_servicesJumpPressedTime, history.jumpPressedTime))
+        history.fields |= ReplayHistoryJumpPressedTime;
+    if (ReadSourceFloat(services, tg::g_servicesLastDuckTime, history.lastDuckTime))
+        history.fields |= ReplayHistoryLastDuckTime;
+    if (ReadSourceTimestamp(services, tg::g_servicesLastActualJumpPressTick, tg::g_servicesLastActualJumpPressFrac,
+                            history.lastActualJumpPressTick, history.lastActualJumpPressFrac))
+        history.fields |= ReplayHistoryLastActualJumpPress;
+    if (ReadSourceTimestamp(services, tg::g_servicesLastUsableJumpPressTick, tg::g_servicesLastUsableJumpPressFrac,
+                            history.lastUsableJumpPressTick, history.lastUsableJumpPressFrac))
+        history.fields |= ReplayHistoryLastUsableJumpPress;
+    if (ReadSourceTimestamp(services, tg::g_servicesLastLandedTick, tg::g_servicesLastLandedFrac,
+                            history.lastLandedTick, history.lastLandedFrac))
+        history.fields |= ReplayHistoryLastLanded;
+    if (ReadSourceFloat(services, tg::g_servicesLastLandedVelocityX, history.lastLandedVelocityX) &&
+        ReadSourceFloat(services, tg::g_servicesLastLandedVelocityY, history.lastLandedVelocityY) &&
+        ReadSourceFloat(services, tg::g_servicesLastLandedVelocityZ, history.lastLandedVelocityZ))
+        history.fields |= ReplayHistoryLastLandedVelocity;
+}
+
 // ---- recording ----
 
 } // namespace
@@ -409,20 +513,18 @@ bool StartRecord(int slot)
     RecordState& r = g_rec[slot];
     {
         std::scoped_lock lk(r.mu);
-        r.ticks.clear();
+        r.frames.clear();
         r.subs.clear();
-        r.commands.clear();
         r.pendingSubs.clear();
-        r.pendingCommand = {};
-        r.havePendingCommand = false;
+        r.pendingFrame = {};
+        r.pendingFrame.history.sourcePlayerTick = -1;
         r.havePre = false;
         r.pendingEventFlags = ReplayEventNone;
         r.pendingDropEvent = {};
         r.pendingDropEvent.weaponDefIndex = -1;
         r.pendingDropCandidates.clear();
-        r.ticks.reserve(4096); // ~64s @ 64 tick
+        r.frames.reserve(4096); // ~64s @ 64 tick
         r.subs.reserve(4096);
-        r.commands.reserve(4096);
     }
     r.currentDef.store(-1, std::memory_order_relaxed);
     r.liveWs.store(nullptr, std::memory_order_relaxed);
@@ -449,7 +551,7 @@ int RecordedTickCount(int slot)
     if (!ValidSlot(slot)) return -1;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    return static_cast<int>(r.ticks.size());
+    return static_cast<int>(r.frames.size());
 }
 
 int RecordedSubtickCount(int slot)
@@ -466,7 +568,7 @@ int RecordedCommandCount(int slot)
     if (!ValidSlot(slot)) return -1;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    return static_cast<int>(r.commands.size());
+    return static_cast<int>(r.frames.size());
 }
 
 void SetLiveWs(int slot, void* ws)
@@ -492,7 +594,7 @@ void OnCapturePre(int slot, void* services, void* cmd)
     MovementSnapshot pre{};
     if (!ReadSnapshot(slot, services, pre)) return;
     std::scoped_lock lk(r.mu);
-    r.pendingPre = pre;
+    r.pendingFrame.tick.pre = pre;
     r.havePre = true;
 }
 
@@ -509,14 +611,17 @@ void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
 }
 
 // Stashes the command frame until the matching movement tick is committed
-void OnCaptureCommand(int slot, const ReplayCommandFrameData& command)
+void OnCaptureCommand(int slot, void* services, const ReplayCommandFrameData& command)
 {
     if (!ValidSlot(slot)) return;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return;
+    ReplayFrameData frame{};
+    ReadSourceState(slot, services, frame);
+    frame.input = command;
     std::scoped_lock lk(r.mu);
-    r.pendingCommand = command;
-    r.havePendingCommand = true;
+    frame.tick.pre = r.pendingFrame.tick.pre;
+    r.pendingFrame = frame;
 }
 
 void OnCapturePost(int slot, void* services, void* cmd)
@@ -556,8 +661,9 @@ void OnCapturePost(int slot, void* services, void* cmd)
             ++i;
         }
 
-        ReplayTick t{};
-        t.pre = r.havePre ? r.pendingPre : post;
+        ReplayFrameData frame = r.pendingFrame;
+        auto& t = frame.tick;
+        t.pre = r.havePre ? t.pre : post;
         t.post = post;
         t.weaponDefIndex = def;
         subtickCount = static_cast<uint32_t>(r.pendingSubs.size());
@@ -580,11 +686,10 @@ void OnCapturePost(int slot, void* services, void* cmd)
         t.eventDropReleaseQuatW = r.pendingDropEvent.releaseQuaternion[3];
         for (const auto& sm : r.pendingSubs)
             r.subs.push_back(sm);
-        r.ticks.push_back(t);
-        r.commands.push_back(r.havePendingCommand ? r.pendingCommand : ReplayCommandFrameData{});
+        r.frames.push_back(frame);
         r.pendingSubs.clear();
-        r.pendingCommand = {};
-        r.havePendingCommand = false;
+        r.pendingFrame = {};
+        r.pendingFrame.history.sourcePlayerTick = -1;
         r.havePre = false;
         r.pendingEventFlags = ReplayEventNone;
         r.pendingDropEvent = {};
@@ -594,15 +699,27 @@ void OnCapturePost(int slot, void* services, void* cmd)
 
 int CopyTicks(int slot, ReplayTick* out, int maxTicks) { return CopyTicksRange(slot, 0, out, maxTicks); }
 
+// Copies complete stopped-recording frames without exposing another source-state buffer.
+int CopyFramesRange(int slot, int start, ReplayFrameData* out, int maxFrames)
+{
+    if (!ValidSlot(slot) || start < 0 || !out || maxFrames <= 0) return 0;
+    RecordState& r = g_rec[slot];
+    std::scoped_lock lk(r.mu);
+    if (r.recording.load(std::memory_order_acquire)) return 0;
+    const int n = std::min(maxFrames, std::max(0, static_cast<int>(r.frames.size()) - start));
+    for (int i = 0; i < n; ++i) out[i] = r.frames[start + i];
+    return n;
+}
+
 // Copies one bounded range without locking for the full recording length.
 int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks)
 {
     if (!ValidSlot(slot) || start < 0 || !out || maxTicks <= 0) return 0;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    int n = std::min(maxTicks, std::max(0, static_cast<int>(r.ticks.size()) - start));
+    int n = std::min(maxTicks, std::max(0, static_cast<int>(r.frames.size()) - start));
     for (int i = 0; i < n; ++i)
-        out[i] = r.ticks[start + i];
+        out[i] = r.frames[start + i].tick;
     return n;
 }
 
@@ -629,9 +746,9 @@ int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxC
     if (!ValidSlot(slot) || start < 0 || !out || maxCommands <= 0) return 0;
     RecordState& r = g_rec[slot];
     std::scoped_lock lk(r.mu);
-    int n = std::min(maxCommands, std::max(0, static_cast<int>(r.commands.size()) - start));
+    int n = std::min(maxCommands, std::max(0, static_cast<int>(r.frames.size()) - start));
     for (int i = 0; i < n; ++i)
-        out[i] = r.commands[start + i];
+        out[i] = r.frames[start + i].input;
     return n;
 }
 
@@ -682,6 +799,20 @@ bool ValidReplayHistory(const ReplayHistoryData& extra)
     return (fields & ReplayHistoryLastLandedVelocity) == 0 ||
            (std::isfinite(extra.lastLandedVelocityX) && std::isfinite(extra.lastLandedVelocityY) && std::isfinite(extra.lastLandedVelocityZ));
 }
+
+// Modifiers require finite selected values, not a timestamp or a player clock.
+bool ValidReplayMovement(const ReplayFrameData& frame)
+{
+    const uint32_t fields = frame.movementFields;
+    return (fields & ~ReplayMovementAll) == 0 &&
+           ((fields & ReplayMovementStamina) == 0 || std::isfinite(frame.stamina)) &&
+           ((fields & ReplayMovementVelocityModifier) == 0 || std::isfinite(frame.velocityModifier)) &&
+           ((fields & ReplayMovementGravityScale) == 0 || std::isfinite(frame.gravityScale)) &&
+           ((fields & ReplayMovementGravityDisabled) == 0 || frame.gravityDisabled <= 1) &&
+           ((fields & ReplayMovementFriction) == 0 || std::isfinite(frame.friction)) &&
+           ((fields & ReplayMovementBaseVelocity) == 0 ||
+            (std::isfinite(frame.baseVelocityX) && std::isfinite(frame.baseVelocityY) && std::isfinite(frame.baseVelocityZ)));
+}
 } // namespace
 
 // Validate, stage, and atomically replace one frame buffer and its subtick storage.
@@ -700,7 +831,8 @@ bool LoadReplay(int slot, float tickRate, const ReplayFrameData* frames, int fra
         {
             auto history = frames[i].history;
             history.sourceTickrate = tickRate;
-            if (!ValidReplayHistory(history)) return false;
+            if (!ValidReplayHistory(history) || !ValidReplayMovement(frames[i]) ||
+                !replay_source_state::Validate(frames[i].source, history.sourcePlayerTick, tickRate)) return false;
             const auto& tick = frames[i].tick;
             if (tick.numSubtick > kMaxSubtickPerTick) return false;
             if ((tick.eventFlags & ReplayEventDrop) != 0)
@@ -734,6 +866,7 @@ bool LoadReplay(int slot, float tickRate, const ReplayFrameData* frames, int fra
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
+        p.restoredWeapons.clear();
         return true;
     }
     catch (...)
@@ -769,10 +902,11 @@ bool StartReplayRange(int slot, bool loop, int startIndex, int holdBeforeIndex)
             p.startCursor = startIndex;
             p.lastFinalViewCursor = -1;
             p.needsInitialTeleport.store(true, std::memory_order_release);
+            p.needsHistory.store(true, std::memory_order_release);
+            p.restoredWeapons.clear();
         }
         p.holdBeforeCursor = holdBeforeIndex;
-        // A resumed hold only rebases history; its engine-generated pose is not teleported.
-        p.needsHistory.store(true, std::memory_order_release);
+        // A resumed pre-roll hold is continuous simulation; keep its evolved source state.
         p.holding.store(false, std::memory_order_release);
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
@@ -801,10 +935,16 @@ bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
 bool StopReplay(int slot)
 {
     if (!ValidSlot(slot)) return false;
-    g_rep[slot].playing.store(false, std::memory_order_release);
+    const bool wasPlaying = g_rep[slot].playing.exchange(false, std::memory_order_acq_rel);
     g_rep[slot].holding.store(false, std::memory_order_release);
     g_rep[slot].needsHistory.store(false, std::memory_order_release);
+    g_rep[slot].restoredWeapons.clear();
     g_replayingSlots.fetch_and(~(uint64_t{ 1 } << slot), std::memory_order_release);
+    if (wasPlaying)
+    {
+        input_injector::ClearReplayInputState(slot);
+        input_injector::ClearUsercmdInjections(slot);
+    }
     input_injector::ClearReplayPawn(slot);
     return true;
 }
@@ -996,7 +1136,6 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
     return true;
 }
 
-// Mirrors DemoTracer's getter view: keep the last completed post view until FinishMove prepares another.
 bool ReplaySpectatorView(int slot, MovementSnapshot& out)
 {
     if (!ValidSlot(slot) || !IsReplaying(slot)) return false;
@@ -1220,7 +1359,7 @@ bool PrepareHistoryWrites(int slot, ReplayHistoryData extra, std::array<HistoryW
     {
         int32_t liveTick = 0;
         const float interval = interfaces::TickInterval();
-        if (!input_injector::ReadReplayTickBase(slot, liveTick) || !std::isfinite(interval) || interval <= 0.0F ||
+        if (!input_injector::ReadPlayerTickBase(slot, liveTick) || !std::isfinite(interval) || interval <= 0.0F ||
             std::fabs(static_cast<double>(extra.sourceTickrate) * interval - 1.0) > 0.0001)
         {
             BC_LOG_WARN("Cannot restore movement history for slot %d: player clock unavailable or tickrates differ\n", slot);
@@ -1325,8 +1464,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
     if (!pawn) return false;
 
     WriteMovementServiceState(services, pre);
-    WriteField(pawn, tg::g_entMoveType, pre.moveType);
-    WriteField(pawn, tg::g_entActualMoveType, pre.actualMoveType);
+    if (!input_injector::InitializeReplayMoveType(pawn, pre.moveType)) return false;
     uint32_t flags = 0;
     if (SafeRead(pawn, tg::g_entFlags, flags))
     {
@@ -1337,7 +1475,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
 }
 } // namespace
 
-// Initializes at start/seek/loop, or rebases history after a hold; subsequent movement is engine-owned.
+// Seeds movement only at boundaries and each source/live weapon instance only once.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView)
 {
     if (!ValidSlot(slot) || !services || !IsReplaying(slot)) return false;
@@ -1349,16 +1487,108 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
         return false;
     }
     ReplayState& p = g_rep[slot];
-    std::array<HistoryWrite, 11> extraWrites{};
-    if (p.needsHistory.exchange(false, std::memory_order_acq_rel))
+    ReplayFrameData frame{};
+    bool hasFrame = false;
     {
-        ReplayHistoryData extra{};
+        std::scoped_lock lk(p.mu);
+        const int cur = p.cursor.load(std::memory_order_relaxed);
+        if (cur >= 0 && static_cast<size_t>(cur) < p.frames.size())
         {
-            std::scoped_lock lk(p.mu);
-            const int cur = p.cursor.load(std::memory_order_relaxed);
-            if (cur >= 0 && static_cast<size_t>(cur) < p.frames.size()) extra = p.frames[cur].history;
+            frame = p.frames[cur];
+            hasFrame = true;
         }
-        if (!PrepareHistoryWrites(slot, extra, extraWrites))
+    }
+    if (!hasFrame)
+    {
+        StopReplay(slot);
+        return false;
+    }
+    const bool initializeMovement = p.needsHistory.exchange(false, std::memory_order_acq_rel);
+    if (!initializeMovement) frame.movementFields = 0;
+    auto selectedSource = frame.source;
+    if (!initializeMovement) selectedSource.fields &= replay_source_state::kWeaponFields;
+    auto sourceTargets = SourceTargets(pawn, services, selectedSource.weaponDefIndex);
+    std::pair<uint32_t, uint32_t> weaponKey{};
+    bool restoreWeapon = (selectedSource.fields & replay_source_state::kWeaponFields) != 0;
+    if (restoreWeapon)
+    {
+        uint32_t liveHandle = 0;
+        if (!WeaponInstance(sourceTargets[3], liveHandle))
+        {
+            if (initializeMovement)
+            {
+                // Report the failing lookup stage once per initialization, not every pending command.
+                void* identity = nullptr;
+                uint32_t candidateHandle = 0;
+                uint32_t activeHandle = UINT32_MAX;
+                const bool identityRead = SafeRead(sourceTargets[3], tg::g_entIdentity, identity);
+                const bool handleRead = identityRead && identity &&
+                    SafeRead(identity, tg::g_entIdentityEHandle, candidateHandle);
+                SafeRead(sourceTargets[4], tg::g_wsActiveWeapon, activeHandle);
+                const char* reason = !sourceTargets[4] ? "weapon_services_unavailable" :
+                    !sourceTargets[3] ? "inventory_lookup_failed" :
+                    !identityRead ? "identity_read_failed" : !identity ? "identity_missing" :
+                    !handleRead ? "handle_read_failed" : "invalid_handle";
+                BC_LOG_WARN("Source weapon restore deferred for slot %d: item=%d reason=%s pawn=%p ws=%p weapon=%p "
+                    "active=0x%08x active_item=%d handle=0x%08x offsets[ws=%d,item=%d,identity=%d,handle=%d]\n",
+                    slot, selectedSource.weaponDefIndex, reason, pawn, sourceTargets[4], sourceTargets[3],
+                    activeHandle, weapon_locker_hooks::ActiveWeaponDef(sourceTargets[4]), candidateHandle,
+                    tg::g_pawnWeaponServices, tg::g_weaponItemDefIndex, tg::g_entIdentity, tg::g_entIdentityEHandle);
+            }
+            // Loadout grants can settle on a later command; leave this instance unrestored.
+            restoreWeapon = false;
+        }
+        else
+        {
+            weaponKey = { selectedSource.weaponInstanceId != 0 ? selectedSource.weaponInstanceId :
+                          static_cast<uint32_t>(selectedSource.weaponDefIndex), liveHandle };
+            restoreWeapon = std::find(p.restoredWeapons.begin(), p.restoredWeapons.end(), weaponKey) == p.restoredWeapons.end();
+        }
+        if (!restoreWeapon) selectedSource.fields &= ~replay_source_state::kWeaponFields;
+    }
+    int32_t liveTick = -1;
+    if ((selectedSource.fields & replay_source_state::kClockFields) != 0 && !input_injector::ReadPlayerTickBase(slot, liveTick))
+    {
+        StopReplay(slot);
+        return false;
+    }
+    replay_source_state::Writes sourceWrites{};
+    if (!replay_source_state::Prepare(sourceTargets, selectedSource, frame.history.sourcePlayerTick,
+                                      frame.history.sourceTickrate, liveTick, interfaces::TickInterval(), sourceWrites))
+    {
+        BC_LOG_WARN("Cannot restore source state for slot %d: unavailable target or invalid clock\n", slot);
+        StopReplay(slot);
+        return false;
+    }
+    // Validate all selected targets before teleport or any source-state writes.
+    const struct MovementWrite
+    {
+        uint32_t field;
+        int offset;
+        const void* value;
+        bool pawnTarget;
+        size_t size;
+    } movementWrites[] = {
+        { ReplayMovementStamina, tg::g_servicesStamina, &frame.stamina, false, sizeof(float) },
+        { ReplayMovementVelocityModifier, tg::g_pawnVelocityModifier, &frame.velocityModifier, true, sizeof(float) },
+        { ReplayMovementGravityScale, tg::g_entGravityScale, &frame.gravityScale, true, sizeof(float) },
+        { ReplayMovementGravityDisabled, tg::g_entGravityDisabled, &frame.gravityDisabled, true, sizeof(uint8_t) },
+        { ReplayMovementFriction, tg::g_entFriction, &frame.friction, true, sizeof(float) },
+        { ReplayMovementBaseVelocity, tg::g_entBaseVelocity, &frame.baseVelocityX, true, 3 * sizeof(float) },
+    };
+    for (const auto& write : movementWrites)
+    {
+        if ((frame.movementFields & write.field) != 0 && write.offset < 0)
+        {
+            BC_LOG_WARN("Cannot restore movement modifiers for slot %d: Schema field unavailable for mask 0x%x\n", slot, write.field);
+            StopReplay(slot);
+            return false;
+        }
+    }
+    std::array<HistoryWrite, 11> extraWrites{};
+    if (initializeMovement)
+    {
+        if (!PrepareHistoryWrites(slot, frame.history, extraWrites))
         {
             StopReplay(slot);
             return false;
@@ -1388,14 +1618,46 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
             return false;
         }
         WriteMovementServiceState(services, tick.pre);
-        WriteField(pawn, tg::g_entMoveType, tick.pre.moveType);
-        WriteField(pawn, tg::g_entActualMoveType, tick.pre.actualMoveType);
+        if (!input_injector::InitializeReplayMoveType(pawn, tick.pre.moveType))
+        {
+            StopReplay(slot);
+            return false;
+        }
         uint32_t flags = 0;
         if (SafeRead(pawn, tg::g_entFlags, flags))
         {
             const uint32_t mask = tg::kFlOnGround | tg::kFlDucking;
             WriteField(pawn, tg::g_entFlags, (flags & ~mask) | (tick.pre.entityFlags & mask));
         }
+    }
+    // Deploy must run before restoring weapon deadlines, otherwise it replaces them.
+    sourceTargets = SourceTargets(pawn, services, selectedSource.weaponDefIndex);
+    uint32_t activeHandle = 0;
+    if (restoreWeapon && (!SafeRead(sourceTargets[4], tg::g_wsActiveWeapon, activeHandle) ||
+        (activeHandle != weaponKey.second && !weapon_locker_hooks::SelectWeaponRaw(sourceTargets[4], sourceTargets[3]))))
+    {
+        StopReplay(slot);
+        return false;
+    }
+    if (!IsReplaying(slot)) return false;
+    pawn = input_injector::ResolveReplayPawn(slot, services);
+    if (!pawn)
+    {
+        StopReplay(slot);
+        return false;
+    }
+    sourceTargets = SourceTargets(pawn, services, selectedSource.weaponDefIndex);
+    uint32_t restoredHandle = 0;
+    if (restoreWeapon && (!WeaponInstance(sourceTargets[3], restoredHandle) || restoredHandle != weaponKey.second))
+    {
+        StopReplay(slot);
+        return false;
+    }
+    if (!replay_source_state::Prepare(sourceTargets, selectedSource, frame.history.sourcePlayerTick,
+                                      frame.history.sourceTickrate, liveTick, interfaces::TickInterval(), sourceWrites))
+    {
+        StopReplay(slot);
+        return false;
     }
     for (const auto& write : extraWrites)
     {
@@ -1405,6 +1667,31 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const 
             StopReplay(slot);
             return false;
         }
+    }
+    if (!replay_source_state::Apply(sourceWrites, TryWriteMemory))
+    {
+        BC_LOG_WARN("Cannot restore source state for slot %d: field write failed\n", slot);
+        StopReplay(slot);
+        return false;
+    }
+    for (const auto& write : movementWrites)
+    {
+        if ((frame.movementFields & write.field) != 0 &&
+            !TryWriteMemory(write.pawnTarget ? pawn : services, write.offset, write.value, write.size))
+        {
+            BC_LOG_WARN("Cannot restore movement modifiers for slot %d: field write failed for mask 0x%x\n", slot, write.field);
+            StopReplay(slot);
+            return false;
+        }
+    }
+    if (initializeMovement || (restoreWeapon && (selectedSource.fields & (uint64_t{ 1 } << 35)) != 0))
+        PublishSourceState(pawn);
+    if (!IsReplaying(slot)) return false;
+    if (restoreWeapon)
+    {
+        PublishSourceState(sourceTargets[3]);
+        if (!IsReplaying(slot)) return false;
+        p.restoredWeapons.push_back(weaponKey);
     }
     if (!WriteLocalViewAnglesToPawn(pawn, commandView.pitch, commandView.yaw))
     {
@@ -1480,6 +1767,7 @@ void OnReplayCommit(int slot, void* services, bool simulated)
         p.cursor.store(p.startCursor, std::memory_order_relaxed);
         p.needsInitialTeleport.store(true, std::memory_order_release);
         p.needsHistory.store(true, std::memory_order_release);
+        p.restoredWeapons.clear();
         p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         p.lastFinalViewCursor = -1;
@@ -1507,12 +1795,11 @@ void ClearAll()
         g_rep[i].loop.store(false, std::memory_order_relaxed);
         {
             std::scoped_lock lk(g_rec[i].mu);
-            g_rec[i].ticks.clear();
+            g_rec[i].frames.clear();
             g_rec[i].subs.clear();
-            g_rec[i].commands.clear();
             g_rec[i].pendingSubs.clear();
-            g_rec[i].pendingCommand = {};
-            g_rec[i].havePendingCommand = false;
+            g_rec[i].pendingFrame = {};
+            g_rec[i].pendingFrame.history.sourcePlayerTick = -1;
             g_rec[i].havePre = false;
             g_rec[i].pendingEventFlags = ReplayEventNone;
             g_rec[i].pendingDropEvent = {};
@@ -1522,6 +1809,7 @@ void ClearAll()
         {
             std::scoped_lock lk(g_rep[i].mu);
             g_rep[i].frames.clear();
+            g_rep[i].restoredWeapons.clear();
             g_rep[i].subs.clear();
             g_rep[i].subOffset.clear();
             g_rep[i].startCursor = 0;

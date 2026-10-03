@@ -19,6 +19,15 @@ inline int g_vtIdxTeleport = 164;
 inline int g_botAiTickedFlag = -1;
 // CCSBot -> pawn (CCSPlayerPawn*)
 inline int g_botPawn = -1;
+// Optional Schema-backed native perception fields; unresolved fields disable warm replay perception.
+inline int g_botEnemy = -1;
+inline int g_botEnemyVisible = -1;
+inline int g_botVisibleEnemyParts = -1;
+inline int g_botNearbyEnemyCount = -1;
+inline int g_botLastEnemyDead = -1;
+inline int g_botLastSawEnemyTimestamp = -1;
+inline int g_botFirstSawEnemyTimestamp = -1;
+inline int g_botCurrentEnemyAcquireTimestamp = -1;
 // CCSBot -> m_profile (BotProfile*)
 inline int g_botProfile = 0x08;
 
@@ -75,6 +84,8 @@ inline int g_pawnWeaponServices = -1;
 inline int g_pawnItemServices = -1;
 // m_pMovementServices
 inline int g_pawnMovementServices = -1;
+// Optional aim-punch service used by source-state recording and replay.
+inline int g_pawnAimPunchServices = -1;
 // m_hController (CHandle)
 inline int g_pawnController = -1;
 // m_hOriginalController (CHandle)
@@ -116,6 +127,13 @@ inline int g_servicesDuckAmount = -1; // float m_flDuckAmount
 inline int g_servicesDuckSpeed = -1; // float m_flDuckSpeed
 inline int g_servicesDesiresDuck = -1; // bool m_bDesiresDuck
 inline int g_servicesDucking = -1; // bool m_bDucking
+// Optional source-state modifiers; missing fields only block replay when supplied.
+inline int g_servicesStamina = -1; // float m_flStamina
+inline int g_pawnVelocityModifier = -1; // float m_flVelocityModifier
+inline int g_entGravityScale = -1; // float m_flGravityScale
+inline int g_entGravityDisabled = -1; // bool m_bGravityDisabled
+inline int g_entFriction = -1; // float m_flFriction
+inline int g_entBaseVelocity = -1; // Vector m_vecBaseVelocity
 
 // Optional movement history; a replay requesting an unavailable field is rejected.
 inline int g_controllerTickBase = -1; // CBasePlayerController::m_nTickBase

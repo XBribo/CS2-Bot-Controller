@@ -106,6 +106,15 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Switches the active weapon for a bot slot.
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
+        // Queues a best-weapon choice for the current unlocked AI owner.
+        public bool RequestEquipBestWeapon(int slot)
+            => BotController.RequestEquipBestWeapon(slot);
+        // Reads the current AI owner's native perception snapshot.
+        public bool TryGetNativePerceptionState(int slot, out BotPerceptionState state)
+            => BotController.TryGetNativePerceptionState(slot, out state);
+        // Applies the shared replay-only native FOV policy.
+        public bool SetReplayNativeFovOverride(bool enabled)
+            => BotController.SetReplayNativeFovOverride(enabled);
         // Returns the active weapon definition index for a bot slot.
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
         // Creates an independently cancellable native usercmd injection
