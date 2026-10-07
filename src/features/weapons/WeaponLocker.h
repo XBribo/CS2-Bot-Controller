@@ -48,7 +48,10 @@ int ActiveWeaponDef(void* ws);
 // First weapon in slots 0..4 whose def index == def
 void* FindWeaponByDef(void* ws, int def);
 
-// Switch via the original SelectItem
+// Request a switch through SelectItem, respecting all registered hooks.
+bool SelectWeapon(void* ws, void* weapon);
+
+// Bypass SelectItem hooks only for internal replay operations.
 bool SelectWeaponRaw(void* ws, void* weapon);
 
 // Cached WeaponServices* for a bot slot
