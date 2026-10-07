@@ -20,6 +20,7 @@
 namespace tg = cs2bc::offsets;
 
 using GetSlotT = void*(BC_FASTCALL*)(void* ws, int slot, unsigned int mask);
+using SelectItemT = char(BC_FASTCALL*)(void* ws, void* weapon, int flag);
 
 namespace cs2bc {
 namespace weapon_locker_hooks {
@@ -313,6 +314,13 @@ void* FindWeaponByDef(void* ws, int def)
     return nullptr;
 }
 
+bool SelectWeapon(void* ws, void* weapon)
+{
+    if (!ws || !weapon || !g_installed || !g_addrSelectItem) return false;
+    // Ordinary requests must respect all registered weapon-selection hooks.
+    return reinterpret_cast<SelectItemT>(g_addrSelectItem)(ws, weapon, 0) != 0;
+}
+
 bool SelectWeaponRaw(void* ws, void* weapon)
 {
     if (!ws || !weapon || !g_hookSelectItem.Active()) return false;
@@ -348,9 +356,7 @@ int SwitchToLockTarget(int slot)
     void* target = g_getSlot(ws, engineSlot, 0xFFFFFFFFU);
     if (!target) return 2;
 
-    // Route through the original (un-hooked) function so we don't
-    // ping-pong through HookedSelectItem.
-    g_hookSelectItem.CallOriginal(ws, target, 0);
+    SelectWeapon(ws, target);
     return 0;
 }
 } // namespace weapon_locker_hooks

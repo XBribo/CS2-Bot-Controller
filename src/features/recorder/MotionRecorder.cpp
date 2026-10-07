@@ -926,7 +926,7 @@ bool SwitchBotWeaponByDef(int slot, int defIndex)
     if (!ws) return false;
     void* weapon = weapon_locker_hooks::FindWeaponByDef(ws, defIndex);
     if (!weapon) return false;
-    return weapon_locker_hooks::SelectWeaponRaw(ws, weapon);
+    return weapon_locker_hooks::SelectWeapon(ws, weapon);
 }
 
 // Def index of the bot's current active weapon
