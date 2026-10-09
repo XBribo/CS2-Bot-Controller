@@ -32,21 +32,13 @@ namespace BotControllerApi
 
         int RecordedTickCount(int slot);
 
-        // Pull a slot's recorded ticks + subticks out of memory.
-        (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot);
-
-        // Pull aligned tick, subtick, and command-frame buffers out of memory
-        (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot);
+        // Pull a stopped recording into the same model used by replay producers.
+        ReplayData GetRecordedMotion(int slot, float tickRate);
 
         // ---- replay ----
 
-        // Load ticks, subticks, and aligned command frames into a replay buffer.
-        bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands);
+        // Copies one complete replay; nullable fields preserve presence independently of value.
+        bool LoadReplay(int slot, ReplayData replay);
 
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -56,21 +48,42 @@ namespace BotControllerApi
 
         bool StartReplay(int slot, bool loop = false);
 
+        // Starts at an inclusive index, or resumes a hold at that index without reinitialization.
+        bool StartReplayAt(int slot, bool loop, int startIndex);
+
+        // Plays [startIndex, holdBeforeIndex), then retains replay ownership without consuming input.
+        bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
+
         bool StopReplay(int slot);
+
+        // Stops replay and frees all replay buffer allocations; recordings remain available.
+        bool ReleaseReplayBuffer(int slot);
 
         int ReplayCursor(int slot);
 
         int ReplayTotal(int slot);
 
+        // Reads aggregate state, including an idle slot's terminal cursor.
+        bool TryGetReplayState(int slot, out ReplaySlotState state);
+
         bool IsReplaying(int slot);
 
-        // The tick currently being replayed on this slot, for driving weapon/fire.
-        bool TryGetReplayTick(int slot, out ReplayTick tick);
+        // The complete frame currently being replayed, including input and subticks.
+        bool TryGetReplayFrame(int slot, out ReplayFrame frame);
 
         // ---- weapons ----
 
         // Switch a bot to the weapon with this def index.
         bool SwitchBotWeapon(int slot, int defIndex);
+
+        // Queues one native AI weapon choice after Update; true means accepted, not already equipped.
+        bool RequestEquipBestWeapon(int slot);
+
+        // Reads native AI evidence only for the current bot/pawn incarnation.
+        bool TryGetNativePerceptionState(int slot, out BotPerceptionState state);
+
+        // Disables only the FOV cone during replay; native LOS and smoke checks remain authoritative.
+        bool SetReplayNativeFovOverride(bool enabled);
 
         // Def index of the bot's current active weapon. <0 if unresolved.
         int BotActiveWeaponDef(int slot);

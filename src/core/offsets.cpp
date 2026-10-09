@@ -5,9 +5,11 @@
 #include "nlohmann/json.hpp"
 #include "core/cs2_sdk/schema.h"
 #include "core/memory_module.h"
+#include "features/recorder/ReplaySourceState.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 
 namespace cs2bc::offsets {
 // Each offset: gamedata[name].offsets[platform], else keep code default
@@ -34,6 +36,7 @@ void LoadFromGamedata(const nlohmann::json& gd)
     g_moveVelocity = gameconfig::FindPlatformOffset(gd, "CMoveData::Velocity", g_moveVelocity);
     g_moveAbsOrigin = gameconfig::FindPlatformOffset(gd, "CMoveData::AbsOrigin", g_moveAbsOrigin);
     g_vtIdxPlayerRunCommand = gameconfig::FindPlatformOffset(gd, "vtidx::PlayerRunCommand", g_vtIdxPlayerRunCommand);
+    g_vtIdxSetupMove = gameconfig::FindPlatformOffset(gd, "vtidx::SetupMove", g_vtIdxSetupMove);
     g_vtIdxFinishMove = gameconfig::FindPlatformOffset(gd, "vtidx::FinishMove", g_vtIdxFinishMove);
     g_vtIdxControllerCommandSetup = gameconfig::FindPlatformOffset(gd, "vtidx::ControllerCommandSetup", g_vtIdxControllerCommandSetup);
     g_vtIdxDropWeapon = gameconfig::FindPlatformOffset(gd, "vtidx::DropWeapon", g_vtIdxDropWeapon);
@@ -53,6 +56,35 @@ bool ResolveRequired(int& target, const char* className, const char* fieldName, 
 
     if (errorOut && errorOutLen > 0) std::snprintf(errorOut, errorOutLen, "Required Schema field missing: %s::%s", className, fieldName);
     return false;
+}
+
+// Resolves optional movement members across their possible declaring classes.
+int ResolveMovementField(const char* fieldName)
+{
+    for (const char* className : { "CCSPlayer_MovementServices", "CPlayer_MovementServices_Humanoid", "CPlayer_MovementServices" })
+    {
+        const int offset = schema::GetFieldOffset(className, fieldName);
+        if (offset >= 0) return offset;
+    }
+    return -1;
+}
+
+// Resolves optional pawn members from their declaring class in the pawn hierarchy.
+int ResolvePawnField(const char* fieldName)
+{
+    for (const char* className : { "CCSPlayerPawn", "CCSPlayerPawnBase", "CBasePlayerPawn", "CBaseEntity" })
+    {
+        const int offset = schema::GetFieldOffset(className, fieldName);
+        if (offset >= 0) return offset;
+    }
+    return -1;
+}
+
+// Flattens an embedded ModernJump member only when both Schema offsets exist.
+int ResolveModernJumpField(int modernJump, const char* fieldName)
+{
+    const int offset = schema::GetFieldOffset("CCSPlayerModernJump", fieldName);
+    return modernJump >= 0 && offset >= 0 ? modernJump + offset : -1;
 }
 
 } // namespace
@@ -103,6 +135,38 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
     }
 
     g_nodeAbsRotation = schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
+
+    g_botEnemy = schema::GetFieldOffset("CCSBot", "m_enemy");
+    g_botEnemyVisible = schema::GetFieldOffset("CCSBot", "m_isEnemyVisible");
+    g_botVisibleEnemyParts = schema::GetFieldOffset("CCSBot", "m_visibleEnemyParts");
+    g_botNearbyEnemyCount = schema::GetFieldOffset("CCSBot", "m_nearbyEnemyCount");
+    g_botLastEnemyDead = schema::GetFieldOffset("CCSBot", "m_isLastEnemyDead");
+    g_botLastSawEnemyTimestamp = schema::GetFieldOffset("CCSBot", "m_lastSawEnemyTimestamp");
+    g_botFirstSawEnemyTimestamp = schema::GetFieldOffset("CCSBot", "m_firstSawEnemyTimestamp");
+    g_botCurrentEnemyAcquireTimestamp = schema::GetFieldOffset("CCSBot", "m_currentEnemyAcquireTimestamp");
+
+    g_controllerTickBase = schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
+    if (g_controllerTickBase < 0) g_controllerTickBase = schema::GetFieldOffset("CCSPlayerController", "m_nTickBase");
+    g_servicesJumpPressedTime = ResolveMovementField("m_flJumpPressedTime");
+    g_servicesLastDuckTime = ResolveMovementField("m_flLastDuckTime");
+    g_servicesStamina = ResolveMovementField("m_flStamina");
+    g_pawnVelocityModifier = ResolvePawnField("m_flVelocityModifier");
+    g_entGravityScale = ResolvePawnField("m_flGravityScale");
+    g_entGravityDisabled = ResolvePawnField("m_bGravityDisabled");
+    g_entFriction = ResolvePawnField("m_flFriction");
+    g_entBaseVelocity = ResolvePawnField("m_vecBaseVelocity");
+    g_pawnAimPunchServices = ResolvePawnField("m_pAimPunchServices");
+    replay_source_state::ResolveOffsets(schema::GetFieldOffset);
+    const int modernJump = schema::GetFieldOffset("CCSPlayer_MovementServices", "m_ModernJump");
+    g_servicesLastActualJumpPressTick = ResolveModernJumpField(modernJump, "m_nLastActualJumpPressTick");
+    g_servicesLastActualJumpPressFrac = ResolveModernJumpField(modernJump, "m_flLastActualJumpPressFrac");
+    g_servicesLastUsableJumpPressTick = ResolveModernJumpField(modernJump, "m_nLastUsableJumpPressTick");
+    g_servicesLastUsableJumpPressFrac = ResolveModernJumpField(modernJump, "m_flLastUsableJumpPressFrac");
+    g_servicesLastLandedTick = ResolveModernJumpField(modernJump, "m_nLastLandedTick");
+    g_servicesLastLandedFrac = ResolveModernJumpField(modernJump, "m_flLastLandedFrac");
+    g_servicesLastLandedVelocityX = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityX");
+    g_servicesLastLandedVelocityY = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityY");
+    g_servicesLastLandedVelocityZ = ResolveModernJumpField(modernJump, "m_flLastLandedVelocityZ");
 
     int attributeManager = -1;
     int item = -1;

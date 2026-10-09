@@ -2,7 +2,7 @@
 
 ## Technical Overview
 
-Current ABI: `21`
+Current ABI: `23`
 
 ------------------------------------------------------------------------
 
@@ -185,12 +185,12 @@ Key operations exposed by both managed integrations:
 - `UnlockAll`
 - `StartRecord`
 - `StopRecord`
-- `GetRecordedMotion`
+- `GetRecordedMotion(slot, tickRate)` returns `ReplayData`
 - `TransferRecordingToReplay`
-- `LoadReplay`
+- `LoadReplay(slot, replay)`
 - `StartReplay`
 - `StopReplay`
-- `TryGetReplayTick`
+- `TryGetReplayFrame`
 - `SwitchBotWeapon`
 - `InjectUsercmd`
 - `CancelUsercmdInjection`

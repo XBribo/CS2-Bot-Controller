@@ -210,6 +210,7 @@ add_library(
     src/features/recorder/InputInjector.cpp
     src/features/recorder/PawnBinding.cpp
     src/features/recorder/MotionRecorder.cpp
+    src/features/recorder/ReplaySourceState.cpp
     src/features/voice/VoiceSender.cpp
     src/features/profile/BotProfile.cpp
     src/core/memory_module.cpp

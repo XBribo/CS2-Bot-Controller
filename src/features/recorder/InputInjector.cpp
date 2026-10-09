@@ -13,7 +13,9 @@
 #include "PawnBinding.h"
 #include "ccsbot_slot.h"
 #include "core/memory_module.h"
+#include "core/cs2_sdk/schema.h"
 #include "MotionRecorder.h"
+#include "BotController.h"
 #include "usercmd.pb.h"
 #include "offsets.h"
 #include "hooks.h"
@@ -48,9 +50,14 @@ constexpr uint64_t kMovementButtonMask = kInForward | kInBack | kInMoveLeft | kI
 void* g_addrProcessMovement = nullptr;
 void* g_addrPlayerRunCommand = nullptr;
 void* g_addrPhysicsSimulate = nullptr;
+using SetMoveTypeFn = void(BC_FASTCALL*)(void*, uint8_t, uint8_t);
+SetMoveTypeFn g_setMoveType = nullptr;
+int g_moveCollideOffset = -1;
 
 hooks::NativeHook<void, void*, void*> g_hookProcessMovement;
 hooks::NativeHook<void, void*, void*> g_hookPlayerRunCommand;
+hooks::NativeHook<void, void*, void*, void*> g_hookSetupMove;
+hooks::NativeHook<void, void*, void*, void*> g_hookFinishMove;
 hooks::NativeHook<void, void*> g_hookPhysicsSimulate;
 hooks::NativeHook<void, void*> g_hookControllerCommandSetup;
 std::atomic<bool> g_controllerHookTried{ false };
@@ -62,6 +69,9 @@ struct MovementFrame
     bool recording;
     bool replaying;
     bool seeded = false;
+    bool movementPrepared = false;
+    bool finalViewPrepared = false;
+    void* controller = nullptr;
 };
 thread_local std::vector<MovementFrame> g_physicsFrames;
 bool g_installed = false;
@@ -582,7 +592,7 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
         command.leftHandDesired = pc->left_hand_desired() ? 1 : 0;
         command.fields |= motion_recorder::kCommandFieldLeftHand;
     }
-    motion_recorder::OnCaptureCommand(slot, command);
+    motion_recorder::OnCaptureCommand(slot, services, command);
 }
 
 // Applies one recorded command before the engine simulates it.
@@ -592,6 +602,20 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
     motion_recorder::ReplayCommandFrame frame{};
     if (motion_recorder::ReplayCommandFrameForSimulation(slot, frame))
     {
+        // Mark before engine calls, then reacquire the boundary after possible reentry.
+        auto* boundary = FindPhysicsFrame(slot);
+        if (!boundary || boundary->services != services) return;
+        if (!boundary->seeded)
+        {
+            boundary->seeded = true;
+            if (!motion_recorder::OnReplayCommandPre(slot, services, frame.tick, frame.commandView))
+            {
+                if (auto* liveBoundary = FindPhysicsFrame(slot)) liveBoundary->seeded = false;
+                return;
+            }
+        }
+        if (!motion_recorder::IsReplaying(slot)) return;
+
         bool suppressUnsafeUtilityAttack =
             IsThrowableUtilityDef(frame.tick.weaponDefIndex) && frame.weaponSelect < 0 &&
             !motion_recorder::ReplayWeaponDefsMatch(motion_recorder::BotActiveWeaponDef(slot), frame.tick.weaponDefIndex);
@@ -659,14 +683,6 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
             if (frame.subticks[i].analogForward != 0.0F) m->set_analog_forward_delta(frame.subticks[i].analogForward);
             if (frame.subticks[i].analogLeft != 0.0F) m->set_analog_left_delta(frame.subticks[i].analogLeft);
         }
-
-        // Mark before calling the engine: reentrant commands must not reseed.
-        auto* boundary = FindPhysicsFrame(slot);
-        if (boundary && !boundary->seeded)
-        {
-            boundary->seeded = true;
-            motion_recorder::OnReplayCommandPre(slot, services, frame.tick);
-        }
     }
 }
 
@@ -679,6 +695,8 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
     auto* boundary = FindPhysicsFrame(slot);
     bool recording = boundary && boundary->recording && motion_recorder::IsRecording(slot);
     bool replaying = boundary && boundary->replaying && motion_recorder::IsReplaying(slot);
+    // A held boundary must not resimulate movement, attack edges, or the last command.
+    if (replaying && motion_recorder::IsReplayHolding(slot)) return { KHook::Action::Supersede };
     const auto [hasUsercmdInjection, hasUsercmdSuppression, hasUsercmdMovement] = replaying ? UsercmdWork{} : GetUsercmdWork(slot);
 
     if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement))
@@ -696,6 +714,34 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
         if (hasUsercmdMovement && !replaying) ApplyUsercmdMovement(slot, pc, base);
     }
 
+    return { KHook::Action::Ignore };
+}
+
+// Supplies recorded pre kinematics after native SetupMove has built its input.
+KHook::Return<void> SetupMovePost(void* services, void*, void* moveData) noexcept
+{
+    if (!motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
+    int slot = pawn_binding::ServicesToSlot(services);
+    auto* boundary = FindPhysicsFrame(slot);
+    if (boundary && boundary->services == services && boundary->replaying && boundary->seeded)
+    {
+        boundary->movementPrepared = motion_recorder::OnReplaySetupMove(slot, moveData);
+        boundary->finalViewPrepared = false;
+    }
+    return { KHook::Action::Ignore };
+}
+
+// Leaves native movement output intact and prepares view before PlayerRunCommand's tail.
+KHook::Return<void> FinishMovePost(void* services, void*, void*) noexcept
+{
+    if (!motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
+    int slot = pawn_binding::ServicesToSlot(services);
+    auto* boundary = FindPhysicsFrame(slot);
+    if (boundary && boundary->services == services && boundary->replaying && boundary->movementPrepared)
+    {
+        bool prepared = motion_recorder::OnReplayFinalView(slot, services);
+        if (auto* liveBoundary = FindPhysicsFrame(slot)) liveBoundary->finalViewPrepared = prepared;
+    }
     return { KHook::Action::Ignore };
 }
 
@@ -752,6 +798,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
     }
     // Publish ownership before engine callbacks can reenter.
     g_physicsFrames.push_back({ slot, services, recording, replaying });
+    g_physicsFrames.back().controller = controller;
 
     // pre: snapshot start-of-tick state once (before any subtick mover).
     if (recording) motion_recorder::OnCapturePre(slot, services, nullptr);
@@ -762,14 +809,15 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
 // Commits the recording and replay state for the matching simulation call.
 KHook::Return<void> PhysicsSimulatePost(void*) noexcept
 {
-    const auto [slot, services, recording, replaying, seeded] = g_physicsFrames.back();
+    const MovementFrame frame = g_physicsFrames.back();
     g_physicsFrames.pop_back();
 
     // post: snapshot end-of-tick state + commit one frame
-    if (recording) motion_recorder::OnCapturePost(slot, services, nullptr);
-    if (replaying)
+    if (frame.recording) motion_recorder::OnCapturePost(frame.slot, frame.services, nullptr);
+    if (frame.replaying)
     {
-        motion_recorder::OnReplayCommit(slot, services, seeded);
+        motion_recorder::OnReplayCommit(frame.slot, frame.services, frame.seeded && frame.movementPrepared && frame.finalViewPrepared);
+        if (!motion_recorder::IsReplaying(frame.slot)) ClearReplayInputState(frame.slot, frame.services);
     }
     return { KHook::Action::Ignore };
 }
@@ -796,9 +844,42 @@ void EnsureVtableHooks(void* services)
         g_hookPlayerRunCommand.Remove();
         g_addrPlayerRunCommand = nullptr;
     }
+
+    // These post callbacks run once around native movement, never its subtick substeps.
+    void* setupMove = nullptr;
+    if (tg::g_vtIdxSetupMove >= 0 &&
+        GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxSetupMove * static_cast<int>(sizeof(void*)), setupMove) &&
+        setupMove && g_hookSetupMove.Install(setupMove, nullptr, &SetupMovePost))
+    {
+        void* finishMove = nullptr;
+        if (tg::g_vtIdxFinishMove >= 0 &&
+            GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxFinishMove * static_cast<int>(sizeof(void*)), finishMove) &&
+            finishMove && g_hookFinishMove.Install(finishMove, nullptr, &FinishMovePost))
+            return;
+        g_hookFinishMove.Remove();
+    }
+    g_hookSetupMove.Remove();
+    BC_LOG_WARN("SetupMove/FinishMove hooks unavailable; engine-driven replay is disabled\n");
 }
 
 } // namespace
+
+// Uses the current command owner's simulation clock rather than server-global tickcount.
+bool ReadPlayerTickBase(int slot, int32_t& tickBase)
+{
+    const auto* frame = FindPhysicsFrame(slot);
+    return frame && (frame->recording || frame->replaying) && frame->controller && ControllerToSlot(frame->controller) == slot &&
+           GuardedRead(frame->controller, tg::g_controllerTickBase, tickBase) && tickBase >= 0;
+}
+
+// Preserves the live collision policy and lets the engine derive its internal movement mode.
+bool InitializeReplayMoveType(void* pawn, uint8_t moveType)
+{
+    uint8_t collide = 0;
+    if (!g_setMoveType || !GuardedRead(pawn, g_moveCollideOffset, collide)) return false;
+    g_setMoveType(pawn, moveType, collide);
+    return true;
+}
 
 bool Install( // NOLINT(misc-use-internal-linkage)
     const nlohmann::json& gd,
@@ -806,6 +887,13 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
+    char moveTypeError[256]{};
+    g_moveCollideOffset = schema::GetFieldOffset("CBaseEntity", "m_MoveCollide");
+    g_setMoveType = reinterpret_cast<SetMoveTypeFn>(gameconfig::ResolveSig(
+        gd, serverModule, "CBaseEntity::SetMoveType", moveTypeError, sizeof(moveTypeError)));
+    if (!g_setMoveType || g_moveCollideOffset < 0)
+        BC_LOG_WARN("Replay movement type setter unavailable (%s); replay is disabled\n",
+                    moveTypeError[0] ? moveTypeError : "m_MoveCollide unavailable");
     g_addrProcessMovement = gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
     if (!g_addrProcessMovement)
     {
@@ -856,11 +944,15 @@ void Remove()
     if (!g_installed) return;
     g_hookProcessMovement.Remove();
     g_hookPlayerRunCommand.Remove();
+    g_hookSetupMove.Remove();
+    g_hookFinishMove.Remove();
     g_hookControllerCommandSetup.Remove();
     g_hookPhysicsSimulate.Remove();
     g_addrProcessMovement = nullptr;
     g_addrPlayerRunCommand = nullptr;
     g_addrPhysicsSimulate = nullptr;
+    g_setMoveType = nullptr;
+    g_moveCollideOffset = -1;
     g_physicsActive = false;
     g_subtickActive = false;
     g_vtHooksTried.store(false, std::memory_order_release);
@@ -890,6 +982,26 @@ bool RecorderReady()
     if (g_physicsActive && g_subtickActive && g_hookControllerCommandSetup.Active()) return true;
     BC_LOG_WARN("Cannot start recording/replay: PhysicsSimulate=%d PlayerRunCommand=%d ControllerCommandSetup=%d\n", g_physicsActive,
                 g_subtickActive, g_hookControllerCommandSetup.Active());
+    return false;
+}
+
+// Fail closed when movement input or output boundaries have not been verified.
+bool ReplayReady()
+{
+    if (!RecorderReady()) return false;
+    if (!g_setMoveType || g_moveCollideOffset < 0)
+    {
+        BC_LOG_WARN("Cannot start replay: engine movement type setter unavailable\n");
+        return false;
+    }
+    if (!bot_controller_hooks::ReplayViewReady())
+    {
+        BC_LOG_WARN("Cannot start replay: SetEyeAngles/GetEyeAngles hooks unavailable\n");
+        return false;
+    }
+    if (g_hookSetupMove.Active() && g_hookFinishMove.Active() && tg::g_moveVelocity >= 0 && tg::g_moveAbsOrigin >= 0) return true;
+    BC_LOG_WARN("Cannot start replay: SetupMove=%d FinishMove=%d CMoveData::Velocity=%d CMoveData::AbsOrigin=%d\n",
+                g_hookSetupMove.Active(), g_hookFinishMove.Active(), tg::g_moveVelocity, tg::g_moveAbsOrigin);
     return false;
 }
 

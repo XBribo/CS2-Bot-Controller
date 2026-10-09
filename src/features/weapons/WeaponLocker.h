@@ -33,6 +33,9 @@ int SwitchToLockTarget(int slot);
 // True once GetSlot + SelectItem are resolved and hooks installed
 bool WeaponHooksReady();
 
+// Calls the original native chooser; the request owner must validate replay/lock/takeover state.
+bool EquipBestWeaponRaw(void* bot, bool mustEquip);
+
 // Read a weapon's item-definition index (weapon+0x9E0). -1 if null
 int ReadDefIndex(void* weapon);
 
@@ -44,6 +47,9 @@ int WeaponDefForEntityIndex(void* ws, int entityIndex);
 
 // Active weapon's def index for a WeaponServices*. -1 if none/unresolved
 int ActiveWeaponDef(void* ws);
+
+// Resolves the exact active inventory instance, including duplicate grenade definitions.
+void* ActiveWeapon(void* ws);
 
 // First weapon in slots 0..4 whose def index == def
 void* FindWeaponByDef(void* ws, int def);

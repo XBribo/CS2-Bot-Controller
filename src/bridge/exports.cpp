@@ -1,14 +1,18 @@
 // C-ABI exports for CounterStrikeSharp P/Invoke.
 
 #include "dispatch.h"
+#include "BotController.h"
 #include "MotionRecorder.h"
 #include "InputInjector.h"
 #include "BuyControllerState.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
+#include "core/interfaces.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -35,8 +39,50 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 22 keeps the native command-based projectile replay path without birth alignment exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
+// ABI 23 loads and queries complete frames rather than public parallel arrays.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
+
+// Base exports are unconditional; perception requires safe, live warm-replay hooks for native contact detection.
+extern "C" BC_EXPORT uint64_t BotController_GetCapabilities()
+{
+    return 0x555FULL | (cs2bc::bot_controller_hooks::NativePerceptionReady() ? (uint64_t{ 1 } << 11) : 0);
+}
+
+// Queries the 44-byte native AI snapshot without exposing a live bot pointer to consumers.
+extern "C" BC_EXPORT int BotController_GetNativePerceptionState(int slot, cs2bc::NativePerceptionState* out, int size)
+{
+    if (!out || size < static_cast<int>(sizeof(*out))) return -1;
+    cs2bc::NativePerceptionState state{};
+    const bool valid = cs2bc::bot_controller_hooks::GetNativePerceptionState(slot, state);
+    std::memcpy(out, &state, sizeof(state));
+    return valid ? 0 : -2;
+}
+
+// Changes only replay's native FOV policy; reports unavailable hooks rather than silently ignoring the request.
+extern "C" BC_EXPORT int BotController_SetReplayNativeFovOverride(int enabled)
+{
+    return cs2bc::bot_controller_hooks::SetReplayNativeFovOverride(enabled != 0) ? 0 : -1;
+}
+
+// Reports packed bridge layouts; the caller must first check the ABI major version.
+extern "C" BC_EXPORT int BotController_GetAbiInfo(void* out, int size)
+{
+#pragma pack(push, 4)
+    struct AbiInfo
+    {
+        int32_t major, minor, snapshotSize, tickSize, subtickSize, slotStateSize, maxSlots;
+        uint64_t capabilities;
+        int32_t reserved0, reserved1;
+    };
+#pragma pack(pop)
+    static_assert(sizeof(AbiInfo) == 44);
+    if (!out || size < static_cast<int>(sizeof(AbiInfo))) return -1;
+    const AbiInfo info{ 23, 0, sizeof(cs2bc::MovementSnapshot), sizeof(cs2bc::ReplayTick), sizeof(cs2bc::SubtickMove),
+                        sizeof(cs2bc::ReplaySlotState), cs2bc::motion_recorder::kMaxSlots, BotController_GetCapabilities(),
+                        sizeof(cs2bc::ReplayFrameData), sizeof(cs2bc::ReplayCommandFrameData) };
+    std::memcpy(out, &info, sizeof(info));
+    return 0;
+}
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
@@ -210,6 +256,12 @@ extern "C" BC_EXPORT int BotController_CopyRecordedTicksRange(int slot, int star
     return cs2bc::motion_recorder::CopyTicksRange(slot, start, out, maxTicks);
 }
 
+// Copies complete recording frames with presence-aware source state.
+extern "C" BC_EXPORT int BotController_CopyRecordedFramesRange(int slot, int start, cs2bc::ReplayFrameData* out, int maxFrames)
+{
+    return cs2bc::motion_recorder::CopyFramesRange(slot, start, out, maxFrames);
+}
+
 extern "C" BC_EXPORT int BotController_CopyRecordedSubticks(int slot, cs2bc::SubtickMove* out, int maxSubticks)
 {
     return cs2bc::motion_recorder::CopySubticks(slot, out, maxSubticks);
@@ -233,21 +285,23 @@ extern "C" BC_EXPORT int BotController_CopyRecordedCommandsRange(int slot, int s
     return cs2bc::motion_recorder::CopyCommandsRange(slot, start, out, maxCommands);
 }
 
-// Load replay buffers with optional per-tick command and movement data. 0 ok.
+// Load one complete frame buffer for the SetupMove consumer. 0 ok.
 extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
-                                                  const cs2bc::ReplayTick* ticks,
-                                                  int tickCount,
+                                                  float tickRate,
+                                                  const cs2bc::ReplayFrameData* frames,
+                                                  int frameCount,
                                                   const cs2bc::SubtickMove* subs,
-                                                  int subCount,
-                                                  const cs2bc::ReplayCommandFrameData* commands,
-                                                  int commandCount,
-                                                  const cs2bc::ReplayMovementExtra* movementExtras,
-                                                  int movementExtraCount) noexcept
+                                                  int subCount) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, movementExtras,
-                                              movementExtraCount)
-               ? 0
-               : -1;
+    if (!std::isfinite(tickRate) || tickRate <= 0.0F) return -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, tickRate, frames, frameCount, subs, subCount) ? 0 : -1;
+}
+
+// Return a whole frame, preserving optional input/history and its own subticks.
+extern "C" BC_EXPORT int BotController_GetReplayFrame(int slot, cs2bc::ReplayFrameData* out,
+                                                       cs2bc::SubtickMove* subs, int maxSubticks)
+{
+    return out && cs2bc::motion_recorder::CurrentReplayFrame(slot, *out, subs, maxSubticks) ? 0 : -1;
 }
 
 // Move a slot's just-recorded buffers into another slot's replay buffer
@@ -257,21 +311,34 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
     if (nt <= 0) return -1;
     int ns = cs2bc::motion_recorder::RecordedSubtickCount(srcSlot);
     ns = std::max(ns, 0);
-    int nc = cs2bc::motion_recorder::RecordedCommandCount(srcSlot);
-    if (nc != nt) return -1;
-    std::vector<cs2bc::ReplayTick> ticks(nt);
+    std::vector<cs2bc::ReplayFrameData> frames(nt);
     std::vector<cs2bc::SubtickMove> subs(ns > 0 ? ns : 1);
-    std::vector<cs2bc::ReplayCommandFrameData> commands(nc);
-    int gotT = cs2bc::motion_recorder::CopyTicks(srcSlot, ticks.data(), nt);
+    int gotT = cs2bc::motion_recorder::CopyFramesRange(srcSlot, 0, frames.data(), nt);
     int gotS = ns > 0 ? cs2bc::motion_recorder::CopySubticks(srcSlot, subs.data(), ns) : 0;
-    int gotC = cs2bc::motion_recorder::CopyCommands(srcSlot, commands.data(), nc);
-    if (gotT <= 0 || gotC != gotT) return -1;
-    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, nullptr, 0) ? 0 : -1;
+    if (gotT != nt || gotS != ns) return -1;
+    const float interval = cs2bc::interfaces::TickInterval();
+    const float rate = frames[0].history.sourceTickrate > 0.0F ? frames[0].history.sourceTickrate :
+                       (interval > 0.0F ? 1.0F / interval : 0.0F);
+    for (const auto& frame : frames)
+        if (frame.history.sourceTickrate > 0.0F && std::fabs(frame.history.sourceTickrate / rate - 1.0F) > 0.0001F) return -1;
+    return cs2bc::motion_recorder::LoadReplay(dstSlot, rate, frames.data(), gotT, subs.data(), gotS) ? 0 : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
 {
     return cs2bc::motion_recorder::StartReplay(slot, loop != 0) ? 0 : -1;
+}
+
+// Starts at an inclusive tick index, or resumes the held boundary at that index.
+extern "C" BC_EXPORT int BotController_StartReplayAt(int slot, int loop, int startIndex)
+{
+    return cs2bc::motion_recorder::StartReplayAt(slot, loop != 0, startIndex) ? 0 : -1;
+}
+
+// Holds before the exclusive end index without releasing replay ownership.
+extern "C" BC_EXPORT int BotController_StartReplayUntil(int slot, int loop, int startIndex, int holdBeforeIndex)
+{
+    return cs2bc::motion_recorder::StartReplayUntil(slot, loop != 0, startIndex, holdBeforeIndex) ? 0 : -1;
 }
 
 // Registers the managed plugin's authoritative pawn pointer for replay.
@@ -283,11 +350,23 @@ extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
 
 extern "C" BC_EXPORT int BotController_StopReplay(int slot) { return cs2bc::motion_recorder::StopReplay(slot) ? 0 : -1; }
 
+// Stops a slot and releases its loaded replay allocations, leaving recordings intact.
+extern "C" BC_EXPORT int BotController_ReleaseReplayBuffer(int slot)
+{
+    return cs2bc::motion_recorder::ReleaseReplayBuffer(slot) ? 0 : -1;
+}
+
 // Current replay tick index, or <0 if the slot is not replaying.
 extern "C" BC_EXPORT int BotController_GetReplayCursor(int slot) { return cs2bc::motion_recorder::ReplayCursor(slot); }
 
 // Total ticks loaded in a slot's replay buffer.
 extern "C" BC_EXPORT int BotController_GetReplayTotal(int slot) { return cs2bc::motion_recorder::ReplayTotal(slot); }
+
+// Includes the terminal cursor even when legacy GetReplayCursor returns -1 for an idle slot.
+extern "C" BC_EXPORT int BotController_GetReplaySlotState(int slot, cs2bc::ReplaySlotState* out)
+{
+    return out && cs2bc::motion_recorder::GetReplaySlotState(slot, *out) ? 0 : -1;
+}
 
 // Copy the tick currently being replayed (for C# to drive weapon/fire).
 // Returns 0 on success, -1 if the slot isn't replaying.
@@ -302,6 +381,12 @@ extern "C" BC_EXPORT int BotController_GetReplayTick(int slot, cs2bc::ReplayTick
 extern "C" BC_EXPORT int BotController_SwitchBotWeapon(int slot, int defIndex)
 {
     return cs2bc::motion_recorder::SwitchBotWeaponByDef(slot, defIndex) ? 0 : -1;
+}
+
+// Returns 0 when queued for native AI selection, -1 when the slot or ownership is unavailable.
+extern "C" BC_EXPORT int BotController_RequestEquipBestWeapon(int slot)
+{
+    return cs2bc::bot_controller_hooks::RequestEquipBestWeapon(slot) ? 0 : -1;
 }
 
 // Def index of the bot's current active weapon (same normalization as the

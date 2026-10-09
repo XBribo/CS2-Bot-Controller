@@ -65,6 +65,9 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
 
     return true;
 }
+// CS2 simulates at 64 ticks per second, matching CounterStrikeSharp's interval.
+float TickInterval() { return 1.0F / 64.0F; }
+
 // Releases interface consumers after native callbacks have been removed.
 void Reset()
 {

@@ -37,8 +37,11 @@ bool PawnOwnsServices(void* pawn, void* services)
 // Registers a readable pawn whose current owner matches the requested slot.
 bool SetReplayPawn(int slot, void* pawn)
 {
-    if (!ValidSlotIndex(slot) || motion_recorder::IsReplaying(slot)) return false;
-    g_slotPawns[slot].store(nullptr, std::memory_order_release);
+    if (!ValidSlotIndex(slot)) return false;
+    const bool replaying = motion_recorder::IsReplaying(slot);
+    // Resume/start callers may revalidate the same pawn without replacing an active owner.
+    if (replaying && g_slotPawns[slot].load(std::memory_order_acquire) != pawn) return false;
+    if (!replaying) g_slotPawns[slot].store(nullptr, std::memory_order_release);
     if (!pawn) return false;
 
     void* identity = nullptr;
@@ -62,6 +65,22 @@ bool SetReplayPawn(int slot, void* pawn)
 void ClearReplayPawn(int slot)
 {
     if (ValidSlotIndex(slot)) g_slotPawns[slot].store(nullptr, std::memory_order_release);
+}
+
+// Retires injected buttons without changing velocity, duck transitions or ladder contact.
+void ClearReplayInputState(int slot, void* services)
+{
+    if (!ValidSlotIndex(slot)) return;
+    void* pawn = services ? ServicesToPawnField(services) : g_slotPawns[slot].load(std::memory_order_acquire);
+    const auto owner = ReadPawnControllerHandles(pawn);
+    if (owner.controllerSlot != slot || owner.originalControllerIndex < 1 ||
+        owner.controllerHandle != owner.originalControllerHandle) return;
+    if (!services && !GuardedRead(pawn, tg::g_pawnMovementServices, services)) return;
+    if (!PawnOwnsServices(pawn, services) || ServicesToPawnField(services) != pawn) return;
+    WriteField(services, tg::g_servicesButtons, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesButtons1, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesButtons2, uint64_t{ 0 });
+    WriteField(services, tg::g_servicesDesiresDuck, uint8_t{ 0 });
 }
 
 // Returns a registered pawn only when its movement-services link is current.

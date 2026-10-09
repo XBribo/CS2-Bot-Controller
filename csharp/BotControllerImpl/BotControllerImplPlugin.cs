@@ -221,16 +221,15 @@ public partial class BotControllerPlugin : BasePlugin
         {
             try
             {
-                MotionRecording rec = MotionStore.LoadFromFile(file);
-                bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                ReplayData rec = MotionStore.LoadFromFile(file);
+                bool loaded = BotController.LoadReplay(botSlot, rec);
                 _completedJobs.Enqueue(() =>
                 {
                     if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
                     _loadingSlots.Remove(botSlot);
                     if (_cancelledLoads.Remove(botSlot)) return;
-                    if (rec.Tickrate != Tickrate)
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+                    if (rec.TickRate != Tickrate)
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.TickRate}, server {Tickrate}.");
                     if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
                     {
                         _driver.Track(botSlot);

@@ -1,6 +1,10 @@
 // Shared data types for the BotController API.
 
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("BotControllerImpl")]
+[assembly: InternalsVisibleTo("BotControllerImplSW2")]
 
 namespace BotControllerApi
 {
@@ -26,8 +30,25 @@ namespace BotControllerApi
         Slot5 = 5,
     }
 
+    // Read-only native AI evidence; consumers own contact and handoff decisions.
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct MovementSnapshot
+    public struct BotPerceptionState
+    {
+        public int Valid;
+        public uint EnemyHandle;
+        public int HasEnemy;
+        public int EnemyVisible;
+        public int VisibleEnemyParts;
+        public int NearbyEnemyCount;
+        public int LastEnemyDead;
+        public float LastSawEnemyTimestamp;
+        public float FirstSawEnemyTimestamp;
+        public float CurrentEnemyAcquireTimestamp;
+        public uint UpdateSerial;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct NativeMovementSnapshot
     {
         public float OriginX, OriginY, OriginZ;
         public float VelX, VelY, VelZ;
@@ -35,9 +56,9 @@ namespace BotControllerApi
         public uint EntityFlags;
         public byte MoveType;
         public byte Pad0, Pad1, Pad2;
-        public ulong Buttons;        // states[0] (pressed)
-        public ulong Buttons1;       // states[1]
-        public ulong Buttons2;       // states[2]
+        public ulong Buttons;        // Engine states[0]: held.
+        public ulong Buttons1;       // states[1]: changed.
+        public ulong Buttons2;       // states[2]: pressed and released within the same command.
         public float DuckAmount;     // m_flDuckAmount (0=stand, 1=full crouch)
         public float DuckSpeed;      // m_flDuckSpeed
         public float LadderNormalX;  // m_vecLadderNormal
@@ -50,10 +71,10 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayTick
+    internal struct ReplayTick
     {
-        public MovementSnapshot Pre;
-        public MovementSnapshot Post;
+        public NativeMovementSnapshot Pre;
+        public NativeMovementSnapshot Post;
         public int WeaponDefIndex;
         public uint NumSubtick;
         public uint EventFlags;
@@ -87,7 +108,7 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayCommandFrame
+    internal struct NativeReplayInput
     {
         public float ForwardMove;
         public float LeftMove;
@@ -109,9 +130,9 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayMovementExtra
+    internal struct NativeReplayHistory
     {
-        public uint Fields;
+        public uint Fields; // Private presence mask; absent groups are not restored.
         public float JumpPressedTime;
         public float LastDuckTime;
         public int LastActualJumpPressTick;
@@ -123,6 +144,52 @@ namespace BotControllerApi
         public float LastLandedVelocityX;
         public float LastLandedVelocityY;
         public float LastLandedVelocityZ;
+        public int SourcePlayerTick;
+        public float SourceTickrate; // Must match the live engine rate; timestamps <= 0 are sentinels.
+    }
+
+    // Private source-state scalars; vector and timestamp components have joint presence.
+    [System.Runtime.CompilerServices.InlineArray(36)]
+    internal struct NativeSourceValues
+    {
+        private uint _element0;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct NativeReplaySourceState
+    {
+        public ulong Fields;
+        public int WeaponDefIndex;
+        public uint WeaponInstanceId;
+        public NativeSourceValues Values;
+    }
+
+    // Private native transport; callers only construct ReplayData/ReplayFrame.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct ReplayFrameData
+    {
+        public ReplayTick Tick;
+        public NativeReplayInput Input;
+        public NativeReplayHistory History;
+        public uint MovementFields;
+        public float Stamina, VelocityModifier, GravityScale;
+        public byte GravityDisabled;
+        public byte Pad0, Pad1, Pad2;
+        public float Friction;
+        public float BaseVelocityX, BaseVelocityY, BaseVelocityZ;
+        public NativeReplaySourceState Source;
+    }
+
+    // Includes an idle slot's terminal cursor; Playing remains authoritative.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct ReplaySlotState
+    {
+        public int Playing;
+        public int Cursor;
+        public int Total;
+        public int CurrentTickIndex;
+        public int WeaponDefIndex;
+        public int NumSubtick;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
