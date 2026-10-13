@@ -1,4 +1,4 @@
-// KHook for CS2 movement functions (ProcessMovement / PhysicsSimulate / PlayerRunCommand)
+// KHook for CS2 command boundaries and engine movement input/output.
 
 #pragma once
 
@@ -24,6 +24,9 @@ const char* Status();
 // Requires the frame-boundary and command hooks; logs unavailable capabilities.
 bool RecorderReady();
 
+// Also requires SetupMove and FinishMove for engine-owned replay movement.
+bool ReplayReady();
+
 // Registers the authoritative pawn supplied by the managed plugin for recording or replay.
 bool SetReplayPawn(int slot, void* pawn);
 
@@ -33,8 +36,17 @@ void PrimeSlotServices(int slot, void* services);
 // Clears the registered replay pawn for a slot.
 void ClearReplayPawn(int slot);
 
+// Clears only replay-owned button residue while the registered pawn is still AI-owned.
+void ClearReplayInputState(int slot, void* services = nullptr);
+
+// Uses the engine setter to derive actual movement type and run physics change callbacks.
+bool InitializeReplayMoveType(void* pawn, uint8_t moveType);
+
 // Resolves and validates the pawn owning the supplied movement services.
 void* ResolveReplayPawn(int slot, void* services);
+
+// Reads the player tickbase from the recording/replay's matching PhysicsSimulate controller.
+bool ReadPlayerTickBase(int slot, int32_t& tickBase);
 
 // Creates an independently cancellable usercmd button injection
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs);

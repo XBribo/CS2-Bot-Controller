@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include "ReplaySourceState.h"
 
 namespace cs2bc {
 // State of the player at one boundary of a movement tick. Captured twice
@@ -16,9 +17,9 @@ struct MovementSnapshot
     uint32_t entityFlags; // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
     uint8_t moveType; // m_MoveType (MoveType_t)
     uint8_t pad[3]; // keep 4-byte alignment explicit
-    uint64_t buttons; // services button states[0] (pressed)
-    uint64_t buttons1; // states[1]
-    uint64_t buttons2; // states[2]
+    uint64_t buttons; // engine states[0]: held
+    uint64_t buttons1; // states[1]: changed
+    uint64_t buttons2; // states[2]: pressed and released within the same command
     float duckAmount; // m_flDuckAmount (0=stand, 1=full crouch)
     float duckSpeed; // m_flDuckSpeed
     float ladderNormalX; // m_vecLadderNormal (ladder anim facing)
@@ -111,9 +112,22 @@ struct ReplayCommandFrameData
     uint8_t pad[3];
 };
 
-struct ReplayMovementExtra
+// Presence applies to scalar times, tick/fraction pairs, or the complete landing velocity.
+enum ReplayHistoryFields : uint32_t // NOLINT(performance-enum-size)
 {
-    uint32_t fields;
+    ReplayHistoryNone = 0,
+    ReplayHistoryJumpPressedTime = 1U << 0,
+    ReplayHistoryLastDuckTime = 1U << 1,
+    ReplayHistoryLastActualJumpPress = 1U << 2,
+    ReplayHistoryLastUsableJumpPress = 1U << 3,
+    ReplayHistoryLastLanded = 1U << 4,
+    ReplayHistoryLastLandedVelocity = 1U << 5,
+    ReplayHistoryAll = (1U << 6) - 1,
+};
+
+struct ReplayHistoryData
+{
+    uint32_t fields; // ReplayHistoryFields; absent fields are not restored
     float jumpPressedTime;
     float lastDuckTime;
     int32_t lastActualJumpPressTick;
@@ -125,12 +139,56 @@ struct ReplayMovementExtra
     float lastLandedVelocityX;
     float lastLandedVelocityY;
     float lastLandedVelocityZ;
+    int32_t sourcePlayerTick;
+    float sourceTickrate; // must match the live engine rate; timestamps <= 0 retain sentinel semantics
+};
+
+// Non-clock movement inputs restored before every simulated command.
+enum ReplayMovementFields : uint32_t // NOLINT(performance-enum-size)
+{
+    ReplayMovementStamina = 1U << 0,
+    ReplayMovementVelocityModifier = 1U << 1,
+    ReplayMovementGravityScale = 1U << 2,
+    ReplayMovementGravityDisabled = 1U << 3,
+    ReplayMovementFriction = 1U << 4,
+    ReplayMovementBaseVelocity = 1U << 5, // complete vector
+    ReplayMovementAll = (1U << 6) - 1,
+};
+
+// Private packed transport for one public ReplayFrame; subticks are flattened only at the bridge.
+struct ReplayFrameData
+{
+    ReplayTick tick;
+    ReplayCommandFrameData input;
+    ReplayHistoryData history;
+    uint32_t movementFields; // ReplayMovementFields; absence never overwrites live state
+    float stamina;
+    float velocityModifier;
+    float gravityScale;
+    uint8_t gravityDisabled;
+    uint8_t pad[3];
+    float friction;
+    float baseVelocityX, baseVelocityY, baseVelocityZ;
+    ReplaySourceStateData source;
+};
+
+// Retains the terminal cursor when idle so callers can distinguish completion from an early stop.
+struct ReplaySlotState
+{
+    int32_t playing;
+    int32_t cursor;
+    int32_t total;
+    int32_t currentTickIndex;
+    int32_t weaponDefIndex;
+    int32_t numSubtick;
 };
 #pragma pack(pop)
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
-static_assert(sizeof(ReplayMovementExtra) == 48);
+static_assert(sizeof(ReplayHistoryData) == 56);
+static_assert(sizeof(ReplayFrameData) == 576);
 static_assert(sizeof(ReplayTick) == 256);
+static_assert(sizeof(ReplaySlotState) == 24);
 
 namespace motion_recorder {
 constexpr int kMaxSlots = 64;
@@ -183,7 +241,7 @@ void OnCapturePost(int slot, void* services, void* cmd);
 // PlayerRunCommand hook: stash this tick's subtick moves
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
 // PlayerRunCommand hook: stash this tick's complete command frame
-void OnCaptureCommand(int slot, const ReplayCommandFrameData& command);
+void OnCaptureCommand(int slot, void* services, const ReplayCommandFrameData& command);
 // Track which WeaponServices* maps to this recording slot
 void SetLiveWs(int slot, void* ws);
 void* LiveWs(int slot);
@@ -193,36 +251,45 @@ void SetCurrentDef(int slot, int defIndex);
 // Copy recorded data out to caller buffers; returns elements written.
 int CopyTicks(int slot, ReplayTick* out, int maxTicks);
 int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks);
+// Copies a bounded complete frame range, including optional pre-command source state.
+int CopyFramesRange(int slot, int start, ReplayFrameData* out, int maxFrames);
 int CopySubticks(int slot, SubtickMove* out, int maxSubticks);
 int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks);
 int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands);
 int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands);
 
 // ---- replay ----
-// Load all parallel replay arrays into a slot's replay buffer
-bool LoadReplay(int slot,
-                const ReplayTick* ticks,
-                int tickCount,
-                const SubtickMove* subs,
-                int subCount,
-                const ReplayCommandFrameData* commands,
-                int commandCount,
-                const ReplayMovementExtra* movementExtras,
-                int movementExtraCount) noexcept;
+// Load complete frames; a zero rate is only allowed for native recordings without history.
+bool LoadReplay(int slot, float tickRate, const ReplayFrameData* frames, int frameCount,
+                const SubtickMove* subs, int subCount) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
+// Starts at an inclusive tick index, or resumes a hold at that index.
+bool StartReplayAt(int slot, bool loop, int startIndex);
+// Plays [startIndex, holdBeforeIndex), then retains replay ownership without consuming input.
+bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex);
 bool StopReplay(int slot); // stop + clear injection
+// Stops replay and releases all loaded replay buffer allocations.
+bool ReleaseReplayBuffer(int slot);
 bool IsReplaying(int slot);
+// Reports whether replay is retaining its completed boundary without simulating commands.
+bool IsReplayHolding(int slot);
 // Reports whether any slot has an active replay.
 bool HasAnyReplay();
 int ReplayCursor(int slot); // current tick index, <0 if idle
 int ReplayTotal(int slot); // loaded tick count
+// Reads one consistent replay state, including an idle slot's terminal cursor.
+bool GetReplaySlotState(int slot, ReplaySlotState& out);
 
 // Current tick being applied this server tick
 bool CurrentReplayTick(int slot, ReplayTick& out);
+// Copies a complete completed/current frame and its subticks under the same slot lock.
+bool CurrentReplayFrame(int slot, ReplayFrameData& out, SubtickMove* subs, int maxSubticks);
 // Assemble all replay input fields for the next simulated tick
 bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out);
 // Command view angles for the tick currently being simulated.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
+// Final view read by the engine; retains the completed tick across cursor advancement.
+bool ReplaySpectatorView(int slot, MovementSnapshot& out);
 // Copy the current tick's subtick moves into out
 // Returns count, or -1 if not replaying.
 int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut);
@@ -252,10 +319,14 @@ bool DropHookReady();
 // Installs the Windows release-pose capture and replay hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
-// ---- replay write hooks ----
-// PlayerRunCommand (pre): seed pawn state consumed by weapon and grenade logic
-void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick);
-// PhysicsSimulate (post): restore the end snapshot and advance the cursor.
+// ---- replay input hooks ----
+// PlayerRunCommand (pre): seed movement at boundaries, initialize each weapon once, and supply view.
+bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick, const MovementSnapshot& commandView);
+// SetupMove (post): supply pre kinematics to CMoveData.
+bool OnReplaySetupMove(int slot, void* moveData);
+// FinishMove (post): supply final view before the command's network publication.
+bool OnReplayFinalView(int slot, void* services);
+// PhysicsSimulate (post): advance after simulation without overwriting its output.
 void OnReplayCommit(int slot, void* services, bool simulated);
 
 void ClearAll(); // wipe all record + replay buffers

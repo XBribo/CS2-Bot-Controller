@@ -68,22 +68,12 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool StopRecord(int slot) => BotController.StopRecord(slot);
         // Returns the number of recorded ticks for a slot.
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
-        // Returns the recorded tick and subtick buffers for a slot.
-        public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers for a slot
-        public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
+        // Returns recording frames using the caller's captured tickrate.
+        public ReplayData GetRecordedMotion(int slot, float tickRate)
+            => BotController.GetRecordedMotion(slot, tickRate);
 
-        // Loads a replay buffer into a bot slot.
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+        // Copies one unified frame sequence into the native replay buffer.
+        public bool LoadReplay(int slot, ReplayData replay) => BotController.LoadReplay(slot, replay);
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
@@ -91,21 +81,40 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         // Starts replay for a bot slot.
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
+        // Starts or resumes replay at an inclusive index.
+        public bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController.StartReplayAt(slot, loop, startIndex);
+        // Holds input before the exclusive boundary while retaining replay ownership.
+        public bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController.StartReplayUntil(slot, loop, startIndex, holdBeforeIndex);
         // Stops replay for a bot slot.
         public bool StopReplay(int slot) => BotController.StopReplay(slot);
+        // Stops replay and releases its buffer allocations.
+        public bool ReleaseReplayBuffer(int slot) => BotController.ReleaseReplayBuffer(slot);
         // Returns the current replay cursor for a slot.
         public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);
         // Returns the total replay length for a slot.
         public int ReplayTotal(int slot) => BotController.ReplayTotal(slot);
+        // Reads aggregate replay state without losing the terminal cursor.
+        public bool TryGetReplayState(int slot, out ReplaySlotState state) => BotController.TryGetReplayState(slot, out state);
         // Reports whether a slot is actively replaying.
         public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
-        // Returns the current replay tick when one is available.
-        public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
+        // Returns snapshots, input and subticks from the same native frame.
+        public bool TryGetReplayFrame(int slot, out ReplayFrame frame)
+            => BotController.TryGetReplayFrame(slot, out frame);
 
         // Switches the active weapon for a bot slot.
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
+        // Queues a best-weapon choice for the current unlocked AI owner.
+        public bool RequestEquipBestWeapon(int slot)
+            => BotController.RequestEquipBestWeapon(slot);
+        // Reads the current AI owner's native perception snapshot.
+        public bool TryGetNativePerceptionState(int slot, out BotPerceptionState state)
+            => BotController.TryGetNativePerceptionState(slot, out state);
+        // Applies the shared replay-only native FOV policy.
+        public bool SetReplayNativeFovOverride(bool enabled)
+            => BotController.SetReplayNativeFovOverride(enabled);
         // Returns the active weapon definition index for a bot slot.
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
         // Creates an independently cancellable native usercmd injection
@@ -427,16 +436,15 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         {
             try
             {
-                MotionRecording rec = MotionStore.LoadFromFile(file);
-                bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                ReplayData rec = MotionStore.LoadFromFile(file);
+                bool loaded = BotController.LoadReplay(botSlot, rec);
                 _completedJobs.Enqueue(() =>
                 {
                     if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
                     _loadingSlots.Remove(botSlot);
                     if (_cancelledLoads.Remove(botSlot)) return;
-                    if (rec.Tickrate != Tickrate)
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
+                    if (rec.TickRate != Tickrate)
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.TickRate}, server {Tickrate}.");
                     if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
                     {
                         _driver.Track(botSlot);

@@ -1,6 +1,6 @@
 <Project>
   <!-- Generate constants for both runtime properties and SW2 attributes. -->
-  <Target Name="GeneratePluginBuildInfo" BeforeTargets="CoreCompile" DependsOnTargets="InitializeSourceControlInformation">
+  <Target Name="GeneratePluginBuildInfo" BeforeTargets="CoreCompile" DependsOnTargets="InitializeSourceControlInformation" Condition="'$(MSBuildProjectName)' != 'BotControllerApi'">
     <Error Condition="'$(PluginVersion)' == ''" Text="Cannot read the CMake base version; supply -p:PluginVersion." />
     <PropertyGroup>
       <_PluginGitSha Condition="'$(SourceRevisionId)' != ''">$(SourceRevisionId)</_PluginGitSha>

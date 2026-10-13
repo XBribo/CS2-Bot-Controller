@@ -19,6 +19,15 @@ inline int g_vtIdxTeleport = 164;
 inline int g_botAiTickedFlag = -1;
 // CCSBot -> pawn (CCSPlayerPawn*)
 inline int g_botPawn = -1;
+// Optional Schema-backed native perception fields; unresolved fields disable warm replay perception.
+inline int g_botEnemy = -1;
+inline int g_botEnemyVisible = -1;
+inline int g_botVisibleEnemyParts = -1;
+inline int g_botNearbyEnemyCount = -1;
+inline int g_botLastEnemyDead = -1;
+inline int g_botLastSawEnemyTimestamp = -1;
+inline int g_botFirstSawEnemyTimestamp = -1;
+inline int g_botCurrentEnemyAcquireTimestamp = -1;
 // CCSBot -> m_profile (BotProfile*)
 inline int g_botProfile = 0x08;
 
@@ -50,7 +59,7 @@ inline int g_buyDoneBuying = 0x18;
 inline int g_entIdentity = -1;
 // CEntityIdentity -> m_EHandle (low 15 bits = entity index)
 inline int g_entIdentityEHandle = 0x10;
-// m_MoveType (MoveType_t, 1 byte) — restored each replay tick
+// m_MoveType (MoveType_t, 1 byte) — restored at replay initialization
 inline int g_entMoveType = -1;
 // m_nActualMoveType (MoveType_t, 1 byte) — networked move type
 inline int g_entActualMoveType = -1;
@@ -75,6 +84,8 @@ inline int g_pawnWeaponServices = -1;
 inline int g_pawnItemServices = -1;
 // m_pMovementServices
 inline int g_pawnMovementServices = -1;
+// Optional aim-punch service used by source-state recording and replay.
+inline int g_pawnAimPunchServices = -1;
 // m_hController (CHandle)
 inline int g_pawnController = -1;
 // m_hOriginalController (CHandle)
@@ -85,7 +96,7 @@ inline int g_pawnViewAngle = -1;
 inline int g_pawnViewAnglePrevious = -1;
 // Embedded server view-angle change vector
 inline int g_pawnServerViewAngleChanges = -1;
-// m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
+// m_angEyeAngles (QAngle) — networked view publish
 inline int g_pawnEyeAngles = -1;
 
 // ---- CCSPlayer_WeaponServices ----
@@ -102,10 +113,10 @@ inline int g_weaponItemDefIndex = -1;
 
 // m_pawn (CCSPlayerPawn*)
 inline int g_servicesPawn = 56;
-// m_nButtons.m_pButtonStates[0..2] — engine button state block (CInButtonState)
-inline int g_servicesButtons = -1; // states[0] (pressed)
-inline int g_servicesButtons1 = -1; // states[1]
-inline int g_servicesButtons2 = -1; // states[2]
+// m_nButtons.m_pButtonStates[0..2] — engine button state planes (CInButtonState)
+inline int g_servicesButtons = -1; // states[0]: held
+inline int g_servicesButtons1 = -1; // states[1]: changed
+inline int g_servicesButtons2 = -1; // states[2]: pressed and released in the same command
 // Previous command view angles consumed by PlayerRunCommand
 inline int g_servicesOldViewAngles = -1;
 
@@ -116,6 +127,27 @@ inline int g_servicesDuckAmount = -1; // float m_flDuckAmount
 inline int g_servicesDuckSpeed = -1; // float m_flDuckSpeed
 inline int g_servicesDesiresDuck = -1; // bool m_bDesiresDuck
 inline int g_servicesDucking = -1; // bool m_bDucking
+// Optional source-state modifiers; missing fields only block replay when supplied.
+inline int g_servicesStamina = -1; // float m_flStamina
+inline int g_pawnVelocityModifier = -1; // float m_flVelocityModifier
+inline int g_entGravityScale = -1; // float m_flGravityScale
+inline int g_entGravityDisabled = -1; // bool m_bGravityDisabled
+inline int g_entFriction = -1; // float m_flFriction
+inline int g_entBaseVelocity = -1; // Vector m_vecBaseVelocity
+
+// Optional movement history; a replay requesting an unavailable field is rejected.
+inline int g_controllerTickBase = -1; // CBasePlayerController::m_nTickBase
+inline int g_servicesJumpPressedTime = -1; // m_flJumpPressedTime (historical engine member)
+inline int g_servicesLastDuckTime = -1; // m_flLastDuckTime
+inline int g_servicesLastActualJumpPressTick = -1; // m_ModernJump.m_nLastActualJumpPressTick
+inline int g_servicesLastActualJumpPressFrac = -1; // m_ModernJump.m_flLastActualJumpPressFrac
+inline int g_servicesLastUsableJumpPressTick = -1; // m_ModernJump.m_nLastUsableJumpPressTick
+inline int g_servicesLastUsableJumpPressFrac = -1; // m_ModernJump.m_flLastUsableJumpPressFrac
+inline int g_servicesLastLandedTick = -1; // m_ModernJump.m_nLastLandedTick
+inline int g_servicesLastLandedFrac = -1; // m_ModernJump.m_flLastLandedFrac
+inline int g_servicesLastLandedVelocityX = -1; // m_ModernJump.m_flLastLandedVelocityX
+inline int g_servicesLastLandedVelocityY = -1; // m_ModernJump.m_flLastLandedVelocityY
+inline int g_servicesLastLandedVelocityZ = -1; // m_ModernJump.m_flLastLandedVelocityZ
 
 // ---- CMoveData  ----
 
@@ -128,9 +160,11 @@ inline int g_moveAbsOrigin = 200;
 
 #ifdef _WIN32
 inline int g_vtIdxPlayerRunCommand = 25;
+inline int g_vtIdxSetupMove = 34;
 inline int g_vtIdxFinishMove = 38;
 #else
 inline int g_vtIdxPlayerRunCommand = 26;
+inline int g_vtIdxSetupMove = 35;
 inline int g_vtIdxFinishMove = 39;
 #endif
 // Controller setup immediately preceding queued client commands.

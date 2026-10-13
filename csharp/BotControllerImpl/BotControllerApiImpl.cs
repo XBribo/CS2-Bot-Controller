@@ -18,36 +18,48 @@ namespace BotControllerApi
         public bool StartRecord(int slot) => BotController.StartRecord(slot);
         public bool StopRecord(int slot) => BotController.StopRecord(slot);
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
-        public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers
-        public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
+        // Returns recording frames using the caller's captured tickrate.
+        public ReplayData GetRecordedMotion(int slot, float tickRate)
+            => BotController.GetRecordedMotion(slot, tickRate);
 
         // ---- replay ----
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+        // Copies one unified frame sequence into the native replay buffer.
+        public bool LoadReplay(int slot, ReplayData replay) => BotController.LoadReplay(slot, replay);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
         // Registers the authoritative native pawn pointer for replay.
         public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
+        // Starts or resumes replay at an inclusive index.
+        public bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController.StartReplayAt(slot, loop, startIndex);
+        // Holds input before the exclusive boundary while retaining replay ownership.
+        public bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController.StartReplayUntil(slot, loop, startIndex, holdBeforeIndex);
         public bool StopReplay(int slot) => BotController.StopReplay(slot);
+        // Stops replay and releases its buffer allocations.
+        public bool ReleaseReplayBuffer(int slot) => BotController.ReleaseReplayBuffer(slot);
         public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);
         public int ReplayTotal(int slot) => BotController.ReplayTotal(slot);
+        // Reads aggregate replay state without losing the terminal cursor.
+        public bool TryGetReplayState(int slot, out ReplaySlotState state) => BotController.TryGetReplayState(slot, out state);
         public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
-        public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
+        // Returns snapshots, input and subticks from the same native frame.
+        public bool TryGetReplayFrame(int slot, out ReplayFrame frame)
+            => BotController.TryGetReplayFrame(slot, out frame);
 
         // ---- weapons ----
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
+        // Queues a best-weapon choice for the current unlocked AI owner.
+        public bool RequestEquipBestWeapon(int slot)
+            => BotController.RequestEquipBestWeapon(slot);
+        // Reads the current AI owner's native perception snapshot.
+        public bool TryGetNativePerceptionState(int slot, out BotPerceptionState state)
+            => BotController.TryGetNativePerceptionState(slot, out state);
+        // Applies the shared replay-only native FOV policy.
+        public bool SetReplayNativeFovOverride(bool enabled)
+            => BotController.SetReplayNativeFovOverride(enabled);
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
         // Creates an independently cancellable native usercmd injection
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)

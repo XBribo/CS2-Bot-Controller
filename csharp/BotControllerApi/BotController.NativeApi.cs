@@ -1,4 +1,4 @@
-// P/Invoke wrapper for BotController.dll (ABI 22), check IsCompatible() before use
+// P/Invoke wrapper for BotController.dll (ABI 23), check IsCompatible() before use
 // Main-thread only.
 
 using System.Runtime.InteropServices;
@@ -8,7 +8,16 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 22;
+        private const int ExpectedAbiVersion = 23;
+
+        // Native layout metadata, not a separately versioned public frame contract.
+        [StructLayout(LayoutKind.Sequential, Pack = 4)]
+        private struct AbiInfo
+        {
+            public int Major, Minor, SnapshotSize, TickSize, SubtickSize, SlotStateSize, MaxSlots;
+            public ulong Capabilities;
+            public int FrameSize, InputSize;
+        }
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -27,6 +36,10 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetVersion();
+
+        // Reject stale local ABI 23 builds before calling the unpublished frame signature.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetAbiInfo(out AbiInfo info, int size);
 
         // Imports the native usercmd injection export
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
@@ -81,15 +94,8 @@ namespace BotControllerApi
         private static extern int BotController_GetRecordedSubtickCount(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_GetRecordedCommandCount(int slot);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_CopyRecordedTicks(
-            int slot, [Out] ReplayTick[] ticks, int maxTicks);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_CopyRecordedTicksRange(
-            int slot, int start, [Out] ReplayTick[] ticks, int maxTicks);
+        private static extern int BotController_CopyRecordedFramesRange(
+            int slot, int start, [Out] ReplayFrameData[] frames, int maxFrames);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CopyRecordedSubticks(
@@ -100,19 +106,9 @@ namespace BotControllerApi
             int slot, int start, [Out] SubtickMove[] subs, int maxSubticks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_CopyRecordedCommands(
-            int slot, [Out] ReplayCommandFrame[] commands, int maxCommands);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_CopyRecordedCommandsRange(
-            int slot, int start, [Out] ReplayCommandFrame[] commands, int maxCommands);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_LoadReplay(
-            int slot, [In] ReplayTick[] ticks, int tickCount,
-            [In] SubtickMove[] subs, int subCount,
-            [In] ReplayCommandFrame[] commands, int commandCount,
-            [In] ReplayMovementExtra[] movementExtras, int movementExtraCount);
+            int slot, float tickRate, [In] ReplayFrameData[] frames, int frameCount,
+            [In] SubtickMove[] subs, int subCount);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -120,11 +116,23 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StartReplay(int slot, int loop);
 
+        // Starts or resumes at an inclusive replay index.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayAt(int slot, int loop, int startIndex);
+
+        // Holds playback before an exclusive replay index.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_StartReplayUntil(int slot, int loop, int startIndex, int holdBeforeIndex);
+
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetReplayPawn(int slot, ulong pawnPtr);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StopReplay(int slot);
+
+        // Stops playback and releases all replay buffer allocations.
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_ReleaseReplayBuffer(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayCursor(int slot);
@@ -132,11 +140,25 @@ namespace BotControllerApi
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetReplayTotal(int slot);
 
+        // Reads the terminal cursor and completed-tick metadata in one native call.
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_GetReplayTick(int slot, out ReplayTick tick);
+        private static extern int BotController_GetReplaySlotState(int slot, out ReplaySlotState state);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetReplayFrame(
+            int slot, out ReplayFrameData frame, [Out] SubtickMove[] subs, int maxSubticks);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SwitchBotWeapon(int slot, int defIndex);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_RequestEquipBestWeapon(int slot);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetNativePerceptionState(int slot, out BotPerceptionState state, int size);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SetReplayNativeFovOverride(int enabled);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_GetBotActiveWeaponDef(int slot);
@@ -185,7 +207,16 @@ namespace BotControllerApi
             int audibleMask);
 
         // Native ABI must match what this wrapper expects.
-        public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
+        public static bool IsCompatible()
+            => BotController_GetVersion() == ExpectedAbiVersion
+               && BotController_GetAbiInfo(out var info, Marshal.SizeOf<AbiInfo>()) == 0
+               && info.Major == ExpectedAbiVersion
+               && info.SnapshotSize == Marshal.SizeOf<NativeMovementSnapshot>()
+               && info.TickSize == Marshal.SizeOf<ReplayTick>()
+               && info.SubtickSize == Marshal.SizeOf<SubtickMove>()
+               && info.SlotStateSize == Marshal.SizeOf<ReplaySlotState>()
+               && info.FrameSize == Marshal.SizeOf<ReplayFrameData>()
+               && info.InputSize == Marshal.SizeOf<NativeReplayInput>();
 
         // Native C-ABI version the loaded DLL reports.
         public static int AbiVersion => BotController_GetVersion();
@@ -263,90 +294,44 @@ namespace BotControllerApi
         public static int RecordedTickCount(int slot) => BotController_GetRecordedTickCount(slot);
 
         // Copies one fixed-size range from a stopped recording.
-        public static int CopyRecordedTicksRange(int slot, int start, ReplayTick[] ticks)
-            => BotController_CopyRecordedTicksRange(slot, start, ticks, ticks.Length);
+        internal static int CopyRecordedFramesRange(int slot, int start, ReplayFrameData[] frames)
+            => BotController_CopyRecordedFramesRange(slot, start, frames, frames.Length);
 
         // Copies one fixed-size subtick range from a stopped recording.
-        public static int CopyRecordedSubticksRange(int slot, int start, SubtickMove[] subs)
+        internal static int CopyRecordedSubticksRange(int slot, int start, SubtickMove[] subs)
             => BotController_CopyRecordedSubticksRange(slot, start, subs, subs.Length);
 
-        // Copies one fixed-size command range from a stopped recording.
-        public static int CopyRecordedCommandsRange(int slot, int start, ReplayCommandFrame[] commands)
-            => BotController_CopyRecordedCommandsRange(slot, start, commands, commands.Length);
-
         // Reports the size of the stopped recording's subtick buffer.
-        public static int RecordedSubtickCount(int slot) => BotController_GetRecordedSubtickCount(slot);
+        internal static int RecordedSubtickCount(int slot) => BotController_GetRecordedSubtickCount(slot);
 
-        // Reports the size of the stopped recording's command buffer.
-        public static int RecordedCommandCount(int slot) => BotController_GetRecordedCommandCount(slot);
-
-        // Pull a slot's recorded ticks + subticks out of native memory.
-        public static (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
+        // Convert a stopped recording without exposing parallel transport buffers.
+        public static ReplayData GetRecordedMotion(int slot, float tickRate)
         {
-            var (ticks, subs, _) = GetRecordedMotionExtended(slot);
-            return (ticks, subs);
-        }
-
-        // Pull aligned tick, subtick, and command-frame buffers from native memory
-        public static (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-        {
+            if (!IsCompatible()) throw new InvalidOperationException("BotController ABI mismatch.");
             int nt = BotController_GetRecordedTickCount(slot);
             if (nt <= 0)
-                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>(), Array.Empty<ReplayCommandFrame>());
-
-            var ticks = new ReplayTick[nt];
-            int gotT = BotController_CopyRecordedTicks(slot, ticks, nt);
-            if (gotT <= 0)
-                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>(), Array.Empty<ReplayCommandFrame>());
-            if (gotT != nt) Array.Resize(ref ticks, gotT);
-
+                return ReplayFrameCodec.FromRecording(tickRate, Array.Empty<ReplayFrameData>(), Array.Empty<SubtickMove>());
+            var frames = new ReplayFrameData[nt];
+            if (BotController_CopyRecordedFramesRange(slot, 0, frames, nt) != nt)
+                throw new InvalidDataException("Recording must be stopped and unchanged during copy.");
             int ns = BotController_GetRecordedSubtickCount(slot);
-            SubtickMove[] subs;
-            if (ns <= 0)
-                subs = Array.Empty<SubtickMove>();
-            else
-            {
-                subs = new SubtickMove[ns];
-                int gotS = BotController_CopyRecordedSubticks(slot, subs, ns);
-                if (gotS <= 0) subs = Array.Empty<SubtickMove>();
-                else if (gotS != ns) Array.Resize(ref subs, gotS);
-            }
-
-            int nc = BotController_GetRecordedCommandCount(slot);
-            ReplayCommandFrame[] commands;
-            if (nc <= 0)
-                commands = Array.Empty<ReplayCommandFrame>();
-            else
-            {
-                commands = new ReplayCommandFrame[nc];
-                int gotC = BotController_CopyRecordedCommands(slot, commands, nc);
-                if (gotC <= 0) commands = Array.Empty<ReplayCommandFrame>();
-                else if (gotC != nc) Array.Resize(ref commands, gotC);
-            }
-            return (ticks, subs, commands);
+            if (ns < 0) throw new InvalidDataException("Recording subtick count is invalid.");
+            var subs = new SubtickMove[ns];
+            if (ns > 0 && BotController_CopyRecordedSubticks(slot, subs, ns) != ns)
+                throw new InvalidDataException("Recording subticks changed during copy.");
+            return ReplayFrameCodec.FromRecording(tickRate, frames, subs);
         }
 
         // ---- replay ----
 
-        // Load replay buffers with optional per-tick command and movement data.
-        public static bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands,
-            ReplayMovementExtra[] movementExtras)
-            => ticks is { Length: > 0 }
-               && BotController_LoadReplay(
-                   slot,
-                   ticks,
-                   ticks.Length,
-                   subs ?? Array.Empty<SubtickMove>(),
-                   subs?.Length ?? 0,
-                   commands ?? Array.Empty<ReplayCommandFrame>(),
-                   commands?.Length ?? 0,
-                   movementExtras ?? Array.Empty<ReplayMovementExtra>(),
-                   movementExtras?.Length ?? 0) == 0;
+        // Translate one public model to the private packed native transport.
+        public static bool LoadReplay(int slot, ReplayData replay)
+        {
+            if (replay?.Frames is not { Length: > 0 } || !IsCompatible() ||
+                !ReplayFrameCodec.TryEncode(replay, out var frames, out var subs))
+                return false;
+            return BotController_LoadReplay(slot, replay.TickRate, frames, frames.Length, subs, subs.Length) == 0;
+        }
 
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.
@@ -356,6 +341,14 @@ namespace BotControllerApi
         public static bool StartReplay(int slot, bool loop = false)
             => BotController_StartReplay(slot, loop ? 1 : 0) == 0;
 
+        // Starts at an inclusive index, or resumes at the held boundary without reinitializing movement.
+        public static bool StartReplayAt(int slot, bool loop, int startIndex)
+            => BotController_StartReplayAt(slot, loop ? 1 : 0, startIndex) == 0;
+
+        // Plays [startIndex, holdBeforeIndex), then holds input and retains replay ownership.
+        public static bool StartReplayUntil(int slot, bool loop, int startIndex, int holdBeforeIndex)
+            => BotController_StartReplayUntil(slot, loop ? 1 : 0, startIndex, holdBeforeIndex) == 0;
+
         // Registers the current native pawn before replay starts.
         public static bool SetReplayPawn(int slot, nint pawn)
             => pawn != 0 &&
@@ -363,20 +356,49 @@ namespace BotControllerApi
 
         public static bool StopReplay(int slot) => BotController_StopReplay(slot) == 0;
 
+        // Stops replay and frees its loaded buffers without affecting recorded motion.
+        public static bool ReleaseReplayBuffer(int slot) => BotController_ReleaseReplayBuffer(slot) == 0;
+
         public static int ReplayCursor(int slot) => BotController_GetReplayCursor(slot);
 
         public static int ReplayTotal(int slot) => BotController_GetReplayTotal(slot);
+
+        // Includes terminal state after natural completion or an explicit stop.
+        public static bool TryGetReplayState(int slot, out ReplaySlotState state)
+            => BotController_GetReplaySlotState(slot, out state) == 0;
 
         public static bool IsReplaying(int slot) => BotController_GetReplayCursor(slot) >= 0;
 
         // The tick currently being replayed on this slot, for driving weapon/fire
         // C#-side. Returns false if the slot isn't replaying.
-        public static bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController_GetReplayTick(slot, out tick) == 0;
+        // Read input, snapshots, history and subticks from the same native frame.
+        public static bool TryGetReplayFrame(int slot, out ReplayFrame frame)
+        {
+            frame = null!;
+            if (!IsCompatible()) return false;
+            var subs = new SubtickMove[36];
+            if (BotController_GetReplayFrame(slot, out var data, subs, subs.Length) != 0)
+                return false;
+            Array.Resize(ref subs, checked((int)data.Tick.NumSubtick));
+            frame = ReplayFrameCodec.Decode(data, subs);
+            return true;
+        }
 
         // Switch a bot to the weapon with this def index.
         public static bool SwitchBotWeapon(int slot, int defIndex)
             => BotController_SwitchBotWeapon(slot, defIndex) == 0;
+
+        // Queues one native AI weapon choice; locked, replaying and human-controlled owners are rejected.
+        public static bool RequestEquipBestWeapon(int slot)
+            => BotController_RequestEquipBestWeapon(slot) == 0;
+
+        // Reads the latest native AI Update snapshot, not inferred managed visibility.
+        public static bool TryGetNativePerceptionState(int slot, out BotPerceptionState state)
+            => BotController_GetNativePerceptionState(slot, out state, Marshal.SizeOf<BotPerceptionState>()) == 0 && state.Valid != 0;
+
+        // Preserves native LOS/smoke evaluation while optionally allowing rear threats during replay.
+        public static bool SetReplayNativeFovOverride(bool enabled)
+            => BotController_SetReplayNativeFovOverride(enabled ? 1 : 0) == 0;
 
         // Def index of the bot's current active weapon, same normalization as the
         // recorded WeaponDefIndex. <0 if unresolved.
