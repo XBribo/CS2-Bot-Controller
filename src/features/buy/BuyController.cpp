@@ -11,7 +11,7 @@
 #include "dispatch.h"
 #include "hooks.h"
 
-#include <eiface.h>
+#include <engine2/isource2server.h>
 #include <playerslot.h>
 #include <convar.h>
 

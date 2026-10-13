@@ -20,7 +20,7 @@
 #include <vector> // NOLINT(misc-include-cleaner)
 
 #include <convar.h>
-#include <eiface.h>
+#include <engine2/isource2server.h>
 #include <playerslot.h>
 
 namespace tg = cs2bc::offsets;

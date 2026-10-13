@@ -24,7 +24,7 @@ permissions:
 env:
   # Native SDK sources. Pin refs to exact commits if your local checkouts
   # diverge from upstream HEAD (recommended for reproducible builds).
-  HL2SDK_REPO: alliedmodders/hl2sdk
+  HL2SDK_REPO: alliedmodders/s2sdk
   HL2SDK_REF: cs2
   MMSOURCE_REPO: alliedmodders/metamod-source
   MMSOURCE_REF: master
@@ -85,12 +85,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Checkout hl2sdk-cs2
+      - name: Checkout s2sdk-cs2
         uses: actions/checkout@v7
         with:
           repository: ${{ env.HL2SDK_REPO }}
           ref: ${{ env.HL2SDK_REF }}
-          path: deps/hl2sdk-cs2
+          path: deps/s2sdk-cs2
 
       - name: Checkout metamod-source
         uses: actions/checkout@v7
@@ -119,7 +119,7 @@ jobs:
 
       - name: Configure + build
         env:
-          HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
+          HL2SDKCS2: ${{ github.workspace }}/deps/s2sdk-cs2
           MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
           CSGO_PROTO: ${{ github.workspace }}/deps/protobufs/${{ env.PROTOBUFS_SUBDIR }}
         run: |
@@ -148,12 +148,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Checkout hl2sdk-cs2
+      - name: Checkout s2sdk-cs2
         uses: actions/checkout@v7
         with:
           repository: ${{ env.HL2SDK_REPO }}
           ref: ${{ env.HL2SDK_REF }}
-          path: deps/hl2sdk-cs2
+          path: deps/s2sdk-cs2
 
       - name: Checkout metamod-source
         uses: actions/checkout@v7
@@ -181,7 +181,7 @@ jobs:
 
       - name: Configure + build
         env:
-          HL2SDKCS2: ${{ github.workspace }}/deps/hl2sdk-cs2
+          HL2SDKCS2: ${{ github.workspace }}/deps/s2sdk-cs2
           MMSOURCE_DEV: ${{ github.workspace }}/deps/metamod-source
           CSGO_PROTO: ${{ github.workspace }}/deps/protobufs/${{ env.PROTOBUFS_SUBDIR }}
         run: |

@@ -3,7 +3,6 @@
 #include "core/cs2_sdk/schema.h"
 
 #include <schemasystem/schemasystem.h>
-#include "schemasystem/schematypes.h"
 
 #include <cstdio>
 #include <cstring>

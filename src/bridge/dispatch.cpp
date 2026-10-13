@@ -6,7 +6,8 @@
 #include "BotControllerState.h"
 #include "MotionRecorder.h"
 
-#include <eiface.h>
+#include <engine2/isource2server.h>
+#include <engine2/ivengineserver2.h>
 
 namespace cs2bc {
 namespace dispatch {

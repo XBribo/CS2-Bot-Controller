@@ -72,6 +72,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "BotController requires x64 build (use -A x64).")
 endif()
 
+# Keep the legacy env var name for the s2sdk cs2 checkout.
 set(HL2SDK $ENV{HL2SDKCS2})
 set(MMS $ENV{MMSOURCE_DEV})
 set(PROTO_DIR $ENV{CSGO_PROTO})
@@ -82,7 +83,7 @@ foreach(v HL2SDK MMS PROTO_DIR)
     endif()
 endforeach()
 
-# eiface.h needs network_connection.pb.h; the usercmd protos give us
+# The engine interfaces need network_connection.pb.h; the usercmd protos give us
 # CSGOUserCmdPB / CSubtickMoveStep for subtick record + replay.
 if(DEFINED ENV{PROTOC} AND EXISTS "$ENV{PROTOC}")
     set(PROTOC_EXE "$ENV{PROTOC}")
@@ -191,8 +192,8 @@ set_target_properties(spdlog PROPERTIES
 
 set(SDK_SOURCES
     ${HL2SDK}/public/tier0/memoverride.cpp
-    ${HL2SDK}/tier1/keyvalues3.cpp
-    ${HL2SDK}/tier1/convar.cpp
+    ${HL2SDK}/tier0_perproject/keyvalues3.cpp
+    ${HL2SDK}/tier0_perproject/convar.cpp
 )
 
 add_library(
@@ -236,6 +237,7 @@ target_include_directories(
     PRIVATE
     src
     src/core
+    src/core/cs2_sdk/metamod
     src/core/cs2_sdk/entity
     src/bridge
     src/utils

@@ -1,10 +1,9 @@
 #include "VoiceSender.h"
 
-#include <eiface.h>
-#include <inetchannel.h>
+#include <engine2/ivengineserver2.h>
+#include <networksystem/inetchannel.h>
 #include <netmessages.pb.h>
 #include <networksystem/inetworkmessages.h>
-#include <networksystem/netmessage.h>
 #include <playerslot.h>
 
 #include <cmath>

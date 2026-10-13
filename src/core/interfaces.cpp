@@ -5,7 +5,8 @@
 #include "commands.h"
 #include "VoiceSender.h"
 #include <icvar.h>
-#include <eiface.h>
+#include <engine2/isource2server.h>
+#include <engine2/ivengineserver2.h>
 #include <interfaces/interfaces.h>
 #include <networksystem/inetworkmessages.h>
 #include <schemasystem/schemasystem.h>

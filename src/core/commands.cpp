@@ -14,7 +14,7 @@
 
 #include <tier0/dbg.h>
 #include <convar.h>
-#include <eiface.h>
+#include <engine2/ivengineserver2.h>
 #include <playerslot.h>
 
 #include <cstdarg>
