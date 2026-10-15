@@ -10,9 +10,14 @@
 #include "MotionRecorder.h"
 #include "offsets.h"
 #include "hooks.h"
+#include "plugin.h"
+#include "core/cs2_sdk/schema.h"
+#include <engine2/isource2server.h>
+#include <game/entitynetworkable.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <mutex>
 #include <unordered_map>
@@ -39,12 +44,49 @@ hooks::NativeHook<char, void*, void*, int> g_hookSelectItem;
 
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 bool g_installed = false;
+ISource2Server* g_server = nullptr;
+int g_controllerPawn = -1;
+int g_pawnBot = -1;
+int g_lifeState = -1;
 
-// WeaponServices* -> (bot slot, pawn)
+struct LiveWeaponServices
+{
+    void* pawn = nullptr;
+    void* ws = nullptr;
+    uint32_t pawnHandle = 0;
+};
+
+// Resolve both ends from the current entity table before using a native service.
+LiveWeaponServices ResolveLiveWs(int slot)
+{
+    if (!g_server || slot < 0 || slot >= 64) return {};
+    Entity2Networkable_t controller{};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
+        !controller.m_pEntityInstance) return {};
+    uint32_t pawnHandle = 0;
+    if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) ||
+        pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU) return {};
+    Entity2Networkable_t pawn{};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(pawnHandle & 0x7FFFU), &pawn) || !pawn.m_pEntity ||
+        !pawn.m_pEntityInstance || pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle ||
+        !pawn.m_pszCPPClassname || std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0) return {};
+    const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
+    if (handles.controllerHandle != controller.m_pEntity->GetRefEHandle().ToInt() ||
+        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != handles.controllerHandle)) return {};
+    uint8_t lifeState = 0xFF;
+    void* bot = nullptr;
+    void* ws = nullptr;
+    if (!GuardedRead(pawn.m_pEntityInstance, g_lifeState, lifeState) || lifeState != 0 ||
+        !GuardedRead(pawn.m_pEntityInstance, g_pawnBot, bot) || !bot ||
+        !GuardedRead(pawn.m_pEntityInstance, tg::g_pawnWeaponServices, ws) || !ws) return {};
+    return { .pawn = pawn.m_pEntityInstance, .ws = ws, .pawnHandle = pawnHandle };
+}
+
+// Cache only enough identity to find a slot; native calls revalidate it.
 struct WsBinding
 {
     int slot;
-    void* pawn;
+    uint32_t pawnHandle;
 };
 std::unordered_map<void*, WsBinding> g_wsToBinding; // NOLINT(bugprone-throwing-static-initialization)
 // Inverse: slot -> WeaponServices*
@@ -55,20 +97,21 @@ std::mutex g_wsToSlotMu;
 void RememberWsForPawn(void* pawn, int slot)
 {
     if (!pawn || slot < 0 || slot >= 64) return;
-    void* ws = nullptr;
-    if (!GuardedRead(pawn, tg::g_pawnWeaponServices, ws)) return;
-    if (!ws) return;
+    const auto live = ResolveLiveWs(slot);
+    if (live.pawn != pawn || !live.ws) return;
     std::scoped_lock lk(g_wsToSlotMu);
-    g_wsToBinding[ws] = { .slot = slot, .pawn = pawn };
-    g_slotToWs[slot] = ws;
+    auto old = g_wsToBinding.find(g_slotToWs[slot]);
+    if (old != g_wsToBinding.end() && old->second.slot == slot) g_wsToBinding.erase(old);
+    g_wsToBinding[live.ws] = { .slot = slot, .pawnHandle = live.pawnHandle };
+    g_slotToWs[slot] = live.ws;
 }
 
 WsBinding LookupBindingForWs(void* ws)
 {
-    if (!ws) return { .slot = -1, .pawn = nullptr };
+    if (!ws) return { .slot = -1, .pawnHandle = 0 };
     std::scoped_lock lk(g_wsToSlotMu);
     auto it = g_wsToBinding.find(ws);
-    return it == g_wsToBinding.end() ? WsBinding{ .slot = -1, .pawn = nullptr } : it->second;
+    return it == g_wsToBinding.end() ? WsBinding{ .slot = -1, .pawnHandle = 0 } : it->second;
 }
 
 // LockTarget -> engine weapon-slot index
@@ -122,10 +165,8 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     WsBinding bind = LookupBindingForWs(ws);
     if (bind.slot < 0) return { KHook::Action::Ignore };
 
-    // Human took over this pawn -> current m_hController != bot slot
-    // we cached; don't block player's weapon switches.
-    int curSlot = ControllerSlotForPawn(bind.pawn);
-    if (curSlot != bind.slot) return { KHook::Action::Ignore };
+    const auto live = ResolveLiveWs(bind.slot);
+    if (live.ws != ws || live.pawnHandle != bind.pawnHandle) return { KHook::Action::Ignore };
 
     if (motion_recorder::IsReplaying(bind.slot)) return { KHook::Action::Ignore };
 
@@ -154,6 +195,16 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 
 bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
+    g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
+    g_controllerPawn = schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
+    g_pawnBot = schema::GetFieldOffset("CCSPlayerPawn", "m_pBot");
+    g_lifeState = schema::GetFieldOffset("CBaseEntity", "m_lifeState");
+    if (!g_server || g_controllerPawn < 0 || g_pawnBot < 0 || g_lifeState < 0)
+    {
+        g_status = "failed: live weapon services resolution";
+        if (errorOut && errorOutLen) std::snprintf(errorOut, errorOutLen, "%s", g_status.c_str());
+        return false;
+    }
     g_addrEquipBestWeapon = gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipBestWeapon", errorOut, errorOutLen);
     if (!g_addrEquipBestWeapon)
     {
@@ -216,6 +267,7 @@ bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, 
 
 void Remove()
 {
+    g_server = nullptr;
     if (!g_installed) return;
     g_hookSelectItem.Remove();
     g_hookEquipPistol.Remove();
@@ -330,9 +382,7 @@ bool SelectWeaponRaw(void* ws, void* weapon)
 
 void* WsForSlot(int slot)
 {
-    if (slot < 0 || slot >= 64) return nullptr;
-    std::scoped_lock lk(g_wsToSlotMu);
-    return g_slotToWs[slot];
+    return ResolveLiveWs(slot).ws;
 }
 
 int SwitchToLockTarget(int slot)
@@ -346,12 +396,8 @@ int SwitchToLockTarget(int slot)
     int engineSlot = LockTargetToEngineSlot(lt);
     if (engineSlot < 0) return 3;
 
-    void* ws = nullptr;
-    {
-        std::scoped_lock lk(g_wsToSlotMu);
-        ws = g_slotToWs[slot];
-    }
-    if (!ws) return 1; // bot hasn't ticked yet; lock will still take effect once AI runs.
+    void* ws = WsForSlot(slot);
+    if (!ws) return 1;
 
     void* target = g_getSlot(ws, engineSlot, 0xFFFFFFFFU);
     if (!target) return 2;
