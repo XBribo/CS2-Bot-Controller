@@ -64,6 +64,9 @@ void Initialize();
 
 // Parses hexadecimal bytes and wildcard markers.
 bool ParseSigString(const std::string& signature, std::vector<uint8_t>& bytes, std::vector<bool>& wildcards);
-// Finds the first pattern match across the module segments.
+// Returns up to two signature matches, including original bytes of KHook detours.
+std::vector<void*> FindPatternMatchesIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wild);
+
+// Returns a signature only when exactly one candidate matches.
 void* FindPatternIn(const ModuleInfo& module, const std::vector<uint8_t>& pattern, const std::vector<bool>& wildcards);
 } // namespace cs2bc::modules
