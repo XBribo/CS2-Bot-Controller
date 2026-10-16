@@ -41,13 +41,13 @@ bool Load(nlohmann::json& gd, modules::ModuleInfo& serverModule, char* error, si
     }
 
     cs2bc::modules::Initialize();
-    if (!cs2bc::modules::server || !cs2bc::modules::server->Image())
+    if (!cs2bc::modules::server || !cs2bc::modules::server->Code())
     {
         std::snprintf(error, maxlen, "Could not open CS2 server module at '%s'",
                       cs2bc::modules::server ? cs2bc::modules::server->Path() : "");
         return false;
     }
-    serverModule = cs2bc::modules::server->Image();
+    serverModule = cs2bc::modules::server->Code();
 
     // Resolve non-Schema offsets before installing hooks that read targets
     cs2bc::offsets::LoadFromGamedata(gd);
