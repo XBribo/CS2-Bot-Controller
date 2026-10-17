@@ -1,6 +1,4 @@
 #include "core/log.h"
-// BotController native Metamod:Source plugin entry point.
-
 #include "plugin.h"
 
 #include <cstdio>
@@ -22,8 +20,8 @@
 #include "MotionRecorder.h"
 #include "WeaponLockerState.h"
 #include "BotControllerState.h"
-#include "core/memory_module.h"
-#include "core/cs2_sdk/schema.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
+#include "core/cs2_sdk/src/core/schema.h"
 #include "offsets.h"
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
@@ -35,12 +33,11 @@ namespace cs2bc {
 
 BotControllerPlugin g_plugin;
 
-// Initializes interfaces and features, rolling back a failed load.
 bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool /*late*/)
 {
     PLUGIN_SAVEVARS();
 
-    if (!log::Init(g_SMAPI->GetBaseDir(), error, maxlen)) return false;
+    if (!log::Init(g_SMAPI->GetBaseDir(), "BotController", error, maxlen)) return false;
     const bool loaded = [&]() -> bool {
         if (!KHook::__exported__khook)
         {
@@ -51,14 +48,14 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         if (!interfaces::Init(ismm, error, maxlen)) return false;
 
         char schemaError[256] = { 0 };
-        if (!cs2bc::schema::Init(schemaError, sizeof(schemaError)))
+        if (!cs2_sdk::schema::Init(g_schemaSystem, schemaError, sizeof(schemaError)))
         {
             std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
             return false;
         }
         if (!cs2bc::offsets::LoadFromSchema(schemaError, sizeof(schemaError)))
         {
-            cs2bc::schema::Reset();
+            cs2_sdk::schema::Reset();
             std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
             return false;
         }
@@ -66,7 +63,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         m_convarsRegistered = true;
 
         nlohmann::json gd;
-        modules::ModuleInfo serverModule;
+        cs2_sdk::modules::ModuleInfo serverModule;
         if (!gamedata::Load(gd, serverModule, error, maxlen)) return false;
 
         if (!cs2bc::weapon_locker_hooks::Install(gd, serverModule, error, maxlen)) return false;
@@ -100,33 +97,21 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     return true;
 }
 
-// Accepts a plugin pause request.
 bool BotControllerPlugin::Pause(char*, size_t) { return true; }
 
-// Accepts a plugin resume request.
 bool BotControllerPlugin::Unpause(char*, size_t) { return true; }
 
-// No additional cross-plugin initialization is required.
 void BotControllerPlugin::AllPluginsLoaded() {}
 
-// Returns plugin author metadata.
 const char* BotControllerPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
-// Returns the plugin name.
 const char* BotControllerPlugin::GetName() { return "BotController"; }
-// Returns the plugin description.
 const char* BotControllerPlugin::GetDescription() { return "Record & Replay and Control CS2 bots."; }
-// Returns the plugin project URL.
 const char* BotControllerPlugin::GetURL() { return "https://github.com/XBribo/CS2-Bot-Controller"; }
-// Returns the plugin license.
 const char* BotControllerPlugin::GetLicense() { return "AGPL-3.0"; }
-// Returns the version supplied by the build.
 const char* BotControllerPlugin::GetVersion() { return VERSION_STRING; }
-// Returns the compilation date and time.
 const char* BotControllerPlugin::GetDate() { return BUILD_TIMESTAMP; }
-// Returns the plugin log tag.
 const char* BotControllerPlugin::GetLogTag() { return "BC"; }
 
-// Drains hooks before releasing feature state, interfaces, and logging.
 bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
     // Drain movement callbacks before releasing their recording and replay state.
@@ -140,7 +125,7 @@ bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     cs2bc::bot_controller_state::ClearAllAll();
     cs2bc::bot_controller_state::ClearAllAim();
     interfaces::Reset();
-    cs2bc::schema::Reset();
+    cs2_sdk::schema::Reset();
     if (m_convarsRegistered) ConVar_Unregister();
     m_convarsRegistered = false;
     g_pCVar = nullptr;

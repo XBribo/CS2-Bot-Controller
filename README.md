@@ -4,7 +4,7 @@
 
 **Make Bot Mimic Again**
 
-> For developer, see [TECH.md](TECH.md).
+> Developer guide: [TECH.md](TECH.md).
 
 ## Your stars⭐ are my motivation to keep updating
 
@@ -27,10 +27,9 @@ It can:
 
 ## Install
 
-1. Download the latest `BotController-MM-windows.zip` or `BotController-MM-linux.zip` from the [Releases page](https://github.com/XBribo/CS2-Bot-Controller/releases/latest).
-2. Download the latest `BotController-CSS-API.zip (CounterStrikeSharp)`
-or `BotController-SW2-API.zip (SwiftlyS2)` from the [Releases page](https://github.com/XBribo/CS2-Bot-Controller/releases/latest).
-3. Extract the archive and copy the `/addons/` folder into your server's `/game/csgo/` directory.
+1. Install Metamod:Source and your chosen framework (CounterStrikeSharp or SwiftlyS2).
+2. From [Releases](https://github.com/XBribo/CS2-Bot-Controller/releases/latest), download the Metamod package for your platform and the matching CSS or SW2 API package.
+3. Copy both packages' `addons/` folders into `game/csgo/`.
 4. Restart the server.
 
 ------------------------------------------------------------------------
@@ -43,8 +42,13 @@ or `BotController-SW2-API.zip (SwiftlyS2)` from the [Releases page](https://gith
 | `bc_unlock <all\|aim\|weapon> <slot>` | Remove a lock from a bot slot |
 | `bc_unlock_all <all\|aim\|weapon>` | Remove one lock kind from all bot slots |
 | `bc_status` | Show current hook status and per-slot lock state |
+| `bc_buy <slot> <alias> [alias...]` | Set a bot's buy plan for each round |
+| `bc_buy_skip <slot>` | Make a bot skip buying each round |
+| `bc_unbuy <slot>` | Remove a bot's buy plan |
+| `bc_unbuy_all` | Remove all buy plans |
+| `bc_profile <slot>` | Show a bot's profile and weapon preferences |
 
-`weapon` mode requires the weapon slot as the third argument.
+`weapon` mode requires the weapon slot as the third argument. Player slots are engine slots, not user IDs or entity indices.
 
 Examples:
 
@@ -66,7 +70,7 @@ bc_status
 !stopreplay <botSlot>
 ```
 
-`fileName` is optional. When omitted, the invoking player's SteamID is used.
+`fileName` is optional. When omitted, the invoking player's SteamID is used. These commands require the CSS or SW2 provider.
 
 - API usage, build details, ABI notes, and integration examples are documented in [TECH.md](TECH.md).
 

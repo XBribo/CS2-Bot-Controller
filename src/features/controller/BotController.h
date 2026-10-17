@@ -5,12 +5,12 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 namespace cs2bc {
 namespace bot_controller_hooks {
 // Resolve sigs and install detours.
-bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
+bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
 
 // Disable + remove detours.
 void Remove();

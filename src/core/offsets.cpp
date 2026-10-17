@@ -1,73 +1,45 @@
-#include "core/gameconfig.h"
-// Override structure offsets from gamedata.json
-
+#include "core/cs2_sdk/src/core/gameconfig.h"
 #include "offsets.h"
 #include "nlohmann/json.hpp"
-#include "core/cs2_sdk/schema.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/schema.h"
 
 #include <cstdint>
-#include <cstdio>
 
 namespace cs2bc::offsets {
-// Each offset: gamedata[name].offsets[platform], else keep code default
-void LoadFromGamedata(const nlohmann::json& gd)
+void LoadFromGamedata(const nlohmann::json& gamedata)
 {
-    g_vtIdxTeleport = gameconfig::FindPlatformOffset(gd, "CBaseEntity_Teleport", g_vtIdxTeleport);
-    g_botProfile = gameconfig::FindPlatformOffset(gd, "CCSBot::Profile", g_botProfile);
-    g_profAggression = gameconfig::FindPlatformOffset(gd, "BotProfile::Aggression", g_profAggression);
-    g_profSkill = gameconfig::FindPlatformOffset(gd, "BotProfile::Skill", g_profSkill);
-    g_profTeamwork = gameconfig::FindPlatformOffset(gd, "BotProfile::Teamwork", g_profTeamwork);
-    g_profWeaponPref = gameconfig::FindPlatformOffset(gd, "BotProfile::WeaponPref", g_profWeaponPref);
-    g_profWeaponPrefCount = gameconfig::FindPlatformOffset(gd, "BotProfile::WeaponPrefCount", g_profWeaponPrefCount);
-    g_profCost = gameconfig::FindPlatformOffset(gd, "BotProfile::Cost", g_profCost);
-    g_profDifficulty = gameconfig::FindPlatformOffset(gd, "BotProfile::Difficulty", g_profDifficulty);
-    g_profReactionTime = gameconfig::FindPlatformOffset(gd, "BotProfile::ReactionTime", g_profReactionTime);
-    g_profAttackDelay = gameconfig::FindPlatformOffset(gd, "BotProfile::AttackDelay", g_profAttackDelay);
-    g_profLookAccelAtk = gameconfig::FindPlatformOffset(gd, "BotProfile::LookAngleMaxAccelAttacking", g_profLookAccelAtk);
-    g_profLookStiffAtk = gameconfig::FindPlatformOffset(gd, "BotProfile::LookAngleStiffnessAttacking", g_profLookStiffAtk);
-    g_profLookDampAtk = gameconfig::FindPlatformOffset(gd, "BotProfile::LookAngleDampingAttacking", g_profLookDampAtk);
-    g_buyInitialDelay = gameconfig::FindPlatformOffset(gd, "BuyState::InitialDelay", g_buyInitialDelay);
-    g_buyDoneBuying = gameconfig::FindPlatformOffset(gd, "BuyState::DoneBuying", g_buyDoneBuying);
-    g_entIdentityEHandle = gameconfig::FindPlatformOffset(gd, "CEntityIdentity::EHandle", g_entIdentityEHandle);
-    g_servicesPawn = gameconfig::FindPlatformOffset(gd, "CCSPlayer_MovementServices::Pawn", g_servicesPawn);
-    g_moveVelocity = gameconfig::FindPlatformOffset(gd, "CMoveData::Velocity", g_moveVelocity);
-    g_moveAbsOrigin = gameconfig::FindPlatformOffset(gd, "CMoveData::AbsOrigin", g_moveAbsOrigin);
-    g_vtIdxPlayerRunCommand = gameconfig::FindPlatformOffset(gd, "vtidx::PlayerRunCommand", g_vtIdxPlayerRunCommand);
-    g_vtIdxFinishMove = gameconfig::FindPlatformOffset(gd, "vtidx::FinishMove", g_vtIdxFinishMove);
-    g_vtIdxControllerCommandSetup = gameconfig::FindPlatformOffset(gd, "vtidx::ControllerCommandSetup", g_vtIdxControllerCommandSetup);
-    g_vtIdxDropWeapon = gameconfig::FindPlatformOffset(gd, "vtidx::DropWeapon", g_vtIdxDropWeapon);
-}
-
-namespace {
-
-// Resolves one required Schema field into its runtime target
-bool ResolveRequired(int& target, const char* className, const char* fieldName, char* errorOut, size_t errorOutLen)
-{
-    const int offset = schema::GetFieldOffset(className, fieldName);
-    if (offset >= 0)
-    {
-        target = offset;
-        return true;
-    }
-
-    if (errorOut && errorOutLen > 0) std::snprintf(errorOut, errorOutLen, "Required Schema field missing: %s::%s", className, fieldName);
-    return false;
-}
-
-} // namespace
-
-// Resolves every required Schema-backed target or reports the first failure
-bool LoadFromSchema(char* errorOut, size_t errorOutLen)
-{
-    struct RequiredField
-    {
-        int* target;
-        const char* className;
-        const char* fieldName;
+    const cs2_sdk::gameconfig::OffsetBinding offsets[] = {
+        { &g_vtIdxTeleport, "CBaseEntity_Teleport" },
+        { &g_botProfile, "CCSBot::Profile" },
+        { &g_profAggression, "BotProfile::Aggression" },
+        { &g_profSkill, "BotProfile::Skill" },
+        { &g_profTeamwork, "BotProfile::Teamwork" },
+        { &g_profWeaponPref, "BotProfile::WeaponPref" },
+        { &g_profWeaponPrefCount, "BotProfile::WeaponPrefCount" },
+        { &g_profCost, "BotProfile::Cost" },
+        { &g_profDifficulty, "BotProfile::Difficulty" },
+        { &g_profReactionTime, "BotProfile::ReactionTime" },
+        { &g_profAttackDelay, "BotProfile::AttackDelay" },
+        { &g_profLookAccelAtk, "BotProfile::LookAngleMaxAccelAttacking" },
+        { &g_profLookStiffAtk, "BotProfile::LookAngleStiffnessAttacking" },
+        { &g_profLookDampAtk, "BotProfile::LookAngleDampingAttacking" },
+        { &g_buyInitialDelay, "BuyState::InitialDelay" },
+        { &g_buyDoneBuying, "BuyState::DoneBuying" },
+        { &g_entIdentityEHandle, "CEntityIdentity::EHandle" },
+        { &g_servicesPawn, "CCSPlayer_MovementServices::Pawn" },
+        { &g_moveVelocity, "CMoveData::Velocity" },
+        { &g_moveAbsOrigin, "CMoveData::AbsOrigin" },
+        { &g_vtIdxPlayerRunCommand, "vtidx::PlayerRunCommand" },
+        { &g_vtIdxFinishMove, "vtidx::FinishMove" },
+        { &g_vtIdxControllerCommandSetup, "vtidx::ControllerCommandSetup" },
+        { &g_vtIdxDropWeapon, "vtidx::DropWeapon" },
     };
+    cs2_sdk::gameconfig::LoadOffsets(gamedata, offsets);
+}
 
-    const RequiredField fields[] = {
+bool LoadFromSchema(char* error, size_t maxlen)
+{
+    const cs2_sdk::schema::FieldBinding fields[] = {
         { .target = &g_botAiTickedFlag, .className = "CCSBot", .fieldName = "m_bEyeAnglesUnderPathFinderControl" },
         { .target = &g_botPawn, .className = "CBot", .fieldName = "m_pPlayer" },
         { .target = &g_entIdentity, .className = "CEntityInstance", .fieldName = "m_pEntity" },
@@ -97,28 +69,24 @@ bool LoadFromSchema(char* errorOut, size_t errorOutLen)
         { .target = &g_servicesDucking, .className = "CCSPlayer_MovementServices", .fieldName = "m_bDucking" },
     };
 
-    for (const RequiredField& field : fields)
-    {
-        if (!ResolveRequired(*field.target, field.className, field.fieldName, errorOut, errorOutLen)) return false;
-    }
+    if (!cs2_sdk::schema::ResolveFields(fields, error, maxlen)) return false;
 
-    g_nodeAbsRotation = schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
+    g_nodeAbsRotation = cs2_sdk::schema::GetFieldOffset("CGameSceneNode", "m_angAbsRotation");
 
-    int attributeManager = -1;
-    int item = -1;
-    int itemDefinitionIndex = -1;
-    if (!ResolveRequired(attributeManager, "CEconEntity", "m_AttributeManager", errorOut, errorOutLen) ||
-        !ResolveRequired(item, "CAttributeContainer", "m_Item", errorOut, errorOutLen) ||
-        !ResolveRequired(itemDefinitionIndex, "CEconItemView", "m_iItemDefinitionIndex", errorOut, errorOutLen))
-        return false;
-    g_weaponItemDefIndex = attributeManager + item + itemDefinitionIndex;
+    const cs2_sdk::schema::Field itemFields[] = {
+        { "CEconEntity", "m_AttributeManager" },
+        { "CAttributeContainer", "m_Item" },
+        { "CEconItemView", "m_iItemDefinitionIndex" },
+    };
+    g_weaponItemDefIndex = cs2_sdk::schema::GetEmbeddedFieldOffset(itemFields, error, maxlen);
+    if (g_weaponItemDefIndex < 0) return false;
 
-    int buttonState = -1;
-    int buttonStates = -1;
-    if (!ResolveRequired(buttonState, "CPlayer_MovementServices", "m_nButtons", errorOut, errorOutLen) ||
-        !ResolveRequired(buttonStates, "CInButtonState", "m_pButtonStates", errorOut, errorOutLen))
-        return false;
-    g_servicesButtons = buttonState + buttonStates;
+    const cs2_sdk::schema::Field buttonFields[] = {
+        { "CPlayer_MovementServices", "m_nButtons" },
+        { "CInButtonState", "m_pButtonStates" },
+    };
+    g_servicesButtons = cs2_sdk::schema::GetEmbeddedFieldOffset(buttonFields, error, maxlen);
+    if (g_servicesButtons < 0) return false;
     g_servicesButtons1 = g_servicesButtons + static_cast<int>(sizeof(uint64_t));
     g_servicesButtons2 = g_servicesButtons1 + static_cast<int>(sizeof(uint64_t));
 

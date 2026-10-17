@@ -1,56 +1,49 @@
-#include "core/gameconfig.h"
 #include "core/gamedata.h"
-#include "platform.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
+#include "core/cs2_sdk/src/utils/platform.h"
 #include "offsets.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 #include <cstdio>
+#include <filesystem>
 #include <string>
 namespace cs2bc::gamedata {
-namespace {
-
-// addons/<name>/bin/<platform>/<lib> -> up 3 dirs -> addons/<name>/gamedata.json
-std::string ComputeGamedataPath()
+std::string ComputePath()
 {
-    std::string p = cs2bc::SelfModulePath();
-    if (p.empty()) return "";
+    std::filesystem::path path(cs2_sdk::platform::SelfModulePath());
+    if (path.empty()) return "";
     for (int i = 0; i < 3; ++i)
     {
-        size_t slash = p.find_last_of("/\\");
-        if (slash == std::string::npos) return "";
-        p.resize(slash);
+        path = path.parent_path();
+        if (path.empty()) return "";
     }
-    return p + "/gamedata.json";
+    return (path / "gamedata.json").string();
 }
 
-} // namespace
-
-// Locates gamedata relative to this plugin and validates its server module.
-bool Load(nlohmann::json& gd, modules::ModuleInfo& serverModule, char* error, size_t maxlen)
+bool Load(nlohmann::json& gamedata, cs2_sdk::modules::ModuleInfo& serverModule, char* error, size_t maxlen)
 {
-    std::string gamedataPath = ComputeGamedataPath();
+    const std::string gamedataPath = ComputePath();
     if (gamedataPath.empty())
     {
         std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
         return false;
     }
 
-    if (!cs2bc::gameconfig::LoadGamedata(gamedataPath.c_str(), gd))
+    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
     {
         std::snprintf(error, maxlen, "Failed to load gamedata: %s", gamedataPath.c_str());
         return false;
     }
 
-    cs2bc::modules::Initialize();
-    if (!cs2bc::modules::server || !cs2bc::modules::server->Code())
+    cs2_sdk::modules::Initialize();
+    if (!cs2_sdk::modules::server || !cs2_sdk::modules::server->Code())
     {
         std::snprintf(error, maxlen, "Could not open CS2 server module at '%s'",
-                      cs2bc::modules::server ? cs2bc::modules::server->Path() : "");
+                      cs2_sdk::modules::server ? cs2_sdk::modules::server->Path() : "");
         return false;
     }
-    serverModule = cs2bc::modules::server->Code();
+    serverModule = cs2_sdk::modules::server->Code();
 
-    // Resolve non-Schema offsets before installing hooks that read targets
-    cs2bc::offsets::LoadFromGamedata(gd);
+    cs2bc::offsets::LoadFromGamedata(gamedata);
 
     return true;
 }

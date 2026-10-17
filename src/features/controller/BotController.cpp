@@ -1,4 +1,4 @@
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 #include "core/log.h"
 // CCSBot Update/Upkeep detours
 
@@ -6,12 +6,13 @@
 #include "BotControllerState.h"
 #include "ccsbot_slot.h"
 #include "nlohmann/json.hpp"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 #include "MotionRecorder.h"
 #include "offsets.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 
 #include <tier0/dbg.h>
+#include <entityhandle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -40,10 +41,10 @@ std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initi
 void* g_slotToBot[64] = { nullptr };
 std::mutex g_slotToBotMu;
 
-hooks::NativeHook<void, void*> g_hookUpdate;
-hooks::NativeHook<void, void*> g_hookUpkeep;
-hooks::NativeHook<void, void*> g_hookUpdateLookAngles;
-hooks::NativeHook<void, void*, float*> g_hookSetEyeAngles;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookUpdate;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookUpkeep;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookUpdateLookAngles;
+cs2_sdk::hooks::NativeHook<void, void*, float*> g_hookSetEyeAngles;
 
 // Normalizes an angle to the engine's expected [-180, 180) range.
 float NormalizeDeg(float angle)
@@ -90,7 +91,7 @@ void* ReplayControllerForPawn(void* pawn)
     if (!TryReadMemory(static_cast<const void*>(g_entityIdentityChunks), 0, static_cast<void*>(&chunks), sizeof(chunks)) || !chunks)
         return nullptr;
 
-    const uint32_t entityIndex = handle & 0x7FFFU;
+    const uint32_t entityIndex = CEntityHandle(handle).GetEntryIndex();
     void* chunk = nullptr;
     if (!TryReadMemory(chunks, static_cast<int>((entityIndex >> 9) * sizeof(void*)), static_cast<void*>(&chunk), sizeof(chunk)) || !chunk)
         return nullptr;
@@ -180,16 +181,16 @@ KHook::Return<void> HookedSetEyeAngles(void* pawn, float* angle) noexcept
 // Resolve a sig from gamedata against the loaded server.dll.
 } // namespace
 
-bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
+bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
-    g_addrUpdate = gameconfig::ResolveSig(gd, serverModule, "CCSBot::Update", errorOut, errorOutLen);
+    g_addrUpdate = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::Update", errorOut, errorOutLen);
     if (!g_addrUpdate)
     {
         g_status = "failed: Update sig";
         return false;
     }
 
-    g_addrUpkeep = gameconfig::ResolveSig(gd, serverModule, "CCSBot::Upkeep", errorOut, errorOutLen);
+    g_addrUpkeep = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::Upkeep", errorOut, errorOutLen);
     if (!g_addrUpkeep)
     {
         g_status = "failed: Upkeep sig";
@@ -198,7 +199,7 @@ bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, 
 
     // UpdateLookAngles is optional
     char ulaErr[256] = { 0 };
-    g_addrUpdateLookAngles = gameconfig::ResolveSig(gd, serverModule, "CCSBot::UpdateLookAngles", ulaErr, sizeof(ulaErr));
+    g_addrUpdateLookAngles = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::UpdateLookAngles", ulaErr, sizeof(ulaErr));
     if (!g_addrUpdateLookAngles)
     {
         BC_LOG_WARN("CCSBot::UpdateLookAngles sig not resolved (%s); replay view-drive disabled\n", ulaErr);
@@ -207,7 +208,7 @@ bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, 
     // SetEyeAngles is optional; without it replay view falls back to
     // the (smoothing) UpdateLookAngles hook only.
     char seaErr[256] = { 0 };
-    g_addrSetEyeAngles = gameconfig::ResolveSig(gd, serverModule, "CCSPlayerPawn::SetEyeAngles", seaErr, sizeof(seaErr));
+    g_addrSetEyeAngles = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayerPawn::SetEyeAngles", seaErr, sizeof(seaErr));
     if (!g_addrSetEyeAngles)
     {
         BC_LOG_WARN("CCSPlayerPawn::SetEyeAngles sig not resolved (%s); replay 1:1 view disabled\n", seaErr);

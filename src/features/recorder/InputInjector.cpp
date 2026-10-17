@@ -1,4 +1,4 @@
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 #include "core/log.h"
 // CS2 movement hooks
 // PhysicsSimulate (record/replay frame boundary)
@@ -12,11 +12,11 @@
 #include "InputInjector.h"
 #include "PawnBinding.h"
 #include "ccsbot_slot.h"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 #include "MotionRecorder.h"
 #include "usercmd.pb.h"
 #include "offsets.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "WeaponLocker.h"
 
 #include <algorithm> // NOLINT(misc-include-cleaner)
@@ -49,10 +49,10 @@ void* g_addrProcessMovement = nullptr;
 void* g_addrPlayerRunCommand = nullptr;
 void* g_addrPhysicsSimulate = nullptr;
 
-hooks::NativeHook<void, void*, void*> g_hookProcessMovement;
-hooks::NativeHook<void, void*, void*> g_hookPlayerRunCommand;
-hooks::NativeHook<void, void*> g_hookPhysicsSimulate;
-hooks::NativeHook<void, void*> g_hookControllerCommandSetup;
+cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookProcessMovement;
+cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookPlayerRunCommand;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookPhysicsSimulate;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookControllerCommandSetup;
 std::atomic<bool> g_controllerHookTried{ false };
 
 struct MovementFrame
@@ -802,11 +802,12 @@ void EnsureVtableHooks(void* services)
 
 bool Install( // NOLINT(misc-use-internal-linkage)
     const nlohmann::json& gd,
-    const modules::ModuleInfo& serverModule,
+    const cs2_sdk::modules::ModuleInfo& serverModule,
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
-    g_addrProcessMovement = gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
+    g_addrProcessMovement =
+        cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
     if (!g_addrProcessMovement)
     {
         g_status = "failed: ProcessMovement sig";
@@ -822,7 +823,8 @@ bool Install( // NOLINT(misc-use-internal-linkage)
 
     // PhysicsSimulate: the per-tick boundary
     char psErr[256] = { 0 };
-    g_addrPhysicsSimulate = gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", psErr, sizeof(psErr));
+    g_addrPhysicsSimulate =
+        cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", psErr, sizeof(psErr));
     if (g_addrPhysicsSimulate && g_hookPhysicsSimulate.Install(g_addrPhysicsSimulate, &HookedPhysicsSimulate, &PhysicsSimulatePost))
     {
         g_physicsActive = true;
@@ -839,10 +841,11 @@ bool Install( // NOLINT(misc-use-internal-linkage)
 
     // PlayerRunCommand is hooked lazily from the first live movement-services vtable.
     char dropReleaseError[256]{};
-    void* outerDrop = gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::OuterDrop", dropReleaseError, sizeof(dropReleaseError));
-    void* buildTransform =
-        outerDrop ? gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::BuildTransform", dropReleaseError, sizeof(dropReleaseError))
-                  : nullptr;
+    void* outerDrop =
+        cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::OuterDrop", dropReleaseError, sizeof(dropReleaseError));
+    void* buildTransform = outerDrop ? cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::BuildTransform",
+                                                                       dropReleaseError, sizeof(dropReleaseError))
+                                     : nullptr;
     if (!motion_recorder::InstallDropReleasePose(outerDrop, buildTransform))
         BC_LOG_WARN("Drop release pose unavailable (%s); drop replay requires this hook\n",
                     dropReleaseError[0] ? dropReleaseError : "hook installation failed");

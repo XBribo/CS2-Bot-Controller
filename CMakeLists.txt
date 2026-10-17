@@ -21,26 +21,17 @@ if(GIT_FOUND)
     endif()
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-
 find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format clang-format.exe)
-file(GLOB_RECURSE BOT_CONTROLLER_FORMAT_FILES
-    CONFIGURE_DEPENDS
-    LIST_DIRECTORIES false
-    "${CMAKE_SOURCE_DIR}/src/*.c"
-    "${CMAKE_SOURCE_DIR}/src/*.cc"
-    "${CMAKE_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/*.cxx"
-    "${CMAKE_SOURCE_DIR}/src/*.h"
-    "${CMAKE_SOURCE_DIR}/src/*.hh"
-    "${CMAKE_SOURCE_DIR}/src/*.hpp"
-    "${CMAKE_SOURCE_DIR}/src/*.hxx"
-    "${CMAKE_SOURCE_DIR}/src/*.inl"
-)
+set(BOT_CONTROLLER_FORMAT_FILES "")
+# Do not traverse the SDK's recursive dependencies when checking plugin formatting.
+foreach(extension c cc cpp cxx h hh hpp hxx inl)
+    file(GLOB plugin_format_top CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/src/*.${extension}" "${CMAKE_SOURCE_DIR}/src/core/*.${extension}")
+    file(GLOB_RECURSE plugin_format_nested CONFIGURE_DEPENDS LIST_DIRECTORIES false
+        "${CMAKE_SOURCE_DIR}/src/features/*.${extension}" "${CMAKE_SOURCE_DIR}/src/bridge/*.${extension}"
+        "${CMAKE_SOURCE_DIR}/src/utils/*.${extension}" "${CMAKE_SOURCE_DIR}/src/core/entity/*.${extension}")
+    list(APPEND BOT_CONTROLLER_FORMAT_FILES ${plugin_format_top} ${plugin_format_nested})
+endforeach()
 
 option(ENABLE_FORMAT_CHECK "Run clang-format check before building BotController" OFF)
 
@@ -68,138 +59,11 @@ else()
     )
 endif()
 
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "BotController requires x64 build (use -A x64).")
-endif()
-
-# Keep the legacy env var name for the s2sdk cs2 checkout.
-set(HL2SDK $ENV{HL2SDKCS2})
-set(MMS $ENV{MMSOURCE_DEV})
-set(PROTO_DIR $ENV{CSGO_PROTO})
-
-foreach(v HL2SDK MMS PROTO_DIR)
-    if(NOT ${v} OR NOT EXISTS "${${v}}")
-        message(FATAL_ERROR "${v} env var not set or path missing: '${${v}}'")
-    endif()
-endforeach()
-
-# The engine interfaces need network_connection.pb.h; the usercmd protos give us
-# CSGOUserCmdPB / CSubtickMoveStep for subtick record + replay.
-if(DEFINED ENV{PROTOC} AND EXISTS "$ENV{PROTOC}")
-    set(PROTOC_EXE "$ENV{PROTOC}")
-else()
-    find_program(PROTOC_EXE protoc REQUIRED)
-endif()
-execute_process(
-    COMMAND "${PROTOC_EXE}" --version
-    OUTPUT_VARIABLE PROTOC_VER
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-if(NOT PROTOC_VER MATCHES "libprotoc 3\\.21\\.")
-    message(FATAL_ERROR "protoc must be 3.21.x (got '${PROTOC_VER}')")
-endif()
-
-message(STATUS "protoc: ${PROTOC_EXE} (${PROTOC_VER})")
-
-set(PROTO_FILES
-    network_connection.proto
-    networkbasetypes.proto
-    source2_steam_stats.proto
-    netmessages.proto
-    valveextensions.proto
-    usercmd.proto
-    cs_usercmd.proto
-)
-
-set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
-file(MAKE_DIRECTORY "${GENERATED_DIR}")
-
-set(PROTO_PATHS
-    "${PROTO_DIR}"
-    "${HL2SDK}/common"
-    "${HL2SDK}/game/shared"
-    "${HL2SDK}/game/shared/cs"
-    "${HL2SDK}/thirdparty/protobuf-3.21.8/src"
-)
-
-set(PROTOC_PATH_ARGS "")
-foreach(proto_path ${PROTO_PATHS})
-    list(APPEND PROTOC_PATH_ARGS "--proto_path=${proto_path}")
-endforeach()
-
-set(PROTO_SRCS "")
-set(PROTO_INPUTS "")
-foreach(p ${PROTO_FILES})
-    string(REGEX REPLACE "\\.proto$" ".pb.cc" cc ${p})
-    string(REGEX REPLACE "\\.proto$" ".pb.h" hh ${p})
-    list(APPEND PROTO_SRCS "${GENERATED_DIR}/${cc}" "${GENERATED_DIR}/${hh}")
-    set(proto_input "")
-    foreach(proto_path ${PROTO_PATHS})
-        if(EXISTS "${proto_path}/${p}")
-            set(proto_input "${proto_path}/${p}")
-            break()
-        endif()
-    endforeach()
-    if(NOT proto_input)
-        message(FATAL_ERROR "Missing proto input '${p}' in PROTO_PATHS")
-    endif()
-    list(APPEND PROTO_INPUTS "${proto_input}")
-endforeach()
-
-if(WIN32)
-    set(STRIP_PROTO_FINAL_COMMAND
-        powershell -NoProfile -Command
-        "Get-ChildItem '${GENERATED_DIR}/*.pb.h' | ForEach-Object { (Get-Content -Raw $_) -replace ' final :',' :' | Set-Content -NoNewline $_ }"
-    )
-else()
-    set(STRIP_PROTO_FINAL_COMMAND
-        /bin/sh -c
-        "perl -0pi -e 's/ final :/ :/g' '${GENERATED_DIR}'/*.pb.h"
-    )
-endif()
-
-add_custom_command(
-    OUTPUT ${PROTO_SRCS}
-    COMMAND "${PROTOC_EXE}" --cpp_out=${GENERATED_DIR} ${PROTOC_PATH_ARGS} ${PROTO_FILES}
-    # protoc 3.21 emits `class X final : public Message`; strip the class-def
-    # `final` so PlayerCommand (playercommand.h) can inherit CSGOUserCmdPB.
-    # final is only a devirtualization hint -- no layout/ABI impact.
-    COMMAND ${STRIP_PROTO_FINAL_COMMAND}
-    DEPENDS ${PROTO_INPUTS}
-    WORKING_DIRECTORY "${PROTO_DIR}"
-    COMMENT "protoc ${PROTO_FILES} (+ strip class final)"
-    VERBATIM
-)
-
-if(NOT EXISTS "${MMS}/third_party/khook/include/khook.hpp")
-    message(FATAL_ERROR "Metamod with KHook is required; initialize its recursive submodules.")
-endif()
-
-include(FetchContent)
-FetchContent_Declare(spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG v1.x
-    GIT_SHALLOW TRUE
-)
-set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(spdlog)
-set_target_properties(spdlog PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
-)
-
-set(SDK_SOURCES
-    ${HL2SDK}/public/tier0/memoverride.cpp
-    ${HL2SDK}/tier0_perproject/keyvalues3.cpp
-    ${HL2SDK}/tier0_perproject/convar.cpp
-)
+add_subdirectory(src/core/cs2_sdk)
 
 add_library(
     BotController SHARED
     src/plugin.cpp
-    src/core/log.cpp
     src/core/interfaces.cpp
     src/core/gamedata.cpp
     src/features/weapons/WeaponLocker.cpp
@@ -213,32 +77,24 @@ add_library(
     src/features/recorder/MotionRecorder.cpp
     src/features/voice/VoiceSender.cpp
     src/features/profile/BotProfile.cpp
-    src/core/memory_module.cpp
-    src/core/gameconfig.cpp
-    src/core/cs2_sdk/schema.cpp
     src/core/offsets.cpp
-    src/utils/platform.cpp
-    src/core/cs2_sdk/entity/ccsbot_slot.cpp
+    src/core/entity/ccsbot_slot.cpp
     src/bridge/dispatch.cpp
     src/core/commands.cpp
     src/bridge/exports.cpp
-    ${PROTO_SRCS}
-    ${SDK_SOURCES}
 )
 
-target_link_libraries(BotController PRIVATE spdlog::spdlog)
+target_link_libraries(BotController PRIVATE cs2_sdk::sdk)
+cs2_sdk_configure_plugin(BotController)
 
 if(ENABLE_FORMAT_CHECK)
     add_dependencies(BotController format-check)
 endif()
 
-target_include_directories(
-    BotController
-    PRIVATE
+target_include_directories(BotController PRIVATE
     src
     src/core
-    src/core/cs2_sdk/metamod
-    src/core/cs2_sdk/entity
+    src/core/entity
     src/bridge
     src/utils
     src/features/weapons
@@ -247,21 +103,6 @@ target_include_directories(
     src/features/recorder
     src/features/voice
     src/features/profile
-    ${CMAKE_SOURCE_DIR}/libraries
-    ${GENERATED_DIR}
-    ${HL2SDK}/thirdparty/protobuf-3.21.8/src
-    ${MMS}/core
-    ${MMS}/third_party/khook/include
-    ${MMS}/core/sourcemm
-    ${HL2SDK}/public
-    ${HL2SDK}/public/engine
-    ${HL2SDK}/public/game/server
-    ${HL2SDK}/public/game/shared
-    ${HL2SDK}/public/mathlib
-    ${HL2SDK}/public/tier0
-    ${HL2SDK}/public/entity2
-    ${HL2SDK}/game/shared
-    ${HL2SDK}/common
 )
 
 target_compile_definitions(
@@ -269,100 +110,14 @@ target_compile_definitions(
     PRIVATE
     SEMVER="${PLUGIN_VERSION}"
     GITHUB_SHA="${PLUGIN_GIT_SHA}"
-    META_IS_SOURCE2
-    PLATFORM_64BITS
-    X64BITS
-    GOOGLE_PROTOBUF_NO_RTTI
 )
 
 if(WIN32)
     set(BC_PLATFORM_DIR win64)
     set(BC_SUFFIX ".dll")
-    set(HL2SDK_LIBDIR ${HL2SDK}/lib/public/win64)
-    # MSVC has no <byteswap.h> clash, so tier1 goes on the normal include path
-    target_include_directories(BotController PRIVATE ${HL2SDK}/public/tier1)
-    target_link_libraries(
-        BotController
-        PRIVATE
-        psapi
-        ${HL2SDK_LIBDIR}/tier0.lib
-        ${HL2SDK_LIBDIR}/mathlib.lib
-        ${HL2SDK_LIBDIR}/interfaces.lib
-        ${HL2SDK_LIBDIR}/2015/libprotobuf.lib
-    )
-    target_link_options(BotController PRIVATE /NODEFAULTLIB:LIBCMTD)
-    target_compile_definitions(
-        BotController
-        PRIVATE
-        _CRT_SECURE_NO_WARNINGS
-        WIN32
-        _WIN32
-        _WINDOWS
-        COMPILER_MSVC
-        COMPILER_MSVC64
-        NOMINMAX
-        _ALLOW_KEYWORD_MACROS
-    )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+else()
     set(BC_PLATFORM_DIR linuxsteamrt64)
     set(BC_SUFFIX ".so")
-    set(HL2SDK_LIBDIR ${HL2SDK}/lib/linux64)
-    target_link_libraries(
-        BotController
-        PRIVATE
-        ${HL2SDK_LIBDIR}/libtier0.so
-        ${HL2SDK_LIBDIR}/mathlib.a
-        ${HL2SDK_LIBDIR}/interfaces.a
-        ${HL2SDK_LIBDIR}/release/libprotobuf.a
-        pthread
-        dl
-    )
-    target_compile_definitions(
-        BotController
-        PRIVATE
-        _GNU_SOURCE
-        POSIX
-        _LINUX
-        LINUX
-        COMPILER_GCC
-        _GLIBCXX_USE_CXX11_ABI=0
-        stricmp=strcasecmp
-        _stricmp=strcasecmp
-        _strnicmp=strncasecmp
-        strnicmp=strncasecmp
-        _snprintf=snprintf
-        _vsnprintf=vsnprintf
-        _alloca=alloca
-        strcmpi=strcasecmp
-    )
-    # spdlog is a separate static library (FetchContent above). It needs the same pre-C++11 std::string ABI as
-    # BotController, or every spdlog function that takes or returns a std::string stays unresolved in the .so.
-    target_compile_definitions(spdlog PUBLIC _GLIBCXX_USE_CXX11_ABI=0)
-    # Report unresolved symbols when linking instead of as a Metamod load failure.
-    target_link_options(BotController PRIVATE "LINKER:-z,defs")
-    target_compile_options(
-        BotController
-        PRIVATE
-        -fPIC
-        -fno-rtti
-        -fvisibility=hidden
-        # tier1 last on the search path: glibc's <byteswap.h> wins over SDK's same-named header
-        -idirafter ${HL2SDK}/public/tier1
-        -Wno-non-virtual-dtor
-        -Wno-overloaded-virtual
-        -Wno-register
-        -Wno-narrowing
-        -Wno-deprecated-copy
-    )
-    set_target_properties(
-        BotController
-        PROPERTIES
-        SKIP_BUILD_RPATH TRUE
-        BUILD_RPATH ""
-        INSTALL_RPATH ""
-    )
-else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()
 
 set(BC_PACKAGE_BIN_DIR "${CMAKE_BINARY_DIR}/package/addons/BotController/bin/${BC_PLATFORM_DIR}")
@@ -403,19 +158,3 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/configs/addons/BotController/gamedata.json"
         "${CMAKE_BINARY_DIR}/package/addons/BotController/gamedata.json"
 )
-
-if(MSVC)
-    target_compile_options(
-        BotController
-        PRIVATE
-        /utf-8
-        /W3
-        /permissive-
-        /wd4819
-        /wd4267
-        /wd4244
-        /wd4146
-        /wd4996
-        /wd4661
-    )
-endif()

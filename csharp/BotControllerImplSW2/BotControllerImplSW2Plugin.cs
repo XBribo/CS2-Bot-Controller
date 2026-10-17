@@ -39,14 +39,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private readonly Dictionary<int, object> _loadingSlots = new();
     private readonly HashSet<int> _cancelledLoads = new();
     private readonly ConcurrentQueue<Action> _completedJobs = new();
-    private bool _nativeApiChecked;
-    private bool _nativeApiAvailable;
+    private bool _bridgeChecked;
+    private bool _bridgeAvailable;
 
     // ---- API implementation (cross-plugin via IInterfaceManager) ----
 
     private sealed class BotControllerApiImpl : IBotControllerApi
     {
-        // Returns the active native ABI version.
+        // Returns the bridge ABI version.
         public int AbiVersion => BotController.AbiVersion;
 
         // Applies a generic lock to a bot slot.
@@ -87,7 +87,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
-        // Registers the authoritative native pawn pointer for replay.
+        // Registers the live pawn pointer for replay.
         public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         // Starts replay for a bot slot.
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
@@ -108,10 +108,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             => BotController.SwitchBotWeapon(slot, defIndex);
         // Returns the active weapon definition index for a bot slot.
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
-        // Creates an independently cancellable native usercmd injection
+        // Creates an independently cancellable usercmd injection
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
             => BotController.InjectUsercmd(slot, buttonMask, durationMs);
-        // Cancels one native usercmd injection by its token
+        // Cancels one usercmd injection by its token
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController.CancelUsercmdInjection(slot, injectionId);
         // Creates an independently cancellable persistent analog movement override
@@ -131,10 +131,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Suppresses selected usercmd buttons for a fixed duration
         public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
             => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
-        // Creates an independently cancellable persistent native usercmd suppression
+        // Creates an independently cancellable persistent usercmd suppression
         public long StartUsercmdSuppression(int slot, ulong buttonMask)
             => BotController.StartUsercmdSuppression(slot, buttonMask);
-        // Cancels one persistent native usercmd suppression by its token
+        // Cancels one persistent usercmd suppression by its token
         public bool CancelUsercmdSuppression(int slot, long suppressionId)
             => BotController.CancelUsercmdSuppression(slot, suppressionId);
 
@@ -153,11 +153,11 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         // Returns the number of configured buy-plan items.
         public int BuyPlanItemCount(int slot) => BotController.BuyPlanItemCount(slot);
 
-        // Reports whether native voice frame sending is available.
+        // Reports whether voice frame sending is available.
         public bool CanSendVoice() => BotController.CanSendVoice();
-        // Returns the native voice sender setup status.
+        // Returns the voice sender setup status.
         public int GetVoiceStatus() => BotController.GetVoiceStatus();
-        // Sends one encoded Opus voice frame through the native module.
+        // Sends one encoded Opus voice frame through the bridge.
         public int SendVoiceFrame(
             int recipientSlot,
             int senderClient,
@@ -194,21 +194,21 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     // ---- Lifecycle ----
 
-    // Registers the shared API only when the native BotController bridge is usable.
+    // Registers the shared API only when the BotController bridge is usable.
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
-        if (!EnsureNativeApiAvailability()) return;
+        if (!EnsureBridgeAvailable()) return;
 
         // Consumers call: interfaceManager.TryGetSharedInterface<IBotControllerApi>("botcontroller:api", out var api)
         interfaceManager.AddSharedInterface<IBotControllerApi, BotControllerApiImpl>(
             InterfaceKey, new BotControllerApiImpl());
     }
 
-    // Loads the plugin and hooks replay ticking when the native ABI is ready.
+    // Loads the plugin and hooks replay ticking when the bridge is ready.
     public override void Load(bool _)
     {
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
-        if (!EnsureNativeApiAvailability()) return;
+        if (!EnsureBridgeAvailable()) return;
 
         Directory.CreateDirectory(RecordingsDir);
 
@@ -219,7 +219,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Unhooks replay ticking during plugin unload.
     public override void Unload()
     {
-        if (_nativeApiAvailable)
+        if (_bridgeAvailable)
         {
             Core.Event.OnTick -= OnTick;
         }
@@ -287,18 +287,18 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
                    ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address);
     }
 
-    // Returns the cached native availability state, probing once on first use.
-    private bool EnsureNativeApiAvailability()
+    // Returns the cached bridge state, probing once on first use.
+    private bool EnsureBridgeAvailable()
     {
-        if (_nativeApiChecked) return _nativeApiAvailable;
+        if (_bridgeChecked) return _bridgeAvailable;
 
-        _nativeApiChecked = true;
-        _nativeApiAvailable = DetectNativeApiAvailability();
-        return _nativeApiAvailable;
+        _bridgeChecked = true;
+        _bridgeAvailable = ProbeBridge();
+        return _bridgeAvailable;
     }
 
-    // Probes whether the native bridge can be called safely and matches the expected ABI.
-    private bool DetectNativeApiAvailability()
+    // Checks bridge availability and ABI compatibility.
+    private bool ProbeBridge()
     {
         try
         {

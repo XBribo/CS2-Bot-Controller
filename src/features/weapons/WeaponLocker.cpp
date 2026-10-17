@@ -1,19 +1,20 @@
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 // Detours for CCSBot::EquipBestWeapon, EquipPistol, and
 // CCSPlayer_WeaponServices::SelectItem
 
 #include "WeaponLocker.h"
 #include "nlohmann/json.hpp"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 #include "WeaponLockerState.h"
 #include "ccsbot_slot.h"
 #include "MotionRecorder.h"
 #include "offsets.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "plugin.h"
-#include "core/cs2_sdk/schema.h"
+#include "core/cs2_sdk/src/core/schema.h"
 #include <engine2/isource2server.h>
 #include <game/entitynetworkable.h>
+#include <entityhandle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -24,8 +25,8 @@
 
 namespace tg = cs2bc::offsets;
 
-using GetSlotT = void*(BC_FASTCALL*)(void* ws, int slot, unsigned int mask);
-using SelectItemT = char(BC_FASTCALL*)(void* ws, void* weapon, int flag);
+using GetSlotT = void*(CS2_SDK_FASTCALL*)(void* ws, int slot, unsigned int mask);
+using SelectItemT = char(CS2_SDK_FASTCALL*)(void* ws, void* weapon, int flag);
 
 namespace cs2bc {
 namespace weapon_locker_hooks {
@@ -38,9 +39,9 @@ void* g_addrEquipPistol = nullptr;
 void* g_addrSelectItem = nullptr;
 void* g_addrGetSlot = nullptr;
 
-hooks::NativeHook<void, void*, char> g_hookEquipBestWeapon;
-hooks::NativeHook<void, void*, char> g_hookEquipPistol;
-hooks::NativeHook<char, void*, void*, int> g_hookSelectItem;
+cs2_sdk::hooks::NativeHook<void, void*, char> g_hookEquipBestWeapon;
+cs2_sdk::hooks::NativeHook<void, void*, char> g_hookEquipPistol;
+cs2_sdk::hooks::NativeHook<char, void*, void*, int> g_hookSelectItem;
 
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 bool g_installed = false;
@@ -61,24 +62,26 @@ LiveWeaponServices ResolveLiveWs(int slot)
 {
     if (!g_server || slot < 0 || slot >= 64) return {};
     Entity2Networkable_t controller{};
-    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
-        !controller.m_pEntityInstance) return {};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity || !controller.m_pEntityInstance)
+        return {};
     uint32_t pawnHandle = 0;
-    if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) ||
-        pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU) return {};
+    if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) || pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU) return {};
     Entity2Networkable_t pawn{};
-    if (!g_server->GetEntity2Networkable(CEntityIndex(pawnHandle & 0x7FFFU), &pawn) || !pawn.m_pEntity ||
-        !pawn.m_pEntityInstance || pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle ||
-        !pawn.m_pszCPPClassname || std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0) return {};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(CEntityHandle(pawnHandle).GetEntryIndex()), &pawn) || !pawn.m_pEntity ||
+        !pawn.m_pEntityInstance || pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle || !pawn.m_pszCPPClassname ||
+        std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
+        return {};
     const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
     if (handles.controllerHandle != controller.m_pEntity->GetRefEHandle().ToInt() ||
-        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != handles.controllerHandle)) return {};
+        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != handles.controllerHandle))
+        return {};
     uint8_t lifeState = 0xFF;
     void* bot = nullptr;
     void* ws = nullptr;
     if (!GuardedRead(pawn.m_pEntityInstance, g_lifeState, lifeState) || lifeState != 0 ||
         !GuardedRead(pawn.m_pEntityInstance, g_pawnBot, bot) || !bot ||
-        !GuardedRead(pawn.m_pEntityInstance, tg::g_pawnWeaponServices, ws) || !ws) return {};
+        !GuardedRead(pawn.m_pEntityInstance, tg::g_pawnWeaponServices, ws) || !ws)
+        return {};
     return { .pawn = pawn.m_pEntityInstance, .ws = ws, .pawnHandle = pawnHandle };
 }
 
@@ -193,40 +196,40 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 
 } // namespace
 
-bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
+bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
     g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
-    g_controllerPawn = schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
-    g_pawnBot = schema::GetFieldOffset("CCSPlayerPawn", "m_pBot");
-    g_lifeState = schema::GetFieldOffset("CBaseEntity", "m_lifeState");
+    g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
+    g_pawnBot = cs2_sdk::schema::GetFieldOffset("CCSPlayerPawn", "m_pBot");
+    g_lifeState = cs2_sdk::schema::GetFieldOffset("CBaseEntity", "m_lifeState");
     if (!g_server || g_controllerPawn < 0 || g_pawnBot < 0 || g_lifeState < 0)
     {
         g_status = "failed: live weapon services resolution";
         if (errorOut && errorOutLen) std::snprintf(errorOut, errorOutLen, "%s", g_status.c_str());
         return false;
     }
-    g_addrEquipBestWeapon = gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipBestWeapon", errorOut, errorOutLen);
+    g_addrEquipBestWeapon = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipBestWeapon", errorOut, errorOutLen);
     if (!g_addrEquipBestWeapon)
     {
         g_status = "failed: EquipBestWeapon sig";
         return false;
     }
 
-    g_addrEquipPistol = gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipPistol", errorOut, errorOutLen);
+    g_addrEquipPistol = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipPistol", errorOut, errorOutLen);
     if (!g_addrEquipPistol)
     {
         g_status = "failed: EquipPistol sig";
         return false;
     }
 
-    g_addrSelectItem = gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_WeaponServices::SelectItem", errorOut, errorOutLen);
+    g_addrSelectItem = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_WeaponServices::SelectItem", errorOut, errorOutLen);
     if (!g_addrSelectItem)
     {
         g_status = "failed: SelectItem sig";
         return false;
     }
 
-    g_addrGetSlot = gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_WeaponServices::GetSlot", errorOut, errorOutLen);
+    g_addrGetSlot = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_WeaponServices::GetSlot", errorOut, errorOutLen);
     if (!g_addrGetSlot)
     {
         g_status = "failed: GetSlot sig";
@@ -299,9 +302,9 @@ int ReadDefIndex(void* weapon)
     return SafeRead(weapon, tg::g_weaponItemDefIndex, def) ? def : -1;
 }
 
-// entity -> identity(0x10) -> m_EHandle(0x10), low 15 bits = index.
 namespace {
 
+// Decodes the entity's current identity handle through s2sdk.
 int EntIndexOf(void* entity)
 {
     if (!entity) return -1;
@@ -311,7 +314,7 @@ int EntIndexOf(void* entity)
     uint32_t h = 0;
     if (!SafeRead(identity, tg::g_entIdentityEHandle, h)) return -1;
     if (h == 0U || h == 0xFFFFFFFFU) return -1;
-    return static_cast<int>(h & 0x7FFFU);
+    return CEntityHandle(h).GetEntryIndex();
 }
 
 } // namespace
@@ -342,7 +345,7 @@ int ActiveWeaponDef(void* ws)
 {
     uint32_t handle = 0;
     if (!ws || !SafeRead(ws, tg::g_wsActiveWeapon, handle) || handle == 0U || handle == 0xFFFFFFFFU) return -1;
-    return WeaponDefForEntityIndex(ws, static_cast<int>(handle & 0x7FFFU));
+    return WeaponDefForEntityIndex(ws, CEntityHandle(handle).GetEntryIndex());
 }
 
 void* FindWeaponByDef(void* ws, int def)
@@ -380,10 +383,7 @@ bool SelectWeaponRaw(void* ws, void* weapon)
     return true;
 }
 
-void* WsForSlot(int slot)
-{
-    return ResolveLiveWs(slot).ws;
-}
+void* WsForSlot(int slot) { return ResolveLiveWs(slot).ws; }
 
 int SwitchToLockTarget(int slot)
 {

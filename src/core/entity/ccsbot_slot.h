@@ -1,5 +1,3 @@
-// Convert a CCSBot* (server-side entity) to its player slot (0..63).
-
 #pragma once
 
 #include <cstddef>
@@ -39,16 +37,16 @@ SlotResolution ResolveSlotFromBotOrContext(void* botOrContext);
 // Returns a player slot from a CCSBot pointer or helper context.
 int CCSBotContextToSlot(void* botOrContext);
 
-// Reads engine memory with Windows SEH and a direct Linux fast path
+// Windows uses SEH; Linux requires trusted, still-live memory and copies directly.
 bool TryReadMemory(const void* base, int offset, void* out, size_t size);
 
-// Writes engine memory with Windows SEH and a direct Linux fast path
+// Windows uses SEH; Linux requires trusted, writable memory and copies directly.
 bool TryWriteMemory(void* base, int offset, const void* value, size_t size);
 
-// Reads an untrusted engine address through platform fault protection
+// Uses fault-protected reads on both platforms; failure may partially fill out.
 bool TryReadMemoryGuarded(const void* base, int offset, void* out, size_t size);
 
-// Writes an untrusted engine address through platform fault protection
+// Uses fault-protected writes on both platforms; failure may leave a partial write.
 bool TryWriteMemoryGuarded(void* base, int offset, const void* value, size_t size);
 
 // Reads a field into a temporary and publishes it only after full success
@@ -71,7 +69,7 @@ template <typename T> bool GuardedRead(const void* base, int offset, T& out)
     return true;
 }
 
-// Writes a trivially-copyable engine field through the guarded memory path.
+// Uses TryWriteMemory's trusted Linux fast path, not TryWriteMemoryGuarded.
 template <typename T> bool WriteField(void* base, int offset, const T& value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
@@ -81,6 +79,7 @@ template <typename T> bool WriteField(void* base, int offset, const T& value)
 // Resolves the owning slot through m_hController, then m_hOriginalController.
 int ControllerSlotForPawn(void* pawn);
 
+// Keeps full handles for identity checks; ownerSlot falls back to the original controller.
 PawnControllerHandles ReadPawnControllerHandles(void* pawn);
 
 // CCSPlayerController* (PhysicsSimulate arg0) -> slot via its own ehandle.

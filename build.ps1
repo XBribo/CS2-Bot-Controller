@@ -52,7 +52,7 @@ if ($Clean) {
 }
 
 # --- Windows -------------------------------------------------------------
-# Configure + build the native DLL locally via Visual Studio generator
+# Configure and build the Windows DLL via Visual Studio
 function Build-Windows {
     Write-Step "Windows"
     $build = Join-Path $Root "build"
@@ -73,14 +73,8 @@ function Build-Windows {
 function Build-Linux {
     Write-Step "Linux (WSL: $WslDistro)"
     $srcWsl = ConvertTo-WslPath $Root
-    $hl2Wsl = ConvertTo-WslPath $env:HL2SDKCS2
-    $mmsWsl = ConvertTo-WslPath $env:MMSOURCE_DEV
-    $protoWsl = ConvertTo-WslPath $env:CSGO_PROTO
     $bash = @"
 set -e
-export HL2SDKCS2='$hl2Wsl'
-export MMSOURCE_DEV='$mmsWsl'
-export CSGO_PROTO='$protoWsl'
 cmake -S '$srcWsl' -B ~/bc-build -DCMAKE_BUILD_TYPE=$Config
 cmake --build ~/bc-build -j`$(nproc)
 test -f ~/bc-build/package/addons/BotController/bin/linuxsteamrt64/BotController.so
@@ -107,18 +101,18 @@ function Reset-DistRoot([string]$destRoot) {
     New-Item -ItemType Directory -Force $destRoot | Out-Null
 }
 
-# Copy only the expected native package files into a per-platform dist folder.
-function Build-Dist([string]$nativePkg, [string]$destRoot) {
+# Copy the Metamod package files into a per-platform dist folder.
+function Build-Dist([string]$packageRoot, [string]$destRoot) {
     Reset-DistRoot $destRoot
-    if ($nativePkg) {
+    if ($packageRoot) {
         $dstBot = Join-Path $destRoot "addons/BotController"
         $dstMeta = Join-Path $destRoot "addons/metamod"
         New-Item -ItemType Directory -Force $dstBot | Out-Null
         New-Item -ItemType Directory -Force $dstMeta | Out-Null
 
-        Copy-Item -Recurse -Force "$nativePkg/addons/BotController/bin" $dstBot
-        Copy-Item -Force "$nativePkg/addons/BotController/gamedata.json" $dstBot
-        Copy-Item -Force "$nativePkg/addons/metamod/BotController.vdf" $dstMeta
+        Copy-Item -Recurse -Force "$packageRoot/addons/BotController/bin" $dstBot
+        Copy-Item -Force "$packageRoot/addons/BotController/gamedata.json" $dstBot
+        Copy-Item -Force "$packageRoot/addons/metamod/BotController.vdf" $dstMeta
     }
     Write-Ok "assembled $((Resolve-Path $destRoot).Path)"
 }
@@ -182,7 +176,7 @@ $winPkg = $null; $linPkg = $null
 if ($Windows) { $winPkg = Build-Windows }
 if ($Linux) { $linPkg = Build-Linux }
 
-Write-Step "Dist (Native)"
+Write-Step "Dist (Metamod)"
 if ($Windows) { Build-Dist $winPkg $DistWin }
 if ($Linux) { Build-Dist $linPkg $DistLin }
 

@@ -1,5 +1,3 @@
-// offsets.h
-
 #pragma once
 
 #include <cstddef>
@@ -146,9 +144,10 @@ inline int g_vtIdxDropWeapon = 28;
 inline int g_vtIdxDropWeapon = 29;
 #endif
 
-void LoadFromGamedata(const nlohmann::json& gd);
+// Overrides platform offsets; missing entries retain their current values.
+void LoadFromGamedata(const nlohmann::json& gamedata);
 
 // Resolves every required Schema-backed target or reports the first failure
-bool LoadFromSchema(char* errorOut, size_t errorOutLen);
+bool LoadFromSchema(char* error, size_t maxlen);
 
 } // namespace cs2bc::offsets

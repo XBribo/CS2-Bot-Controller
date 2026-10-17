@@ -6,14 +6,14 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 
 namespace cs2bc {
 namespace weapon_locker_hooks {
 // Sentinel def index meaning any knife
 constexpr int kKnifeDef = 9001;
 
-bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
+bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen);
 
 void Remove();
 

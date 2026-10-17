@@ -6,7 +6,7 @@
 #include "InputInjector.h"
 #include "WeaponLocker.h"
 #include "ccsbot_slot.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 #include "core/log.h"
 #include "offsets.h"
 
@@ -77,7 +77,7 @@ std::array<ReplayState, kMaxSlots> g_rep;
 std::atomic<uint64_t> g_recordingSlots{ 0 };
 std::atomic<uint64_t> g_replayingSlots{ 0 };
 static_assert(kMaxSlots <= 64);
-hooks::NativeHook<void, void*, void*, void*, const float*> g_hookDropWeapon;
+cs2_sdk::hooks::NativeHook<void, void*, void*, void*, const float*> g_hookDropWeapon;
 struct DropFrame
 {
     void* weaponServices;
@@ -90,8 +90,8 @@ thread_local std::vector<DropFrame> g_dropFrames;
 void* g_addrDropWeapon = nullptr;
 std::atomic<bool> g_dropHookTried{ false };
 std::atomic<bool> g_dropHookReady{ false };
-hooks::NativeHook<char, void*, void*, int, const float*> g_hookDropReleaseOuter;
-hooks::NativeHook<char, void*, void*> g_hookDropReleaseBuilder;
+cs2_sdk::hooks::NativeHook<char, void*, void*, int, const float*> g_hookDropReleaseOuter;
+cs2_sdk::hooks::NativeHook<char, void*, void*> g_hookDropReleaseBuilder;
 struct DropReleaseFrame
 {
     int slot{ -1 };
@@ -1126,7 +1126,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
     const float bodyYaw = hasRecordedBodyYaw ? event.target[0] : pre.yaw;
     const float angles[3] = { 0.0F, NormalizeReplayYaw(bodyYaw), 0.0F };
     const float* teleportAngles = alignStationaryBody ? angles : nullptr;
-    using TeleportFn = void(BC_FASTCALL*)(void*, const float*, const float*, const float*);
+    using TeleportFn = void(CS2_SDK_FASTCALL*)(void*, const float*, const float*, const float*);
     reinterpret_cast<TeleportFn>(target)(pawn, position, teleportAngles, velocity);
     if (!IsReplaying(slot)) return false;
     pawn = input_injector::ResolveReplayPawn(slot, services);
@@ -1172,7 +1172,7 @@ void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
         }
         const float position[3] = { tick.pre.originX, tick.pre.originY, tick.pre.originZ };
         const float velocity[3] = { tick.pre.velX, tick.pre.velY, tick.pre.velZ };
-        using TeleportFn = void(BC_FASTCALL*)(void*, const float*, const float*, const float*);
+        using TeleportFn = void(CS2_SDK_FASTCALL*)(void*, const float*, const float*, const float*);
         reinterpret_cast<TeleportFn>(target)(pawn, position, nullptr, velocity);
         if (!IsReplaying(slot)) return;
         pawn = input_injector::ResolveReplayPawn(slot, services);

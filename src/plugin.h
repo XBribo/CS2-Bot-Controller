@@ -8,15 +8,15 @@ namespace cs2bc {
 class BotControllerPlugin : public ISmmPlugin
 {
   public:
-    // Loads interfaces and installs the controller modules.
+    // Rolls back partially installed features when loading fails.
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
-    // Removes hooks and releases controller state.
+    // Drains hooks before releasing feature state, interfaces, and logging.
     bool Unload(char* error, size_t maxlen) override;
     // Accepts a plugin pause request.
     bool Pause(char* error, size_t maxlen) override;
     // Accepts a plugin resume request.
     bool Unpause(char* error, size_t maxlen) override;
-    // Handles completion of Metamod plugin loading.
+    // No additional cross-plugin initialization is needed.
     void AllPluginsLoaded() override;
 
     // Returns plugin author metadata.

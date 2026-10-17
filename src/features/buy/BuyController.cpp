@@ -1,4 +1,4 @@
-#include "core/gameconfig.h"
+#include "core/cs2_sdk/src/core/gameconfig.h"
 // Detour for BuyState::OnUpdate
 
 #include "BuyController.h"
@@ -6,10 +6,10 @@
 #include "MotionRecorder.h"
 #include "ccsbot_slot.h"
 #include "nlohmann/json.hpp"
-#include "core/memory_module.h"
+#include "core/cs2_sdk/src/core/memory_module.h"
 #include "offsets.h"
 #include "dispatch.h"
-#include "hooks.h"
+#include "core/cs2_sdk/src/utils/hooks.h"
 
 #include <engine2/isource2server.h>
 #include <playerslot.h>
@@ -26,7 +26,7 @@ namespace buy_controller_hooks {
 
 namespace {
 void* g_addrOnUpdate = nullptr;
-hooks::NativeHook<void, void*, void*> g_hookOnUpdate;
+cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookOnUpdate;
 bool g_installed = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 
@@ -83,9 +83,9 @@ KHook::Return<void> HookedOnUpdate(void* self, void* me) noexcept
 
 } // namespace
 
-bool Install(const nlohmann::json& gd, const modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
+bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
-    g_addrOnUpdate = gameconfig::ResolveSig(gd, serverModule, "BuyState::OnUpdate", errorOut, errorOutLen);
+    g_addrOnUpdate = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "BuyState::OnUpdate", errorOut, errorOutLen);
     if (!g_addrOnUpdate)
     {
         g_status = "failed: OnUpdate sig";
