@@ -104,7 +104,7 @@ void RememberWsForPawn(void* pawn, int slot)
     if (live.pawn != pawn || !live.ws) return;
     std::scoped_lock lk(g_wsToSlotMu);
     auto old = g_wsToBinding.find(g_slotToWs[slot]);
-    if (old != g_wsToBinding.end() && old->second.slot == slot) g_wsToBinding.erase(old);
+    if (old != g_wsToBinding.end() && old->first != live.ws && old->second.slot == slot) g_wsToBinding.erase(old);
     g_wsToBinding[live.ws] = { .slot = slot, .pawnHandle = live.pawnHandle };
     g_slotToWs[slot] = live.ws;
 }
@@ -168,13 +168,13 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     WsBinding bind = LookupBindingForWs(ws);
     if (bind.slot < 0) return { KHook::Action::Ignore };
 
-    const auto live = ResolveLiveWs(bind.slot);
-    if (live.ws != ws || live.pawnHandle != bind.pawnHandle) return { KHook::Action::Ignore };
-
     if (motion_recorder::IsReplaying(bind.slot)) return { KHook::Action::Ignore };
 
     LockTarget lt = weapon_locker_state::Get(bind.slot);
     if (lt == LockTarget::None) return { KHook::Action::Ignore };
+
+    const auto live = ResolveLiveWs(bind.slot);
+    if (live.ws != ws || live.pawnHandle != bind.pawnHandle) return { KHook::Action::Ignore };
 
     int engineSlot = LockTargetToEngineSlot(lt);
     if (engineSlot < 0 || !g_getSlot) return { KHook::Action::Ignore };
