@@ -151,6 +151,7 @@ KHook::Return<void> HookedUpdate(void* bot) noexcept
 // EXCEPTION: while a slot is replaying, drive ONLY the view
 KHook::Return<void> HookedUpkeep(void* bot) noexcept
 {
+    if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     int slot = CCSBotContextToSlot(bot);
     if (slot >= 0 && motion_recorder::IsReplaying(slot)) return { KHook::Action::Supersede };
     if (slot >= 0 && (bot_controller_state::GetAll(slot) || bot_controller_state::GetAim(slot)))
@@ -163,6 +164,7 @@ KHook::Return<void> HookedUpkeep(void* bot) noexcept
 // view replay
 KHook::Return<void> HookedUpdateLookAngles(void* bot) noexcept
 {
+    if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     int slot = CCSBotContextToSlot(bot);
     if (slot >= 0 && (motion_recorder::IsReplaying(slot) || bot_controller_state::GetAll(slot) || bot_controller_state::GetAim(slot)))
         return { KHook::Action::Supersede };
