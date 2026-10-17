@@ -78,10 +78,10 @@ bc_status
 
 ## Special thanks
 
-- [cs2kz-metamod](https://github.com/KZGlobalTeam/cs2kz-metamod) for helping determine the replay framework.
-- [御坂17032号](https://github.com/Misaka17032) and [Miksen](https://github.com/mrc4tt) for adding Linux support to the plugin.
-- [nicedayzhu](https://github.com/nicedayzhu) for adding swiftlys2 api support to the plugin.
-- [un1](https://github.com/unicbm) for the voice framework and signature updates.
+- [un1](https://github.com/unicbm)
+- [御坂17032号](https://github.com/Misaka17032)
+- [Miksen](https://github.com/mrc4tt)
+- [nicedayzhu](https://github.com/nicedayzhu)
 
 ------------------------------------------------------------------------
 
