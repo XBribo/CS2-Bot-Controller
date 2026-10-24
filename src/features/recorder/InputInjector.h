@@ -27,13 +27,10 @@ bool RecorderReady();
 // Registers the authoritative pawn supplied by the managed plugin for recording or replay.
 bool SetReplayPawn(int slot, void* pawn);
 
-// Caches validated services at registration so the first active tick has a frame boundary.
-void PrimeSlotServices(int slot, void* services);
-
-// Clears the registered replay pawn for a slot.
+// Detaches the pawn and its movement service.
 void ClearReplayPawn(int slot);
 
-// Resolves and validates the pawn owning the supplied movement services.
+// Resolves only a registered, current pawn.
 void* ResolveReplayPawn(int slot, void* services);
 
 // Creates an independently cancellable usercmd button injection

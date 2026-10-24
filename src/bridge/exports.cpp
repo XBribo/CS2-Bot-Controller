@@ -3,6 +3,7 @@
 #include "dispatch.h"
 #include "MotionRecorder.h"
 #include "InputInjector.h"
+#include "PawnBinding.h"
 #include "BuyControllerState.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
@@ -35,8 +36,8 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 23 removes unused movement extras from LoadReplay.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
+// ABI 24 guards asynchronous loads with pawn generations.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 24; }
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
@@ -240,9 +241,10 @@ extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                                                   const cs2bc::SubtickMove* subs,
                                                   int subCount,
                                                   const cs2bc::ReplayCommandFrameData* commands,
-                                                  int commandCount) noexcept
+                                                  int commandCount,
+                                                  uint64_t pawnGeneration) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount) ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, pawnGeneration) ? 0 : -1;
 }
 
 // Move a slot's just-recorded buffers into another slot's replay buffer
@@ -275,6 +277,21 @@ extern "C" BC_EXPORT int BotController_SetReplayPawn(int slot, uint64_t pawnPtr)
     void* pawn = reinterpret_cast<void*>(static_cast<uintptr_t>(pawnPtr)); // NOLINT(performance-no-int-to-ptr)
     return cs2bc::input_injector::SetReplayPawn(slot, pawn) ? 0 : -1;
 }
+
+// Returns zero after the registered pawn changes or disconnects.
+extern "C" BC_EXPORT uint64_t BotController_GetPawnGeneration(int slot)
+{
+    return cs2bc::input_injector::pawn_binding::ServicesForSlot(slot) ? cs2bc::motion_recorder::PawnGeneration(slot) : 0;
+}
+
+// Checks only registered pawn sessions.
+extern "C" BC_EXPORT void BotController_RefreshPawns() { cs2bc::input_injector::pawn_binding::Refresh(); }
+
+// Invalidates sessions without discarding recording buffers.
+extern "C" BC_EXPORT void BotController_ResetPawns() { cs2bc::input_injector::pawn_binding::Reset(); }
+
+// Ends one disconnected player's session.
+extern "C" BC_EXPORT void BotController_ResetPawn(int slot) { cs2bc::motion_recorder::InvalidateSlot(slot); }
 
 extern "C" BC_EXPORT int BotController_StopReplay(int slot) { return cs2bc::motion_recorder::StopReplay(slot) ? 0 : -1; }
 

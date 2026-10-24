@@ -1,5 +1,5 @@
-// P/Invoke wrapper for BotController.dll (ABI 23), check IsCompatible() before use
-// Main-thread only.
+// P/Invoke wrapper for BotController.dll (ABI 24), check IsCompatible() before use
+// Engine calls are main-thread only; buffer copies and loads may use workers.
 
 using System.Runtime.InteropServices;
 
@@ -8,7 +8,7 @@ namespace BotControllerApi
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 23;
+        private const int ExpectedAbiVersion = 24;
 
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
@@ -111,7 +111,7 @@ namespace BotControllerApi
         private static extern int BotController_LoadReplay(
             int slot, [In] ReplayTick[] ticks, int tickCount,
             [In] SubtickMove[] subs, int subCount,
-            [In] ReplayCommandFrame[] commands, int commandCount);
+            [In] ReplayCommandFrame[] commands, int commandCount, ulong pawnGeneration);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -121,6 +121,18 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetReplayPawn(int slot, ulong pawnPtr);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern ulong BotController_GetPawnGeneration(int slot);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void BotController_RefreshPawns();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void BotController_ResetPawns();
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void BotController_ResetPawn(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_StopReplay(int slot);
@@ -334,6 +346,15 @@ namespace BotControllerApi
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
+            => LoadReplay(slot, ticks, subs, commands, 0);
+
+        // Rejects results from a previous pawn session.
+        internal static bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            ulong pawnGeneration)
             => ticks is { Length: > 0 }
                && BotController_LoadReplay(
                    slot,
@@ -342,7 +363,8 @@ namespace BotControllerApi
                    subs ?? Array.Empty<SubtickMove>(),
                    subs?.Length ?? 0,
                    commands ?? Array.Empty<ReplayCommandFrame>(),
-                   commands?.Length ?? 0) == 0;
+                   commands?.Length ?? 0,
+                   pawnGeneration) == 0;
 
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.
@@ -356,6 +378,18 @@ namespace BotControllerApi
         public static bool SetReplayPawn(int slot, nint pawn)
             => pawn != 0 &&
                BotController_SetReplayPawn(slot, unchecked((ulong)pawn)) == 0;
+
+        // Identifies the currently registered pawn session.
+        internal static ulong PawnGeneration(int slot) => BotController_GetPawnGeneration(slot);
+
+        // Invalidates changed and disconnected pawns.
+        internal static void RefreshPawns() => BotController_RefreshPawns();
+
+        // Ends pawn sessions on map changes or provider unload.
+        internal static void ResetPawns() => BotController_ResetPawns();
+
+        // Ends one disconnected player's session.
+        internal static void ResetPawn(int slot) => BotController_ResetPawn(slot);
 
         public static bool StopReplay(int slot) => BotController_StopReplay(slot) == 0;
 

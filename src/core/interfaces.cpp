@@ -61,7 +61,7 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     cs2bc::voice_sender::SetInterfaces(cs2bc::dispatch::g_engine, networkMessages);
     if (!networkMessages)
     {
-        BC_LOG_WARN("network messages interface unavailable; voice send disabled\n");
+        BC_LOG_WARN("voice disabled: network messages unavailable");
     }
 
     return true;

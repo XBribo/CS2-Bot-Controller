@@ -74,14 +74,14 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         char buyErr[256] = { 0 };
         if (!cs2bc::buy_controller_hooks::Install(gd, serverModule, buyErr, sizeof(buyErr)))
         {
-            BC_LOG_WARN("BuyController::Install failed (%s); bot buy control disabled\n", buyErr);
+            BC_LOG_WARN("buy disabled: %s", buyErr);
         }
 
         // movement hooks for record/replay
         char injErr[256] = { 0 };
         if (!cs2bc::input_injector::Install(gd, serverModule, injErr, sizeof(injErr)))
         {
-            BC_LOG_WARN("InputInjector::Install failed (%s); record/replay movement will be a no-op\n", injErr);
+            BC_LOG_WARN("record/replay disabled: %s", injErr);
         }
 
         return true;

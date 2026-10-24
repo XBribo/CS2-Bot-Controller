@@ -13,6 +13,7 @@
 
 #include <tier0/dbg.h>
 #include <entityhandle.h>
+#include <const.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -51,14 +52,14 @@ float NormalizeDeg(float angle)
 
 #ifdef _WIN32
 // Resolves the entity identity chunk pointer referenced by SetEyeAngles.
-void ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
+bool ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
 {
     g_entityIdentityChunks = nullptr;
-    if (!setEyeAngles) return;
+    if (!setEyeAngles) return false;
 
     constexpr size_t kSearchBytes = 0x120;
     uint8_t code[kSearchBytes] = {};
-    if (!TryReadMemory(setEyeAngles, 0, code, sizeof(code))) return;
+    if (!TryReadMemory(setEyeAngles, 0, code, sizeof(code))) return false;
 
     auto* functionBase = reinterpret_cast<uint8_t*>(setEyeAngles);
     for (size_t i = 0; i + 10 <= kSearchBytes; ++i)
@@ -70,8 +71,9 @@ void ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
         int32_t relative = 0;
         std::memcpy(&relative, code + i + 3, sizeof(relative));
         g_entityIdentityChunks = reinterpret_cast<void**>(functionBase + i + 7 + relative);
-        return;
+        return true;
     }
+    return false;
 }
 
 // Resolves the live controller owning a replay pawn through entity chunks.
@@ -80,7 +82,8 @@ void* ReplayControllerForPawn(void* pawn)
     if (!pawn || !g_entityIdentityChunks) return nullptr;
 
     uint32_t handle = 0;
-    if (!SafeRead(pawn, tg::g_pawnController, handle) || handle == 0xFFFFFFFFU || handle == 0xFFFFFFFEU) return nullptr;
+    if (!SafeRead(pawn, tg::g_pawnController, handle) || handle == 0U || handle == 0xFFFFFFFFU || handle == 0xFFFFFFFEU)
+        return nullptr;
 
     void* chunks = nullptr;
     if (!TryReadMemory(static_cast<const void*>(g_entityIdentityChunks), 0, static_cast<void*>(&chunks), sizeof(chunks)) || !chunks)
@@ -103,23 +106,23 @@ void* ReplayControllerForPawn(void* pawn)
 // Updates replay angles without queuing a server correction over the next UserCmd.
 bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
 {
-    if (!pawn || !g_hookSetEyeAngles.Active()) return false;
+    if (!pawn || !ReplayViewReady()) return false;
 
     float angle[3] = { pitch, NormalizeDeg(yaw), 0.0F };
 #ifdef _WIN32
     void* controller = ReplayControllerForPawn(pawn);
     uint32_t controllerFlags = 0;
     if (!controller || !SafeRead(controller, tg::g_entFlags, controllerFlags)) return false;
-    const bool restoreControllerFlags = (controllerFlags & 0x100U) == 0;
+    const bool restoreControllerFlags = (controllerFlags & FL_FAKECLIENT) == 0;
     if (restoreControllerFlags)
     {
-        const uint32_t replayFlags = controllerFlags | 0x100U;
+        const uint32_t replayFlags = controllerFlags | FL_FAKECLIENT;
         if (!WriteField(controller, tg::g_entFlags, replayFlags)) return false;
     }
 #endif
     g_hookSetEyeAngles.CallOriginal(pawn, angle);
 #ifdef _WIN32
-    if (restoreControllerFlags) WriteField(controller, tg::g_entFlags, controllerFlags);
+    if (restoreControllerFlags && !WriteField(controller, tg::g_entFlags, controllerFlags)) return false;
 #endif
     return true;
 }
@@ -138,22 +141,8 @@ KHook::Return<void> HookedUpdate(void* bot) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Skip the per-frame view tick under All or Aim lock.
-// EXCEPTION: while a slot is replaying, drive ONLY the view
-KHook::Return<void> HookedUpkeep(void* bot) noexcept
-{
-    if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
-    int slot = CCSBotContextToSlot(bot);
-    if (slot >= 0 && motion_recorder::IsReplaying(slot)) return { KHook::Action::Supersede };
-    if (slot >= 0 && (bot_controller_state::GetAll(slot) || bot_controller_state::GetAim(slot)))
-    {
-        return { KHook::Action::Supersede };
-    }
-    return { KHook::Action::Ignore };
-}
-
-// view replay
-KHook::Return<void> HookedUpdateLookAngles(void* bot) noexcept
+// Blocks native view updates owned by a lock or replay.
+KHook::Return<void> HookedViewUpdate(void* bot) noexcept
 {
     if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     int slot = CCSBotContextToSlot(bot);
@@ -170,10 +159,9 @@ KHook::Return<void> HookedSetEyeAngles(void* pawn, float* angle) noexcept
     if (slot >= 0 && motion_recorder::IsReplaying(slot)) return { KHook::Action::Supersede };
     return { KHook::Action::Ignore };
 }
-
-// Resolve a sig from gamedata against the loaded server.dll.
 } // namespace
 
+// Installs AI hooks even when replay view support is unavailable.
 bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
     g_addrUpdate = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::Update", errorOut, errorOutLen);
@@ -195,21 +183,21 @@ bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serve
     g_addrUpdateLookAngles = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::UpdateLookAngles", ulaErr, sizeof(ulaErr));
     if (!g_addrUpdateLookAngles)
     {
-        BC_LOG_WARN("CCSBot::UpdateLookAngles sig not resolved (%s); replay view-drive disabled\n", ulaErr);
+        BC_LOG_WARN("UpdateLookAngles unresolved (%s)", ulaErr);
     }
 
-    // SetEyeAngles is optional; without it replay view falls back to
-    // the (smoothing) UpdateLookAngles hook only.
+    // Optional for locks and recording, required for replay.
     char seaErr[256] = { 0 };
     g_addrSetEyeAngles = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayerPawn::SetEyeAngles", seaErr, sizeof(seaErr));
     if (!g_addrSetEyeAngles)
     {
-        BC_LOG_WARN("CCSPlayerPawn::SetEyeAngles sig not resolved (%s); replay 1:1 view disabled\n", seaErr);
+        BC_LOG_WARN("replay disabled: SetEyeAngles unresolved (%s)", seaErr);
     }
 #ifdef _WIN32
-    else
+    else if (!ResolveSetEyeAnglesEntityChunks(g_addrSetEyeAngles))
     {
-        ResolveSetEyeAnglesEntityChunks(g_addrSetEyeAngles);
+        BC_LOG_WARN("replay disabled: entity table unresolved");
+        g_addrSetEyeAngles = nullptr;
     }
 #endif
 
@@ -223,7 +211,7 @@ bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serve
     }
 
     // required: Upkeep
-    if (!g_hookUpkeep.Install(g_addrUpkeep, &HookedUpkeep))
+    if (!g_hookUpkeep.Install(g_addrUpkeep, &HookedViewUpdate))
     {
         std::snprintf(errorOut, errorOutLen, "hook CCSBot::Upkeep failed");
         g_hookUpkeep.Remove();
@@ -233,29 +221,23 @@ bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serve
     }
 
     // optional: UpdateLookAngles
-    if (g_addrUpdateLookAngles)
+    if (g_addrUpdateLookAngles && !g_hookUpdateLookAngles.Install(g_addrUpdateLookAngles, &HookedViewUpdate))
     {
-        if (!g_hookUpdateLookAngles.Install(g_addrUpdateLookAngles, &HookedUpdateLookAngles))
-        {
-            BC_LOG_WARN("hook UpdateLookAngles failed; replay view-drive disabled\n");
-            g_hookUpdateLookAngles.Remove();
-            g_addrUpdateLookAngles = nullptr;
-        }
+        BC_LOG_WARN("UpdateLookAngles hook failed");
+        g_hookUpdateLookAngles.Remove();
+        g_addrUpdateLookAngles = nullptr;
     }
 
     // optional: SetEyeAngles
-    if (g_addrSetEyeAngles)
+    if (g_addrSetEyeAngles && !g_hookSetEyeAngles.Install(g_addrSetEyeAngles, &HookedSetEyeAngles))
     {
-        if (!g_hookSetEyeAngles.Install(g_addrSetEyeAngles, &HookedSetEyeAngles))
-        {
-            BC_LOG_WARN("hook SetEyeAngles failed; replay 1:1 view disabled\n");
-            g_hookSetEyeAngles.Remove();
-            g_addrSetEyeAngles = nullptr;
-        }
+        BC_LOG_WARN("replay disabled: SetEyeAngles hook failed");
+        g_hookSetEyeAngles.Remove();
+        g_addrSetEyeAngles = nullptr;
     }
 
     g_installed = true;
-    g_status = "ok";
+    g_status = ReplayViewReady() ? "ok" : "degraded: replay view unavailable";
     return true;
 }
 
@@ -278,7 +260,29 @@ void* UpdateAddress() { return g_addrUpdate; }
 void* UpkeepAddress() { return g_addrUpkeep; }
 void* UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
 
-// Publishes a replay angle without depending on the bot upkeep path.
-bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw) { return ApplyReplayEyeAnglesInternal(pawn, pitch, yaw); }
+// Requires both the native hook and its platform-specific dependencies.
+bool ReplayViewReady()
+{
+#ifdef _WIN32
+    if (!g_entityIdentityChunks) return false;
+#endif
+    return g_hookSetEyeAngles.Active();
+}
+
+// Stops only the replay whose eye-angle update failed.
+bool ApplyReplayEyeAngles(int slot, void* pawn, float pitch, float yaw)
+{
+    if (!motion_recorder::IsReplaying(slot)) return false;
+    const uint64_t generation = motion_recorder::PawnGeneration(slot);
+    const bool applied = ApplyReplayEyeAnglesInternal(pawn, pitch, yaw);
+    if (generation != motion_recorder::PawnGeneration(slot)) return false;
+    if (!applied)
+    {
+        BC_LOG_WARN("slot %d: view failed; replay stopped", slot);
+        motion_recorder::StopReplay(slot);
+        return false;
+    }
+    return motion_recorder::IsReplaying(slot);
+}
 } // namespace bot_controller_hooks
 } // namespace cs2bc

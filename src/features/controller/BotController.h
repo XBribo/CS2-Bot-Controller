@@ -1,4 +1,4 @@
-// MinHook install/remove for CCSBot Update/Upkeep.
+// Bot AI and eye-angle hooks.
 
 #pragma once
 
@@ -21,7 +21,10 @@ void* UpdateAddress();
 void* UpkeepAddress();
 void* UpdateLookAnglesAddress();
 
-// Publishes replay-owned eye angles through the current engine path.
-bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw);
+// Reports whether native replay eye-angle publishing is available.
+bool ReplayViewReady();
+
+// Publishes eye angles or stops the affected replay on failure.
+bool ApplyReplayEyeAngles(int slot, void* pawn, float pitch, float yaw);
 } // namespace bot_controller_hooks
 } // namespace cs2bc

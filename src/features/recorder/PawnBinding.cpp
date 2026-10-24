@@ -2,129 +2,185 @@
 #include "InputInjector.h"
 #include "MotionRecorder.h"
 #include "ccsbot_slot.h"
+#include "core/cs2_sdk/src/core/schema.h"
+#include "core/log.h"
 #include "offsets.h"
+#include "plugin.h"
+
+#include <engine2/isource2server.h>
+#include <game/entitynetworkable.h>
+#include <entityhandle.h>
 
 #include <array>
 #include <atomic>
+#include <bit>
+#include <cstring>
+#include <mutex>
 
 namespace tg = cs2bc::offsets;
 
 namespace cs2bc::input_injector {
 namespace {
-// Registered pawns belong to this module, not the hook scheduler.
-std::array<std::atomic<void*>, kMaxSlots> g_slotPawns{};
-
-// Checks the fixed registration table's slot bounds.
-bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
-
-// Reads the helper pawn field embedded in movement services.
-void* ServicesToPawnField(void* services)
+struct Binding
 {
     void* pawn = nullptr;
-    return GuardedRead(services, tg::g_servicesPawn, pawn) ? pawn : nullptr;
-}
+    void* services = nullptr;
+    uint32_t pawnHandle = 0;
+    uint32_t controllerHandle = 0;
+};
+std::array<Binding, kMaxSlots> g_bindings{};
+std::array<std::mutex, kMaxSlots> g_bindingMutexes;
+std::atomic<uint64_t> g_registeredSlots{ 0 };
+ISource2Server* g_server = nullptr;
+int g_controllerPawn = -1;
 
-// Verifies that a pawn currently owns the supplied movement services.
-bool PawnOwnsServices(void* pawn, void* services)
+// Checks the fixed slot table.
+bool ValidSlot(int slot) { return slot >= 0 && slot < kMaxSlots; }
+
+// Resolves both entities before touching their services.
+Binding CurrentBinding(int slot)
 {
-    if (!pawn || !services) return false;
-    void* liveServices = nullptr;
-    return GuardedRead(pawn, tg::g_pawnMovementServices, liveServices) && liveServices == services;
+    if (!ValidSlot(slot) || !g_server) return {};
+    Entity2Networkable_t controller{};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
+        !controller.m_pEntityInstance)
+        return {};
+    uint32_t pawnHandle = 0;
+    if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) || pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU)
+        return {};
+    Entity2Networkable_t pawn{};
+    if (!g_server->GetEntity2Networkable(CEntityIndex(CEntityHandle(pawnHandle).GetEntryIndex()), &pawn) || !pawn.m_pEntity ||
+        !pawn.m_pEntityInstance || pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle || !pawn.m_pszCPPClassname ||
+        std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
+        return {};
+    const uint32_t controllerHandle = controller.m_pEntity->GetRefEHandle().ToInt();
+    const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
+    const uint32_t owner = handles.controllerSlot >= 0 ? handles.controllerHandle : handles.originalControllerHandle;
+    if (handles.ownerSlot != slot || owner != controllerHandle) return {};
+    void* services = nullptr;
+    void* fieldPawn = nullptr;
+    if (!GuardedRead(pawn.m_pEntityInstance, tg::g_pawnMovementServices, services) || !services ||
+        !GuardedRead(services, tg::g_servicesPawn, fieldPawn) || fieldPawn != pawn.m_pEntityInstance)
+        return {};
+    return { pawn.m_pEntityInstance, services, pawnHandle, controllerHandle };
 }
 
+// Invalidates stale registrations instead of following a replacement pawn.
+Binding RegisteredBinding(int slot)
+{
+    if (!ValidSlot(slot)) return {};
+    Binding registered;
+    {
+        std::scoped_lock lock(g_bindingMutexes[slot]);
+        registered = g_bindings[slot];
+    }
+    if (!registered.pawn) return {};
+    const Binding current = CurrentBinding(slot);
+    if (current.pawn == registered.pawn && current.services == registered.services && current.pawnHandle == registered.pawnHandle &&
+        current.controllerHandle == registered.controllerHandle)
+        return registered;
+    motion_recorder::InvalidateSlot(slot);
+    BC_LOG_WARN("slot %d: pawn changed; stopped", slot);
+    return {};
+}
 } // namespace
 
-// Registers a readable pawn whose current owner matches the requested slot.
+// Registers only the controller's current pawn.
 bool SetReplayPawn(int slot, void* pawn)
 {
-    if (!ValidSlotIndex(slot) || motion_recorder::IsReplaying(slot)) return false;
-    g_slotPawns[slot].store(nullptr, std::memory_order_release);
-    if (!pawn) return false;
-
-    void* identity = nullptr;
-    uint32_t handle = 0;
-    if (!GuardedRead(pawn, tg::g_entIdentity, identity) || !identity || !GuardedRead(identity, tg::g_entIdentityEHandle, handle) ||
-        handle == 0U || handle == 0xFFFFFFFFU)
-        return false;
-
-    int ownerSlot = ControllerSlotForPawn(pawn);
-    if (ownerSlot >= 0 && ownerSlot != slot) return false;
-
-    void* services = nullptr;
-    if (!GuardedRead(pawn, tg::g_pawnMovementServices, services) || !services || ServicesToPawnField(services) != pawn) return false;
-
-    g_slotPawns[slot].store(pawn, std::memory_order_release);
-    PrimeSlotServices(slot, services);
+    if (!ValidSlot(slot) || !pawn) return false;
+    const Binding registered = RegisteredBinding(slot);
+    if (registered.pawn == pawn) return true;
+    if (motion_recorder::IsRecording(slot) || motion_recorder::IsReplaying(slot)) return false;
+    const Binding current = CurrentBinding(slot);
+    if (current.pawn != pawn) return false;
+    motion_recorder::InvalidateSlot(slot);
+    {
+        std::scoped_lock lock(g_bindingMutexes[slot]);
+        g_bindings[slot] = current;
+    }
+    g_registeredSlots.fetch_or(uint64_t{ 1 } << slot, std::memory_order_release);
     return true;
 }
 
-// Removes a registered pawn before the entity can be recycled.
+// Detaches both pawn and services without touching stored recordings.
 void ClearReplayPawn(int slot)
 {
-    if (ValidSlotIndex(slot)) g_slotPawns[slot].store(nullptr, std::memory_order_release);
+    if (!ValidSlot(slot)) return;
+    std::scoped_lock lock(g_bindingMutexes[slot]);
+    g_bindings[slot] = {};
+    g_registeredSlots.fetch_and(~(uint64_t{ 1 } << slot), std::memory_order_release);
 }
 
-// Returns a registered pawn only when its movement-services link is current.
+// Never falls back to an unregistered pawn.
 void* ResolveReplayPawn(int slot, void* services)
 {
-    if (ValidSlotIndex(slot))
-    {
-        void* registered = g_slotPawns[slot].load(std::memory_order_acquire);
-        if (PawnOwnsServices(registered, services)) return registered;
-    }
-
-    void* fieldPawn = ServicesToPawnField(services);
-    return PawnOwnsServices(fieldPawn, services) ? fieldPawn : nullptr;
+    const Binding binding = RegisteredBinding(slot);
+    return services && binding.services == services ? binding.pawn : nullptr;
 }
-
-namespace {
-
-// Finds a registered slot by validating every pawn-to-services link.
-int RegisteredSlotForServices(void* services)
-{
-    if (!services) return -1;
-    for (int slot = 0; slot < kMaxSlots; ++slot)
-    {
-        void* pawn = g_slotPawns[slot].load(std::memory_order_acquire);
-        if (PawnOwnsServices(pawn, services)) return slot;
-    }
-    return -1;
-}
-
-} // namespace
 
 namespace pawn_binding {
-// Optionally returns the field pawn validated during this same resolution.
+// Caches the engine interface and schema field once.
+bool Init()
+{
+    g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
+    g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
+    return g_server && g_controllerPawn >= 0;
+}
+
+// Returns only the registered, live services.
+void* ServicesForSlot(int slot) { return RegisteredBinding(slot).services; }
+
+// New input requests explicitly bind the current pawn.
+bool BindCurrentPawn(int slot)
+{
+    if (RegisteredBinding(slot).pawn) return true;
+    return SetReplayPawn(slot, CurrentBinding(slot).pawn);
+}
+
+// Resolves the callback owner without adopting its pawn.
 int ServicesToSlot(void* services, void** validatedPawn)
 {
-    if (validatedPawn) *validatedPawn = nullptr;
-    if (!services) return -1;
-    void* pawn = ServicesToPawnField(services);
-    if (!PawnOwnsServices(pawn, services)) pawn = nullptr;
+    void* pawn = nullptr;
+    if (services) GuardedRead(services, tg::g_servicesPawn, pawn);
     if (validatedPawn) *validatedPawn = pawn;
-
-    PawnControllerHandles handles = ReadPawnControllerHandles(pawn);
-    int ownerSlot = handles.ownerSlot;
-    if (ownerSlot < 0) ownerSlot = RegisteredSlotForServices(services);
-    return ownerSlot;
+    return ControllerSlotForPawn(pawn);
 }
 
-// Reuses this callback's field pawn while retaining registered-pawn precedence.
+// Uses the same registration as the enclosing movement callback.
 void* ServicesToWeaponServices(int slot, void* services, void* validatedPawn)
 {
-    void* registered = ValidSlotIndex(slot) ? g_slotPawns[slot].load(std::memory_order_acquire) : nullptr;
-    void* pawn = validatedPawn;
-    if (!pawn || (registered && registered != pawn)) pawn = ResolveReplayPawn(slot, services);
-    if (!pawn) return nullptr;
-    void* weaponServices = nullptr;
-    return GuardedRead(pawn, tg::g_pawnWeaponServices, weaponServices) ? weaponServices : nullptr;
+    void* pawn = ResolveReplayPawn(slot, services);
+    if (!pawn || pawn != validatedPawn) return nullptr;
+    void* weapons = nullptr;
+    return GuardedRead(pawn, tg::g_pawnWeaponServices, weapons) ? weapons : nullptr;
 }
 
-// Clears registrations when input hooks are removed.
+// Checks only registered slots, once per provider tick.
+void Refresh()
+{
+    uint64_t slots = g_registeredSlots.load(std::memory_order_acquire);
+    while (slots)
+    {
+        RegisteredBinding(std::countr_zero(slots));
+        slots &= slots - 1;
+    }
+}
+
+// Ends sessions on map changes and provider unload.
+void Reset()
+{
+    for (int slot = 0; slot < kMaxSlots; ++slot)
+        motion_recorder::InvalidateSlot(slot);
+}
+
+// Clears registrations after callbacks have drained.
 void ClearAll()
 {
-    for (auto& pawn : g_slotPawns)
-        pawn.store(nullptr, std::memory_order_release);
+    for (int slot = 0; slot < kMaxSlots; ++slot)
+        ClearReplayPawn(slot);
+    g_server = nullptr;
+    g_controllerPawn = -1;
 }
 } // namespace pawn_binding
 } // namespace cs2bc::input_injector

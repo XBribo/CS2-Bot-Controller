@@ -62,6 +62,7 @@ struct MovementFrame
     bool recording;
     bool replaying;
     bool seeded = false;
+    uint64_t generation = 0;
 };
 thread_local std::vector<MovementFrame> g_physicsFrames;
 bool g_installed = false;
@@ -70,9 +71,6 @@ bool g_physicsActive = false;
 // True once PlayerRunCommand is hooked
 bool g_subtickActive = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
-
-// slot -> live CCSPlayer_MovementServices*
-std::array<std::atomic<void*>, kMaxSlots> g_slotServices{};
 
 enum class UsercmdInjectionPhase : uint8_t
 {
@@ -148,15 +146,10 @@ int64_t MonotonicMilliseconds()
 // Creates an independently cancellable usercmd button injection
 } // namespace
 
-// Seeds the active frame boundary from a pawn registered before recording starts.
-void PrimeSlotServices(int slot, void* services)
-{
-    if (ValidSlotIndex(slot)) g_slotServices[slot].store(services, std::memory_order_release);
-}
-
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!pawn_binding::BindCurrentPawn(slot)) return -1;
 
     int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
     std::scoped_lock lock(g_usercmdInjectionMutex);
@@ -174,6 +167,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
         motion_recorder::IsReplaying(slot))
         return -1;
 
+    if (!pawn_binding::BindCurrentPawn(slot)) return -1;
     int64_t id = g_nextUsercmdMovementId.fetch_add(1, std::memory_order_relaxed);
     std::scoped_lock lock(g_usercmdInjectionMutex);
     if (motion_recorder::IsReplaying(slot)) return -1;
@@ -187,6 +181,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 bool UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
 {
     if (!ValidSlotIndex(slot) || movementId <= 0 || !std::isfinite(forwardMove) || !std::isfinite(leftMove)) return false;
+    if (!pawn_binding::ServicesForSlot(slot)) return false;
 
     std::scoped_lock lock(g_usercmdInjectionMutex);
     for (UsercmdMovement& movement : g_usercmdMovements[slot])
@@ -240,6 +235,7 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
 bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return false;
+    if (!pawn_binding::BindCurrentPawn(slot)) return false;
 
     int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
     std::scoped_lock lock(g_usercmdInjectionMutex);
@@ -254,6 +250,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!pawn_binding::BindCurrentPawn(slot)) return -1;
 
     int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
     std::scoped_lock lock(g_usercmdInjectionMutex);
@@ -486,19 +483,15 @@ void ApplyReplayDrop(int slot, void* services)
 // Installs the command hook from the live movement-services vtable.
 void EnsureVtableHooks(void* services);
 
-// Discovers live services without modifying any substep simulation state.
+// Discovers command hooks and records the registered pawn's weapon service.
 KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
 {
     EnsureVtableHooks(services);
-    if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
+    if (!motion_recorder::HasAnyRecording()) return { KHook::Action::Ignore };
     void* validatedPawn = nullptr;
     int slot = pawn_binding::ServicesToSlot(services, &validatedPawn);
-    if (slot >= 0 && slot < kMaxSlots)
-    {
-        g_slotServices[slot].store(services, std::memory_order_release);
-        if (motion_recorder::IsRecording(slot))
-            motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services, validatedPawn));
-    }
+    if (motion_recorder::IsRecording(slot))
+        motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services, validatedPawn));
     return { KHook::Action::Ignore };
 }
 
@@ -592,6 +585,11 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
     motion_recorder::ReplayCommandFrame frame{};
     if (motion_recorder::ReplayCommandFrameForSimulation(slot, frame))
     {
+        const auto* active = FindPhysicsFrame(slot);
+        if (!active || active->services != services || active->generation != motion_recorder::PawnGeneration(slot) ||
+            !motion_recorder::IsReplaying(slot))
+            return;
+        const uint64_t generation = active->generation;
         bool suppressUnsafeUtilityAttack =
             IsThrowableUtilityDef(frame.tick.weaponDefIndex) && frame.weaponSelect < 0 &&
             !motion_recorder::ReplayWeaponDefsMatch(motion_recorder::BotActiveWeaponDef(slot), frame.tick.weaponDefIndex);
@@ -601,6 +599,7 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
             frame.buttons1 &= ~kGrenadeAttackMask;
             frame.buttons2 &= ~kGrenadeAttackMask;
         }
+        if (!motion_recorder::IsReplaying(slot) || generation != motion_recorder::PawnGeneration(slot)) return;
 
         CInButtonStatePB* bp = base->mutable_buttons_pb();
         bp->set_buttonstate1(frame.buttons0);
@@ -676,7 +675,9 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
     if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay() && g_usercmdWorkSlots.load(std::memory_order_acquire) == 0)
         return { KHook::Action::Ignore };
     int slot = pawn_binding::ServicesToSlot(services);
+    if (!ResolveReplayPawn(slot, services)) return { KHook::Action::Ignore };
     auto* boundary = FindPhysicsFrame(slot);
+    if (boundary && (boundary->services != services || boundary->generation != motion_recorder::PawnGeneration(slot))) boundary = nullptr;
     bool recording = boundary && boundary->recording && motion_recorder::IsRecording(slot);
     bool replaying = boundary && boundary->replaying && motion_recorder::IsReplaying(slot);
     const auto [hasUsercmdInjection, hasUsercmdSuppression, hasUsercmdMovement] = replaying ? UsercmdWork{} : GetUsercmdWork(slot);
@@ -708,7 +709,8 @@ KHook::Return<void> ControllerCommandSetupPost(void* controller) noexcept
     if (g_physicsFrames.empty()) return { KHook::Action::Ignore };
     // Do not cross an inactive/nested simulation frame to consume an outer event.
     const MovementFrame frame = g_physicsFrames.back();
-    if (frame.replaying && frame.services && ControllerToSlot(controller) == frame.slot && motion_recorder::IsReplaying(frame.slot))
+    if (frame.replaying && frame.services && ControllerToSlot(controller) == frame.slot && motion_recorder::IsReplaying(frame.slot) &&
+        ResolveReplayPawn(frame.slot, frame.services) && frame.generation == motion_recorder::PawnGeneration(frame.slot))
         ApplyReplayDrop(frame.slot, frame.services);
     return { KHook::Action::Ignore };
 }
@@ -724,7 +726,7 @@ void EnsureControllerCommandHook(void* controller)
         target && g_hookControllerCommandSetup.Install(target, nullptr, &ControllerCommandSetupPost))
         return;
     g_hookControllerCommandSetup.Remove();
-    BC_LOG_WARN("Controller command setup hook unavailable; recording and replay are disabled\n");
+    BC_LOG_WARN("record/replay: command setup unavailable");
 }
 
 // Captures the per-tick state before any subtick movement.
@@ -739,7 +741,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
     }
     int slot = ControllerToSlot(controller);
 
-    void* services = (slot >= 0 && slot < kMaxSlots) ? g_slotServices[slot].load(std::memory_order_acquire) : nullptr;
+    void* services = pawn_binding::ServicesForSlot(slot);
 
     bool recording = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsRecording(slot);
     bool replaying = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsReplaying(slot);
@@ -751,7 +753,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
         return { KHook::Action::Ignore };
     }
     // Publish ownership before engine callbacks can reenter.
-    g_physicsFrames.push_back({ slot, services, recording, replaying });
+    g_physicsFrames.push_back({ slot, services, recording, replaying, false, motion_recorder::PawnGeneration(slot) });
 
     // pre: snapshot start-of-tick state once (before any subtick mover).
     if (recording) motion_recorder::OnCapturePre(slot, services, nullptr);
@@ -762,8 +764,10 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
 // Commits the recording and replay state for the matching simulation call.
 KHook::Return<void> PhysicsSimulatePost(void*) noexcept
 {
-    const auto [slot, services, recording, replaying, seeded] = g_physicsFrames.back();
+    const auto [slot, services, recording, replaying, seeded, generation] = g_physicsFrames.back();
     g_physicsFrames.pop_back();
+    if ((!recording && !replaying) || !ResolveReplayPawn(slot, services) || generation != motion_recorder::PawnGeneration(slot))
+        return { KHook::Action::Ignore };
 
     // post: snapshot end-of-tick state + commit one frame
     if (recording) motion_recorder::OnCapturePost(slot, services, nullptr);
@@ -806,6 +810,12 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
+    if (!pawn_binding::Init())
+    {
+        std::snprintf(errorOut, errorOutLen, "pawn binding unavailable");
+        g_status = "failed: pawn binding";
+        return false;
+    }
     g_addrProcessMovement =
         cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
     if (!g_addrProcessMovement)
@@ -836,7 +846,7 @@ bool Install( // NOLINT(misc-use-internal-linkage)
             g_hookPhysicsSimulate.Remove();
             g_addrPhysicsSimulate = nullptr;
         }
-        BC_LOG_WARN("PhysicsSimulate hook unavailable (%s); recording and replay are disabled\n", psErr[0] ? psErr : "KHook failed");
+        BC_LOG_WARN("record/replay: simulation hook failed (%s)", psErr[0] ? psErr : "KHook");
     }
 
     // PlayerRunCommand is hooked lazily from the first live movement-services vtable.
@@ -847,8 +857,7 @@ bool Install( // NOLINT(misc-use-internal-linkage)
                                                                        dropReleaseError, sizeof(dropReleaseError))
                                      : nullptr;
     if (!motion_recorder::InstallDropReleasePose(outerDrop, buildTransform))
-        BC_LOG_WARN("Drop release pose unavailable (%s); drop replay requires this hook\n",
-                    dropReleaseError[0] ? dropReleaseError : "hook installation failed");
+        BC_LOG_WARN("drop replay unavailable (%s)", dropReleaseError[0] ? dropReleaseError : "hook failed");
     g_installed = true;
     g_status = "ok";
     return true;
@@ -856,7 +865,11 @@ bool Install( // NOLINT(misc-use-internal-linkage)
 
 void Remove()
 {
-    if (!g_installed) return;
+    if (!g_installed)
+    {
+        pawn_binding::ClearAll();
+        return;
+    }
     g_hookProcessMovement.Remove();
     g_hookPlayerRunCommand.Remove();
     g_hookControllerCommandSetup.Remove();
@@ -868,8 +881,6 @@ void Remove()
     g_subtickActive = false;
     g_vtHooksTried.store(false, std::memory_order_release);
     g_controllerHookTried.store(false, std::memory_order_release);
-    for (auto& s : g_slotServices)
-        s.store(nullptr, std::memory_order_release);
     pawn_binding::ClearAll();
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
@@ -891,7 +902,7 @@ void Remove()
 bool RecorderReady()
 {
     if (g_physicsActive && g_subtickActive && g_hookControllerCommandSetup.Active()) return true;
-    BC_LOG_WARN("Cannot start recording/replay: PhysicsSimulate=%d PlayerRunCommand=%d ControllerCommandSetup=%d\n", g_physicsActive,
+    BC_LOG_WARN("record/replay unavailable: simulation=%d command=%d setup=%d", g_physicsActive,
                 g_subtickActive, g_hookControllerCommandSetup.Active());
     return false;
 }

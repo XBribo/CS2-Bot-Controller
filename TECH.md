@@ -70,7 +70,7 @@ CMake output is under `<build-directory>/package/addons/`. Use the script to ass
 
 ## C# Integration
 
-The Metamod plugin and C# provider must use the same ABI, currently **23**. Both providers expose `IBotControllerApi` under `botcontroller:api`.
+The Metamod plugin and C# provider must use the same ABI, currently **24**. Both providers expose `IBotControllerApi` under `botcontroller:api`.
 
 Reference the matching `BotControllerApi.dll` in your consumer project. Adjust `HintPath` to its local location; `Private=false` avoids deploying a second contract with the consumer.
 
@@ -175,7 +175,7 @@ Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotContr
 2. Call `StopRecord` before retrieving or transferring the recording.
 3. Use `TransferRecordingToReplay` for an in-memory transfer, or `GetRecordedMotionExtended` and `LoadReplay` to include aligned command frames.
 4. Register the destination bot's current pawn with `SetReplayPawn`, then call `StartReplay`.
-5. Use `StopReplay` to stop playback. Register the current pawn again before restarting.
+5. Use `StopReplay` to stop playback. Pawn replacement or disconnection stops the session; register the current pawn again before restarting recording or replay.
 
 Check every operation's result. Pawn pointers must belong to the live player, not a previous spawn. Record and replay at the same tickrate; the bundled managed recording workflow assumes 64 ticks per second.
 

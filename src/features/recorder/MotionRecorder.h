@@ -156,6 +156,10 @@ bool StopRecord(int slot); // stops
 bool IsRecording(int slot);
 // Reports whether any slot has an active recording.
 bool HasAnyRecording();
+// Invalidates runtime state while retaining complete recorded data.
+void InvalidateSlot(int slot);
+// Identifies one pawn session, including its asynchronous work.
+uint64_t PawnGeneration(int slot);
 int RecordedTickCount(int slot); // <0 on bad slot
 int RecordedSubtickCount(int slot); // <0 on bad slot
 int RecordedCommandCount(int slot); // <0 on bad slot
@@ -190,7 +194,8 @@ bool LoadReplay(int slot,
                 const SubtickMove* subs,
                 int subCount,
                 const ReplayCommandFrameData* commands,
-                int commandCount) noexcept;
+                int commandCount,
+                uint64_t pawnGeneration = 0) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
 bool StopReplay(int slot); // stop + clear injection
 bool IsReplaying(int slot);

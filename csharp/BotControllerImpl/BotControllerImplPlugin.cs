@@ -28,11 +28,13 @@ public partial class BotControllerPlugin : BasePlugin
     // Record and replay must share a tickrate; adjust if your server differs.
     private const int Tickrate = 64;
 
-    private readonly Dictionary<int, string> _recordingFiles = new();
+    private readonly Dictionary<int, (ulong SteamId, string File)> _recordingFiles = new();
     private readonly HashSet<int> _savingSlots = new();
-    private readonly Dictionary<int, object> _loadingSlots = new();
-    private readonly HashSet<int> _cancelledLoads = new();
+    private readonly Dictionary<int, ulong> _loadingSlots = new();
     private readonly ConcurrentQueue<Action> _completedJobs = new();
+    private readonly List<Task> _jobs = new();
+    private bool _bridgeReady;
+    private ulong _mapGeneration;
 
     // Loads the managed plugin and publishes its shared API
     public override void Load(bool hotReload)
@@ -49,14 +51,51 @@ public partial class BotControllerPlugin : BasePlugin
         Capabilities.RegisterPluginCapability(
             BotControllerCapability.Cap, () => new BotControllerApiImpl());
 
+        _bridgeReady = true;
+        ResetSessions();
         Directory.CreateDirectory(RecordingsDir);
         RegisterListener<Listeners.OnTick>(OnTick);
+        RegisterListener<Listeners.OnMapStart>(_ => ResetSessions());
+        RegisterListener<Listeners.OnMapEnd>(ResetSessions);
+        RegisterListener<Listeners.OnClientDisconnect>(OnDisconnect);
+    }
+
+    // Drains native buffer readers before the provider disappears.
+    public override void Unload(bool hotReload)
+    {
+        if (!_bridgeReady) return;
+        _bridgeReady = false;
+        ResetSessions();
+        Task.WaitAll(_jobs.ToArray());
+        _jobs.Clear();
+        _completedJobs.Clear();
+        _savingSlots.Clear();
+    }
+
+    // Invalidates ownership before a disconnected slot can be reused.
+    private void OnDisconnect(int slot)
+    {
+        if (!_bridgeReady) return;
+        _loadingSlots.Remove(slot);
+        _recordingFiles.Remove(slot);
+        BotController.ResetPawn(slot);
+    }
+
+    // Keeps in-flight saves pinned to their stopped native buffers.
+    private void ResetSessions()
+    {
+        ++_mapGeneration;
+        _loadingSlots.Clear();
+        _recordingFiles.Clear();
+        BotController.ResetPawns();
     }
 
     // Applies completed file jobs on the game thread.
     private void OnTick()
     {
+        BotController.RefreshPawns();
         while (_completedJobs.TryDequeue(out Action? completion)) completion();
+        _jobs.RemoveAll(job => job.IsCompleted);
     }
 
     // Reports an asynchronous result only to the player who issued the command.
@@ -119,7 +158,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnRecord(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (player == null || !player.IsValid) return;
+        if (!_bridgeReady || player == null || !player.IsValid) return;
         if (_savingSlots.Contains(player.Slot))
         {
             cmd.ReplyToCommand("[BotController] Previous recording is still saving.");
@@ -137,7 +176,7 @@ public partial class BotControllerPlugin : BasePlugin
             cmd.ReplyToCommand("[BotController] Failed to start recording.");
             return;
         }
-        _recordingFiles[player.Slot] = file;
+        _recordingFiles[player.Slot] = (player.SteamID, file);
         cmd.ReplyToCommand("[BotController] Recording. Use !stoprecord to finish.");
     }
 
@@ -146,23 +185,27 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopRecord(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (player == null || !player.IsValid) return;
+        if (!_bridgeReady || player == null || !player.IsValid) return;
         if (_savingSlots.Contains(player.Slot))
         {
             cmd.ReplyToCommand("[BotController] Recording is still saving.");
             return;
         }
-        BotController.StopRecord(player.Slot);
-
-        if (!_recordingFiles.Remove(player.Slot, out string? file) &&
-            !TryGetRecordingFile(null, player.SteamID, out file))
+        if (!_recordingFiles.TryGetValue(player.Slot, out var recording) || recording.SteamId != player.SteamID)
+        {
+            cmd.ReplyToCommand("[BotController] No recording.");
             return;
+        }
+        _recordingFiles.Remove(player.Slot);
+        BotController.StopRecord(player.Slot);
+        string file = recording.File;
 
         int slot = player.Slot;
         ulong steamId = player.SteamID;
+        ulong mapGeneration = _mapGeneration;
         _savingSlots.Add(slot);
         cmd.ReplyToCommand("[BotController] Saving recording...");
-        _ = Task.Run(() =>
+        _jobs.Add(Task.Run(() =>
         {
             try
             {
@@ -170,6 +213,7 @@ public partial class BotControllerPlugin : BasePlugin
                 _completedJobs.Enqueue(() =>
                 {
                     _savingSlots.Remove(slot);
+                    if (mapGeneration != _mapGeneration) return;
                     NotifyPlayer(slot, steamId, saved > 0 ? $"Saved {saved} ticks." : "Nothing recorded.");
                 });
             }
@@ -178,11 +222,12 @@ public partial class BotControllerPlugin : BasePlugin
                 _completedJobs.Enqueue(() =>
                 {
                     _savingSlots.Remove(slot);
-                    Server.PrintToConsole($"[BotController] Save failed: {ex}");
+                    if (mapGeneration != _mapGeneration) return;
+                    Server.PrintToConsole($"[BotController] Save failed: {ex.Message}");
                     NotifyPlayer(slot, steamId, "Recording save failed.");
                 });
             }
-        });
+        }));
     }
 
     // Loads the optional recording file and replays it on a bot
@@ -190,7 +235,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(minArgs: 1, usage: "<botSlot> [fileName]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnReplay(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (player == null || !player.IsValid) return;
+        if (!_bridgeReady || player == null || !player.IsValid) return;
         string? fileName = cmd.ArgCount >= 3 ? cmd.GetArg(2) : null;
         if (cmd.ArgCount > 3 ||
             !int.TryParse(cmd.GetArg(1), out int botSlot) ||
@@ -210,26 +255,36 @@ public partial class BotControllerPlugin : BasePlugin
             cmd.ReplyToCommand("[BotController] Replay is still loading on that slot.");
             return;
         }
+        if (BotController.IsReplaying(botSlot) || !RegisterPawnForSlot(botSlot))
+        {
+            cmd.ReplyToCommand("[BotController] Replay target unavailable.");
+            return;
+        }
+        ulong generation = BotController.PawnGeneration(botSlot);
+        if (generation == 0) return;
         int requesterSlot = player.Slot;
         ulong requesterSteamId = player.SteamID;
-        object token = new();
-        _loadingSlots.Add(botSlot, token);
+        _loadingSlots.Add(botSlot, generation);
         cmd.ReplyToCommand("[BotController] Loading replay...");
-        _ = Task.Run(() =>
+        _jobs.Add(Task.Run(() =>
         {
             try
             {
                 MotionRecording rec = MotionStore.LoadFromFile(file);
                 bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands);
+                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, generation);
                 _completedJobs.Enqueue(() =>
                 {
-                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
+                    if (!_loadingSlots.TryGetValue(botSlot, out ulong current) || current != generation) return;
                     _loadingSlots.Remove(botSlot);
-                    if (_cancelledLoads.Remove(botSlot)) return;
+                    if (BotController.PawnGeneration(botSlot) != generation)
+                    {
+                        NotifyPlayer(requesterSlot, requesterSteamId, "Replay cancelled: pawn changed.");
+                        return;
+                    }
                     if (rec.Tickrate != Tickrate)
                         NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
-                    if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
+                    if (loaded && BotController.StartReplay(botSlot))
                         NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
                     else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
                 });
@@ -238,14 +293,13 @@ public partial class BotControllerPlugin : BasePlugin
             {
                 _completedJobs.Enqueue(() =>
                 {
-                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
+                    if (!_loadingSlots.TryGetValue(botSlot, out ulong current) || current != generation) return;
                     _loadingSlots.Remove(botSlot);
-                    if (_cancelledLoads.Remove(botSlot)) return;
-                    Server.PrintToConsole($"[BotController] Replay load failed: {ex}");
+                    Server.PrintToConsole($"[BotController] Replay load failed: {ex.Message}");
                     NotifyPlayer(requesterSlot, requesterSteamId, "Replay load failed.");
                 });
             }
-        });
+        }));
     }
 
     // Stops replay on the selected bot slot
@@ -253,9 +307,9 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(minArgs: 1, usage: "<botSlot>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopReplay(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (player == null || !player.IsValid) return;
+        if (!_bridgeReady || player == null || !player.IsValid) return;
         if (!int.TryParse(cmd.GetArg(1), out int botSlot)) return;
-        if (_loadingSlots.ContainsKey(botSlot)) _cancelledLoads.Add(botSlot);
+        _loadingSlots.Remove(botSlot);
         BotController.StopReplay(botSlot);
         cmd.ReplyToCommand($"[BotController] Stopped replay on bot slot {botSlot}.");
     }
