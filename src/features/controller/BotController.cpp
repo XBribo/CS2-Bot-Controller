@@ -18,7 +18,6 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
-#include <mutex>
 #include <string>
 
 namespace tg = cs2bc::offsets;
@@ -36,10 +35,6 @@ void** g_entityIdentityChunks = nullptr;
 #endif
 bool g_installed = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
-
-// slot -> last CCSBot* seen in Update (for profile reads by slot)
-void* g_slotToBot[64] = { nullptr };
-std::mutex g_slotToBotMu;
 
 cs2_sdk::hooks::NativeHook<void, void*> g_hookUpdate;
 cs2_sdk::hooks::NativeHook<void, void*> g_hookUpkeep;
@@ -132,12 +127,8 @@ bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
 // Skip the Bot tick under All lock OR while replaying
 KHook::Return<void> HookedUpdate(void* bot) noexcept
 {
+    if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     int slot = CCSBotToSlot(bot);
-    if (slot >= 0 && slot < 64)
-    {
-        std::scoped_lock lk(g_slotToBotMu);
-        g_slotToBot[slot] = bot;
-    }
     if (slot >= 0 && (bot_controller_state::GetAll(slot) || motion_recorder::IsReplaying(slot)))
     {
         const uint8_t ticked = 1;
@@ -280,11 +271,6 @@ void Remove()
     g_hookUpdate.Remove();
     g_installed = false;
     g_status = "not_attempted";
-    {
-        std::scoped_lock lk(g_slotToBotMu);
-        for (auto& i : g_slotToBot)
-            i = nullptr;
-    }
 }
 
 const char* Status() { return g_status.c_str(); }
@@ -294,13 +280,5 @@ void* UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
 
 // Publishes a replay angle without depending on the bot upkeep path.
 bool ApplyReplayEyeAngles(void* pawn, float pitch, float yaw) { return ApplyReplayEyeAnglesInternal(pawn, pitch, yaw); }
-
-// Last CCSBot* seen in Update for this slot
-void* BotForSlot(int slot)
-{
-    if (slot < 0 || slot >= 64) return nullptr;
-    std::scoped_lock lk(g_slotToBotMu);
-    return g_slotToBot[slot];
-}
 } // namespace bot_controller_hooks
 } // namespace cs2bc
