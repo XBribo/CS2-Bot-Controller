@@ -33,7 +33,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private const int Tickrate = 64;
     private const string InterfaceKey = "botcontroller:api";
 
-    private readonly ReplayDriver _driver = new();
     private readonly Dictionary<int, string> _recordingFiles = new();
     private readonly HashSet<int> _savingSlots = new();
     private readonly Dictionary<int, object> _loadingSlots = new();
@@ -204,7 +203,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             InterfaceKey, new BotControllerApiImpl());
     }
 
-    // Loads the plugin and hooks replay ticking when the bridge is ready.
+    // Registers file-job callbacks when the bridge is ready.
     public override void Load(bool _)
     {
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
@@ -212,11 +211,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
         Directory.CreateDirectory(RecordingsDir);
 
-        // Hook the server tick for replay driver
         Core.Event.OnTick += OnTick;
     }
 
-    // Unhooks replay ticking during plugin unload.
+    // Removes file-job callbacks on unload.
     public override void Unload()
     {
         if (_bridgeAvailable)
@@ -227,11 +225,10 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     // ---- Helpers ----
 
-    // Applies completed file jobs on the game thread before replay bookkeeping.
+    // Applies completed file jobs on the game thread.
     private void OnTick()
     {
         while (_completedJobs.TryDequeue(out Action? completion)) completion();
-        _driver.Tick();
     }
 
     // Reports an asynchronous result only to the player who issued the command.
@@ -438,10 +435,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
                     if (rec.Tickrate != Tickrate)
                         NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
                     if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
-                    {
-                        _driver.Track(botSlot);
                         NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
-                    }
                     else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
                 });
             }
@@ -459,7 +453,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         });
     }
 
-    // Stops replay on a target bot slot and releases the bot lock.
+    // Stops replay on the target slot.
     [Command("stopreplay")]
     public void OnStopReplay(ICommandContext context)
     {
@@ -471,7 +465,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         if (_loadingSlots.ContainsKey(botSlot)) _cancelledLoads.Add(botSlot);
 
         BotController.StopReplay(botSlot);
-        _driver.Release(botSlot);
         context.Reply(Tag($"Stopped replay on bot slot {botSlot}."));
     }
 }

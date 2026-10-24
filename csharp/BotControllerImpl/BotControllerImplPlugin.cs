@@ -28,7 +28,6 @@ public partial class BotControllerPlugin : BasePlugin
     // Record and replay must share a tickrate; adjust if your server differs.
     private const int Tickrate = 64;
 
-    private readonly ReplayDriver _driver = new();
     private readonly Dictionary<int, string> _recordingFiles = new();
     private readonly HashSet<int> _savingSlots = new();
     private readonly Dictionary<int, object> _loadingSlots = new();
@@ -54,11 +53,10 @@ public partial class BotControllerPlugin : BasePlugin
         RegisterListener<Listeners.OnTick>(OnTick);
     }
 
-    // Applies completed file jobs on the game thread before replay bookkeeping.
+    // Applies completed file jobs on the game thread.
     private void OnTick()
     {
         while (_completedJobs.TryDequeue(out Action? completion)) completion();
-        _driver.Tick();
     }
 
     // Reports an asynchronous result only to the player who issued the command.
@@ -232,10 +230,7 @@ public partial class BotControllerPlugin : BasePlugin
                     if (rec.Tickrate != Tickrate)
                         NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
                     if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
-                    {
-                        _driver.Track(botSlot);
                         NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
-                    }
                     else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
                 });
             }
@@ -262,7 +257,6 @@ public partial class BotControllerPlugin : BasePlugin
         if (!int.TryParse(cmd.GetArg(1), out int botSlot)) return;
         if (_loadingSlots.ContainsKey(botSlot)) _cancelledLoads.Add(botSlot);
         BotController.StopReplay(botSlot);
-        _driver.Release(botSlot);
         cmd.ReplyToCommand($"[BotController] Stopped replay on bot slot {botSlot}.");
     }
 }
