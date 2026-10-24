@@ -109,23 +109,6 @@ namespace BotControllerApi
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayMovementExtra
-    {
-        public uint Fields;
-        public float JumpPressedTime;
-        public float LastDuckTime;
-        public int LastActualJumpPressTick;
-        public float LastActualJumpPressFrac;
-        public int LastUsableJumpPressTick;
-        public float LastUsableJumpPressFrac;
-        public int LastLandedTick;
-        public float LastLandedFrac;
-        public float LastLandedVelocityX;
-        public float LastLandedVelocityY;
-        public float LastLandedVelocityZ;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
     public struct BotProfileData
     {
         public float Aggression;    // 0..1

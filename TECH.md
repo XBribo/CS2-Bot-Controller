@@ -70,7 +70,7 @@ CMake output is under `<build-directory>/package/addons/`. Use the script to ass
 
 ## C# Integration
 
-The Metamod plugin and C# provider must use the same ABI, currently **22**. Both providers expose `IBotControllerApi` under `botcontroller:api`.
+The Metamod plugin and C# provider must use the same ABI, currently **23**. Both providers expose `IBotControllerApi` under `botcontroller:api`.
 
 Reference the matching `BotControllerApi.dll` in your consumer project. Adjust `HintPath` to its local location; `Private=false` avoids deploying a second contract with the consumer.
 

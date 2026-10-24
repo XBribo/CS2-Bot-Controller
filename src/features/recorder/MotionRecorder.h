@@ -111,25 +111,9 @@ struct ReplayCommandFrameData
     uint8_t pad[3];
 };
 
-struct ReplayMovementExtra
-{
-    uint32_t fields;
-    float jumpPressedTime;
-    float lastDuckTime;
-    int32_t lastActualJumpPressTick;
-    float lastActualJumpPressFrac;
-    int32_t lastUsableJumpPressTick;
-    float lastUsableJumpPressFrac;
-    int32_t lastLandedTick;
-    float lastLandedFrac;
-    float lastLandedVelocityX;
-    float lastLandedVelocityY;
-    float lastLandedVelocityZ;
-};
 #pragma pack(pop)
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
-static_assert(sizeof(ReplayMovementExtra) == 48);
 static_assert(sizeof(ReplayTick) == 256);
 
 namespace motion_recorder {
@@ -206,9 +190,7 @@ bool LoadReplay(int slot,
                 const SubtickMove* subs,
                 int subCount,
                 const ReplayCommandFrameData* commands,
-                int commandCount,
-                const ReplayMovementExtra* movementExtras,
-                int movementExtraCount) noexcept;
+                int commandCount) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
 bool StopReplay(int slot); // stop + clear injection
 bool IsReplaying(int slot);
@@ -223,12 +205,6 @@ bool CurrentReplayTick(int slot, ReplayTick& out);
 bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out);
 // Command view angles for the tick currently being simulated.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
-// Copy the current tick's subtick moves into out
-// Returns count, or -1 if not replaying.
-int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut);
-
-// Buttons of the tick about to be simulated
-bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b2);
 
 // Switch a bot to the weapon with this def index.
 bool SwitchBotWeaponByDef(int slot, int defIndex);
@@ -239,9 +215,6 @@ int BotActiveWeaponDef(int slot);
 // Treats CT and T fire grenades as the same replay weapon type
 bool ReplayWeaponDefsMatch(int firstDef, int secondDef);
 
-// Entity index to write into cmd.weaponselect this replay tick
-int CurrentReplayWeaponSelect(int slot);
-int CurrentReplayWeaponDef(int slot);
 // Consumes the current tick's drop event once
 bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event);
 // Drops the recorded item through the bot pawn's native weapon service

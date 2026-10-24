@@ -31,8 +31,7 @@ namespace BotControllerApi
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+            => BotController.LoadReplay(slot, ticks, subs, commands);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
         // Registers the authoritative native pawn pointer for replay.

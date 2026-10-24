@@ -81,8 +81,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+            => BotController.LoadReplay(slot, ticks, subs, commands);
         // Moves a recorded buffer directly into another slot's replay buffer.
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
@@ -426,7 +425,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             {
                 MotionRecording rec = MotionStore.LoadFromFile(file);
                 bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                    botSlot, rec.Ticks, rec.Subticks, rec.Commands);
                 _completedJobs.Enqueue(() =>
                 {
                     if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;

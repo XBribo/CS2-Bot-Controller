@@ -35,8 +35,8 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 22 keeps the native command-based projectile replay path without birth alignment exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
+// ABI 23 removes unused movement extras from LoadReplay.
+extern "C" BC_EXPORT int BotController_GetVersion() { return 23; }
 
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
@@ -233,21 +233,16 @@ extern "C" BC_EXPORT int BotController_CopyRecordedCommandsRange(int slot, int s
     return cs2bc::motion_recorder::CopyCommandsRange(slot, start, out, maxCommands);
 }
 
-// Load replay buffers with optional per-tick command and movement data. 0 ok.
+// Loads tick, subtick, and command buffers. 0 ok.
 extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                                                   const cs2bc::ReplayTick* ticks,
                                                   int tickCount,
                                                   const cs2bc::SubtickMove* subs,
                                                   int subCount,
                                                   const cs2bc::ReplayCommandFrameData* commands,
-                                                  int commandCount,
-                                                  const cs2bc::ReplayMovementExtra* movementExtras,
-                                                  int movementExtraCount) noexcept
+                                                  int commandCount) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, movementExtras,
-                                              movementExtraCount)
-               ? 0
-               : -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount) ? 0 : -1;
 }
 
 // Move a slot's just-recorded buffers into another slot's replay buffer
@@ -266,7 +261,7 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
     int gotS = ns > 0 ? cs2bc::motion_recorder::CopySubticks(srcSlot, subs.data(), ns) : 0;
     int gotC = cs2bc::motion_recorder::CopyCommands(srcSlot, commands.data(), nc);
     if (gotT <= 0 || gotC != gotT) return -1;
-    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, nullptr, 0) ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC) ? 0 : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)

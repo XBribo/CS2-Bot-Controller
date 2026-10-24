@@ -62,10 +62,8 @@ struct ReplayState
     std::vector<ReplayTick> ticks;
     std::vector<SubtickMove> subs;
     std::vector<ReplayCommandFrameData> commands;
-    std::vector<ReplayMovementExtra> movementExtras;
     std::vector<uint32_t> subOffset; // prefix sum, size ticks.size()+1
     std::atomic<int> cursor{ 0 };
-    std::atomic<int> lastAppliedDef{ -1 };
     int lastEventCursor{ -1 };
     std::mutex mu; // guards ticks/subs/subOffset
 };
@@ -639,15 +637,12 @@ bool LoadReplay(int slot,
                 const SubtickMove* subs,
                 int subCount,
                 const ReplayCommandFrameData* commands,
-                int commandCount,
-                const ReplayMovementExtra* movementExtras,
-                int movementExtraCount) noexcept
+                int commandCount) noexcept
 {
     try
     {
         if (!ValidSlot(slot) || !ticks || tickCount < 0 || subCount < 0 || (subCount > 0 && !subs) ||
-            (commandCount != 0 && commandCount != tickCount) || (commandCount > 0 && !commands) ||
-            (movementExtraCount != 0 && movementExtraCount != tickCount) || (movementExtraCount > 0 && !movementExtras))
+            (commandCount != 0 && commandCount != tickCount) || (commandCount > 0 && !commands))
         {
             return false;
         }
@@ -658,7 +653,6 @@ bool LoadReplay(int slot,
         std::vector<ReplayTick> stagedTicks;
         std::vector<SubtickMove> stagedSubs;
         std::vector<ReplayCommandFrameData> stagedCommands;
-        std::vector<ReplayMovementExtra> stagedMovementExtras;
         const auto subCountValue = static_cast<uint64_t>(subCount);
         std::vector<uint32_t> stagedOffsets(static_cast<size_t>(tickCount) + 1, 0);
 
@@ -683,10 +677,6 @@ bool LoadReplay(int slot,
         if (tickCount > 0) stagedTicks.assign(ticks, ticks + tickCount);
         if (subCount > 0) stagedSubs.assign(subs, subs + subCount);
         if (commandCount > 0) stagedCommands.assign(commands, commands + commandCount);
-        if (movementExtraCount > 0)
-        {
-            stagedMovementExtras.assign(movementExtras, movementExtras + movementExtraCount);
-        }
 
         std::scoped_lock lk(p.mu);
         if (p.playing.load(std::memory_order_acquire)) return false;
@@ -694,10 +684,8 @@ bool LoadReplay(int slot,
         p.ticks.swap(stagedTicks);
         p.subs.swap(stagedSubs);
         p.commands.swap(stagedCommands);
-        p.movementExtras.swap(stagedMovementExtras);
         p.subOffset.swap(stagedOffsets);
         p.cursor.store(0, std::memory_order_relaxed);
-        p.lastAppliedDef.store(-1, std::memory_order_relaxed);
         p.lastEventCursor = -1;
         return true;
     }
@@ -721,7 +709,6 @@ bool StartReplay(int slot, bool loop)
         if (p.ticks.empty()) return false;
     }
     p.cursor.store(0, std::memory_order_relaxed);
-    p.lastAppliedDef.store(-1, std::memory_order_relaxed);
     {
         std::scoped_lock lk(p.mu);
         p.lastEventCursor = -1;
@@ -878,46 +865,6 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
     return true;
 }
 
-int CurrentReplaySubticks(int slot, SubtickMove* out, int maxOut)
-{
-    if (!ValidSlot(slot) || !out || maxOut <= 0) return -1;
-    ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return -1;
-    std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
-    int idx = p.cursor.load(std::memory_order_relaxed);
-    if (idx < 0 || idx >= total) return -1;
-    uint32_t begin = p.subOffset[idx];
-    uint32_t end = p.subOffset[idx + 1];
-    int n = static_cast<int>(end - begin);
-    n = std::min(n, maxOut);
-    for (int i = 0; i < n; ++i)
-        out[i] = p.subs[begin + i];
-    return n;
-}
-
-bool CurrentReplayInputButtons(int slot, uint64_t& b0, uint64_t& b1, uint64_t& b2)
-{
-    if (!ValidSlot(slot)) return false;
-    ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return false;
-    std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
-    int cur = p.cursor.load(std::memory_order_relaxed);
-    if (cur < 0 || cur >= total) return false;
-    const MovementSnapshot& pre = p.ticks[cur].pre;
-    b0 = pre.buttons;
-    b1 = pre.buttons1;
-    b2 = pre.buttons2;
-    if (b1 == 0 && b2 == 0)
-    {
-        uint64_t heldPrev = (cur > 0) ? p.ticks[cur - 1].pre.buttons : 0;
-        b1 = b0 & ~heldPrev;
-        b2 = heldPrev & ~b0;
-    }
-    return true;
-}
-
 bool SwitchBotWeaponByDef(int slot, int defIndex)
 {
     if (!ValidSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
@@ -944,22 +891,9 @@ bool ReplayWeaponDefsMatch(int firstDef, int secondDef)
     return firstDef == secondDef || (IsFireGrenadeDef(firstDef) && IsFireGrenadeDef(secondDef));
 }
 
-// Entity index for cmd.weaponselect this replay tick
-int CurrentReplayWeaponDef(int slot)
-{
-    if (!ValidSlot(slot)) return -1;
-    ReplayState& p = g_rep[slot];
-    if (!p.playing.load(std::memory_order_acquire)) return -1;
-    std::scoped_lock lk(p.mu);
-    int total = static_cast<int>(p.ticks.size());
-    int cur = p.cursor.load(std::memory_order_relaxed);
-    if (cur < 0 || cur >= total) return -1;
-    return p.ticks[cur].weaponDefIndex;
-}
-
-// Resolves and applies the recorded weapon definition for one command frame
 namespace {
 
+// Selects the recorded weapon when it differs from the active item.
 int ReplayWeaponSelectForDef(int slot, int recordedDef)
 {
     if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
@@ -969,25 +903,16 @@ int ReplayWeaponSelectForDef(int slot, int recordedDef)
     if (!ws) return -1;
 
     // Already holding the recorded weapon -> no switch
-    if (ReplayWeaponDefsMatch(weapon_locker_hooks::ActiveWeaponDef(ws), recordedDef))
-    {
-        g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
-        return -1;
-    }
+    if (ReplayWeaponDefsMatch(weapon_locker_hooks::ActiveWeaponDef(ws), recordedDef)) return -1;
 
     void* weapon = FindReplayWeaponByDef(ws, recordedDef);
     if (!weapon) return -1;
     weapon_locker_hooks::SelectWeaponRaw(ws, weapon);
-    g_rep[slot].lastAppliedDef.store(recordedDef, std::memory_order_relaxed);
     return weapon_locker_hooks::WeaponEntIndex(weapon);
 }
-
-// Resolves the current tick's recorded weapon to a live entity index
-int CurrentReplayWeaponSelect(int slot) { return ReplayWeaponSelectForDef(slot, CurrentReplayWeaponDef(slot)); }
-
-// Returns the current drop event only once for each replay cursor
 } // namespace
 
+// Consumes a drop event once per replay cursor.
 bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 {
     event = {};
@@ -1213,7 +1138,6 @@ void OnReplayCommit(int slot, void* services, bool simulated)
             {
                 p.cursor.store(0, std::memory_order_relaxed);
                 p.needsInitialTeleport.store(true, std::memory_order_release);
-                p.lastAppliedDef.store(-1, std::memory_order_relaxed);
                 p.lastEventCursor = -1;
                 return;
             }
@@ -1283,14 +1207,12 @@ void ClearAll()
             g_rep[i].ticks.clear();
             g_rep[i].subs.clear();
             g_rep[i].commands.clear();
-            g_rep[i].movementExtras.clear();
             g_rep[i].subOffset.clear();
             g_rep[i].lastEventCursor = -1;
         }
         g_rec[i].currentDef.store(-1, std::memory_order_relaxed);
         g_rec[i].liveWs.store(nullptr, std::memory_order_relaxed);
         g_rep[i].cursor.store(0, std::memory_order_relaxed);
-        g_rep[i].lastAppliedDef.store(-1, std::memory_order_relaxed);
         input_injector::ClearReplayPawn(i);
     }
     g_recordingSlots.store(0, std::memory_order_release);

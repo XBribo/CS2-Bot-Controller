@@ -221,7 +221,7 @@ public partial class BotControllerPlugin : BasePlugin
             {
                 MotionRecording rec = MotionStore.LoadFromFile(file);
                 bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
+                    botSlot, rec.Ticks, rec.Subticks, rec.Commands);
                 _completedJobs.Enqueue(() =>
                 {
                     if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
