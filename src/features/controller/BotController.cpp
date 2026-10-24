@@ -10,6 +10,7 @@
 #include "MotionRecorder.h"
 #include "offsets.h"
 #include "core/cs2_sdk/src/utils/hooks.h"
+#include "core/cs2_sdk/src/utils/memory.h"
 
 #include <tier0/dbg.h>
 #include <entityhandle.h>
@@ -18,8 +19,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
-#include <cstring>
 #include <string>
+#include <vector>
 
 namespace tg = cs2bc::offsets;
 
@@ -51,7 +52,7 @@ float NormalizeDeg(float angle)
 }
 
 #ifdef _WIN32
-// Resolves the entity identity chunk pointer referenced by SetEyeAngles.
+// Resolves the entity table within SetEyeAngles.
 bool ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
 {
     g_entityIdentityChunks = nullptr;
@@ -61,19 +62,17 @@ bool ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
     uint8_t code[kSearchBytes] = {};
     if (!TryReadMemory(setEyeAngles, 0, code, sizeof(code))) return false;
 
-    auto* functionBase = reinterpret_cast<uint8_t*>(setEyeAngles);
-    for (size_t i = 0; i + 10 <= kSearchBytes; ++i)
-    {
-        if (code[i] != 0x4C || code[i + 1] != 0x8B || code[i + 2] != 0x05 || code[i + 7] != 0x4D || code[i + 8] != 0x85 ||
-            code[i + 9] != 0xC0)
-            continue;
+    const cs2_sdk::modules::ModuleInfo window{ .base = code, .size = sizeof(code), .segments = { { code, sizeof(code) } } };
+    std::vector<uint8_t> pattern;
+    std::vector<bool> wildcards;
+    if (!cs2_sdk::modules::ParseSigString("4C 8B 05 ? ? ? ? 4D 85 C0", pattern, wildcards)) return false;
+    const auto matches = cs2_sdk::modules::FindPatternMatchesIn(window, pattern, wildcards, 1);
+    if (matches.empty()) return false;
 
-        int32_t relative = 0;
-        std::memcpy(&relative, code + i + 3, sizeof(relative));
-        g_entityIdentityChunks = reinterpret_cast<void**>(functionBase + i + 7 + relative);
-        return true;
-    }
-    return false;
+    const auto offset = static_cast<uint8_t*>(matches.front()) - code;
+    auto* instruction = static_cast<uint8_t*>(setEyeAngles) + offset;
+    g_entityIdentityChunks = static_cast<void**>(cs2_sdk::memory::ResolveRelativeAddress(instruction, 3, 7));
+    return g_entityIdentityChunks != nullptr;
 }
 
 // Resolves the live controller owning a replay pawn through entity chunks.
