@@ -1,4 +1,4 @@
-// Recording model and Brotli-compressed JSON load/save
+// Shared recording model and Brotli-compressed JSON storage.
 
 using System.IO.Compression;
 using System.Text.Json;
@@ -6,7 +6,11 @@ using System.Text.Json.Serialization;
 
 using BotControllerApi;
 
+#if BOT_CONTROLLER_SW2
+namespace BotControllerImplSW2;
+#else
 namespace BotControllerImpl;
+#endif
 
 // Recorded motion plus the tickrate it was captured at
 public sealed class MotionRecording
@@ -20,7 +24,6 @@ public sealed class MotionRecording
 // File + capture-buffer on top of the native calls
 public static class MotionStore
 {
-    // IncludeFields
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = false,
@@ -28,8 +31,7 @@ public static class MotionStore
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
-    // Save a slot's recorded motion to a compressed JSON file. Returns tick count, or -1
-    // if nothing was recorded
+    // Saves a stopped recording; returns its tick count or -1.
     public static int SaveToFile(int slot, string path, int tickrate = 64)
     {
         int ticks = BotController.RecordedTickCount(slot);
@@ -62,7 +64,7 @@ public static class MotionStore
         }
     }
 
-    // Copies and serializes ticks in bounded batches without a full managed snapshot.
+    // Streams bounded batches of ticks.
     private static void WriteTicks(Utf8JsonWriter writer, int slot, int total)
     {
         writer.WritePropertyName(nameof(MotionRecording.Ticks));

@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <DefineConstants>$(DefineConstants);BOT_CONTROLLER_SW2</DefineConstants>
     <AssemblyName>BotControllerImplSW2</AssemblyName>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
@@ -24,6 +25,7 @@
 
   <ItemGroup>
     <Compile Include="../BotControllerImpl/BotController.NativeApi.cs" Link="BotController.NativeApi.cs" />
+    <Compile Include="../BotControllerImpl/MotionRecording.cs" Link="MotionRecording.cs" />
   </ItemGroup>
 
 
