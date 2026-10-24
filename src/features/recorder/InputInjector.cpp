@@ -756,7 +756,7 @@ KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
     g_physicsFrames.push_back({ slot, services, recording, replaying, false, motion_recorder::PawnGeneration(slot) });
 
     // pre: snapshot start-of-tick state once (before any subtick mover).
-    if (recording) motion_recorder::OnCapturePre(slot, services, nullptr);
+    if (recording) motion_recorder::OnCapturePre(slot, services);
 
     return { KHook::Action::Ignore };
 }
@@ -770,7 +770,7 @@ KHook::Return<void> PhysicsSimulatePost(void*) noexcept
         return { KHook::Action::Ignore };
 
     // post: snapshot end-of-tick state + commit one frame
-    if (recording) motion_recorder::OnCapturePost(slot, services, nullptr);
+    if (recording) motion_recorder::OnCapturePost(slot, services);
     if (replaying)
     {
         motion_recorder::OnReplayCommit(slot, services, seeded);

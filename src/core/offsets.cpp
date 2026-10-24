@@ -28,7 +28,6 @@ void LoadFromGamedata(const nlohmann::json& gamedata)
         { &g_entIdentityEHandle, "CEntityIdentity::EHandle" },
         { &g_servicesPawn, "CCSPlayer_MovementServices::Pawn" },
         { &g_moveVelocity, "CMoveData::Velocity" },
-        { &g_moveAbsOrigin, "CMoveData::AbsOrigin" },
         { &g_vtIdxPlayerRunCommand, "vtidx::PlayerRunCommand" },
         { &g_vtIdxFinishMove, "vtidx::FinishMove" },
         { &g_vtIdxControllerCommandSetup, "vtidx::ControllerCommandSetup" },

@@ -515,9 +515,8 @@ void SetCurrentDef(int slot, int defIndex)
 }
 
 // Captures only the current pawn session.
-void OnCapturePre(int slot, void* services, void* cmd)
+void OnCapturePre(int slot, void* services)
 {
-    (void)cmd;
     if (!ValidSlot(slot) || !services) return;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return;
@@ -554,9 +553,8 @@ void OnCaptureCommand(int slot, const ReplayCommandFrameData& command)
 }
 
 // Commits complete ticks without holding locks across engine calls.
-void OnCapturePost(int slot, void* services, void* cmd)
+void OnCapturePost(int slot, void* services)
 {
-    // cmd is actually the CMoveData* (hook passes moveData here)
     if (!ValidSlot(slot) || !services) return;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return;
@@ -564,11 +562,6 @@ void OnCapturePost(int slot, void* services, void* cmd)
 
     MovementSnapshot post{};
     if (!ReadSnapshot(slot, services, post)) return;
-
-    if (cmd)
-    {
-        ReadVector3(cmd, tg::g_moveAbsOrigin, post.originX, post.originY, post.originZ);
-    }
 
     // Active weapon def for this tick.
     void* ws = r.liveWs.load(std::memory_order_relaxed);

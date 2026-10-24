@@ -235,13 +235,6 @@
     },
     "comment": "m_vecVelocity"
   },
-  "CMoveData::AbsOrigin": {
-    "offsets": {
-      "windows": 200,
-      "linux": 200
-    },
-    "comment": "m_vecAbsOrigin"
-  },
   "vtidx::PlayerRunCommand": {
     "offsets": {
       "windows": 25,

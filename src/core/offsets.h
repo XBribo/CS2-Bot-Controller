@@ -119,8 +119,6 @@ inline int g_servicesDucking = -1; // bool m_bDucking
 
 // m_vecVelocity — the velocity TryPlayerMove integrates into origin
 inline int g_moveVelocity = 56;
-// m_vecAbsOrigin — post-move origin written here before FinishMove commits
-inline int g_moveAbsOrigin = 200;
 
 // ---- vtable indices (CCSPlayer_MovementServices) ----
 

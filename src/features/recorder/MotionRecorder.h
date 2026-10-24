@@ -165,9 +165,9 @@ int RecordedSubtickCount(int slot); // <0 on bad slot
 int RecordedCommandCount(int slot); // <0 on bad slot
 
 // PhysicsSimulate hook: capture pre snapshot
-void OnCapturePre(int slot, void* services, void* cmd);
+void OnCapturePre(int slot, void* services);
 // PhysicsSimulate hook: capture post snapshot + commit the tick
-void OnCapturePost(int slot, void* services, void* cmd);
+void OnCapturePost(int slot, void* services);
 // PlayerRunCommand hook: stash this tick's subtick moves
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
 // PlayerRunCommand hook: stash this tick's complete command frame
