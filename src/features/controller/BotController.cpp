@@ -10,17 +10,13 @@
 #include "MotionRecorder.h"
 #include "offsets.h"
 #include "core/cs2_sdk/src/utils/hooks.h"
-#include "core/cs2_sdk/src/utils/memory.h"
 
 #include <tier0/dbg.h>
-#include <entityhandle.h>
-#include <const.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
 #include <string>
-#include <vector>
 
 namespace tg = cs2bc::offsets;
 
@@ -32,9 +28,6 @@ void* g_addrUpdate = nullptr;
 void* g_addrUpkeep = nullptr;
 void* g_addrUpdateLookAngles = nullptr;
 void* g_addrSetEyeAngles = nullptr;
-#ifdef _WIN32
-void** g_entityIdentityChunks = nullptr;
-#endif
 bool g_installed = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 
@@ -51,78 +44,13 @@ float NormalizeDeg(float angle)
     return angle - 180.0F;
 }
 
-#ifdef _WIN32
-// Resolves the entity table within SetEyeAngles.
-bool ResolveSetEyeAnglesEntityChunks(void* setEyeAngles)
-{
-    g_entityIdentityChunks = nullptr;
-    if (!setEyeAngles) return false;
-
-    constexpr size_t kSearchBytes = 0x120;
-    uint8_t code[kSearchBytes] = {};
-    if (!TryReadMemory(setEyeAngles, 0, code, sizeof(code))) return false;
-
-    const cs2_sdk::modules::ModuleInfo window{ .base = code, .size = sizeof(code), .segments = { { code, sizeof(code) } } };
-    std::vector<uint8_t> pattern;
-    std::vector<bool> wildcards;
-    if (!cs2_sdk::modules::ParseSigString("4C 8B 05 ? ? ? ? 4D 85 C0", pattern, wildcards)) return false;
-    const auto matches = cs2_sdk::modules::FindPatternMatchesIn(window, pattern, wildcards, 1);
-    if (matches.empty()) return false;
-
-    const auto offset = static_cast<uint8_t*>(matches.front()) - code;
-    auto* instruction = static_cast<uint8_t*>(setEyeAngles) + offset;
-    g_entityIdentityChunks = static_cast<void**>(cs2_sdk::memory::ResolveRelativeAddress(instruction, 3, 7));
-    return g_entityIdentityChunks != nullptr;
-}
-
-// Resolves the live controller owning a replay pawn through entity chunks.
-void* ReplayControllerForPawn(void* pawn)
-{
-    if (!pawn || !g_entityIdentityChunks) return nullptr;
-
-    uint32_t handle = 0;
-    if (!SafeRead(pawn, tg::g_pawnController, handle) || handle == 0U || handle == 0xFFFFFFFFU || handle == 0xFFFFFFFEU)
-        return nullptr;
-
-    void* chunks = nullptr;
-    if (!TryReadMemory(static_cast<const void*>(g_entityIdentityChunks), 0, static_cast<void*>(&chunks), sizeof(chunks)) || !chunks)
-        return nullptr;
-
-    const uint32_t entityIndex = CEntityHandle(handle).GetEntryIndex();
-    void* chunk = nullptr;
-    if (!TryReadMemory(chunks, static_cast<int>((entityIndex >> 9) * sizeof(void*)), static_cast<void*>(&chunk), sizeof(chunk)) || !chunk)
-        return nullptr;
-
-    constexpr int kIdentitySize = 0x70;
-    auto* identity = reinterpret_cast<uint8_t*>(chunk) + (static_cast<size_t>(entityIndex & 0x1FFU) * kIdentitySize);
-    uint32_t liveHandle = 0;
-    void* controller = nullptr;
-    if (!SafeRead(identity, 0x10, liveHandle) || liveHandle != handle || !SafeRead(identity, 0x00, controller)) return nullptr;
-    return controller;
-}
-#endif
-
-// Updates replay angles without queuing a server correction over the next UserCmd.
+// Publishes replay angles through the native engine function.
 bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
 {
     if (!pawn || !ReplayViewReady()) return false;
 
     float angle[3] = { pitch, NormalizeDeg(yaw), 0.0F };
-#ifdef _WIN32
-    void* controller = ReplayControllerForPawn(pawn);
-    uint32_t controllerFlags = 0;
-    if (!controller || !SafeRead(controller, tg::g_entFlags, controllerFlags)) return false;
-    const bool restoreControllerFlags = (controllerFlags & FL_FAKECLIENT) == 0;
-    if (restoreControllerFlags)
-    {
-        const uint32_t replayFlags = controllerFlags | FL_FAKECLIENT;
-        if (!WriteField(controller, tg::g_entFlags, replayFlags)) return false;
-    }
-#endif
     g_hookSetEyeAngles.CallOriginal(pawn, angle);
-#ifdef _WIN32
-    if (restoreControllerFlags && !WriteField(controller, tg::g_entFlags, controllerFlags)) return false;
-#endif
     return true;
 }
 
@@ -192,13 +120,6 @@ bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serve
     {
         BC_LOG_WARN("replay disabled: SetEyeAngles unresolved (%s)", seaErr);
     }
-#ifdef _WIN32
-    else if (!ResolveSetEyeAnglesEntityChunks(g_addrSetEyeAngles))
-    {
-        BC_LOG_WARN("replay disabled: entity table unresolved");
-        g_addrSetEyeAngles = nullptr;
-    }
-#endif
 
     // required: Update
     if (!g_hookUpdate.Install(g_addrUpdate, &HookedUpdate))
@@ -244,9 +165,6 @@ void Remove()
 {
     if (!g_installed) return;
     g_hookSetEyeAngles.Remove();
-#ifdef _WIN32
-    g_entityIdentityChunks = nullptr;
-#endif
     g_hookUpdateLookAngles.Remove();
     g_hookUpkeep.Remove();
     g_hookUpdate.Remove();
@@ -259,14 +177,8 @@ void* UpdateAddress() { return g_addrUpdate; }
 void* UpkeepAddress() { return g_addrUpkeep; }
 void* UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
 
-// Requires both the native hook and its platform-specific dependencies.
-bool ReplayViewReady()
-{
-#ifdef _WIN32
-    if (!g_entityIdentityChunks) return false;
-#endif
-    return g_hookSetEyeAngles.Active();
-}
+// Requires the native eye-angle hook on both platforms.
+bool ReplayViewReady() { return g_hookSetEyeAngles.Active(); }
 
 // Stops only the replay whose eye-angle update failed.
 bool ApplyReplayEyeAngles(int slot, void* pawn, float pitch, float yaw)
