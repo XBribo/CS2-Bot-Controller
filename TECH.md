@@ -142,7 +142,7 @@ Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotContr
 | --- | --- |
 | Compatibility | `AbiVersion` |
 | Locks | `Lock`, `Unlock`, `UnlockAll`, `IsLocked`, `GetWeaponLock` |
-| Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended` |
+| Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended`, `GetRecordedInputHistory` |
 | Replay data | `LoadReplay`, `TransferRecordingToReplay`, `SetReplayPawn` |
 | Replay control | `StartReplay`, `StopReplay`, `ReplayCursor`, `ReplayTotal`, `IsReplaying`, `TryGetReplayTick` |
 | Weapons | `SwitchBotWeapon`, `BotActiveWeaponDef` |
@@ -171,11 +171,20 @@ Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotContr
 
 ### Record and Replay
 
+Frames are captured and consumed per `PlayerRunCommand`, not per controller batch. Empty batches do not advance playback. Public `ReplayTick` names and layouts remain unchanged under ABI 24. Previously overwritten commands cannot be reconstructed from existing files; re-record to capture them.
+
 1. Register the source's live pawn pointer with `SetReplayPawn`, then call `StartRecord`.
 2. Call `StopRecord` before retrieving or transferring the recording.
-3. Use `TransferRecordingToReplay` for an in-memory transfer, or `GetRecordedMotionExtended` and `LoadReplay` to include aligned command frames.
+3. Use `TransferRecordingToReplay` for an in-memory transfer, or pass the three buffers from `GetRecordedMotionExtended` to `LoadReplay`.
 4. Register the destination bot's current pawn with `SetReplayPawn`, then call `StartReplay`.
 5. Use `StopReplay` to stop playback. Pawn replacement or disconnection stops the session; register the current pawn again before restarting recording or replay.
+
+`inputHistory` is optional and defaults to `null`; an empty array also omits it. Replay works without it, but recorded attack timing, history angles, and interpolation are not restored. Use updated native and provider binaries to include this data:
+
+```csharp
+api.LoadReplay(targetSlot, ticks, subs, commands);
+api.LoadReplay(targetSlot, ticks, subs, commands, inputHistory: api.GetRecordedInputHistory(sourceSlot));
+```
 
 Check every operation's result. Pawn pointers must belong to the live player, not a previous spawn. Record and replay at the same tickrate; the bundled managed recording workflow assumes 64 ticks per second.
 
