@@ -1,4 +1,4 @@
-// Provider-side implementation of IBotControllerApi.
+// Shared provider-side implementation of IBotControllerApi.
 
 namespace BotControllerApi
 {
