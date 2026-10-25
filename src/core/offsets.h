@@ -81,8 +81,6 @@ inline int g_pawnOriginalController = -1;
 inline int g_pawnViewAngle = -1;
 // CCSPlayerPawn -> v_anglePrevious (QAngle)
 inline int g_pawnViewAnglePrevious = -1;
-// Embedded server view-angle change vector
-inline int g_pawnServerViewAngleChanges = -1;
 // m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
 inline int g_pawnEyeAngles = -1;
 
@@ -115,19 +113,12 @@ inline int g_servicesDuckSpeed = -1; // float m_flDuckSpeed
 inline int g_servicesDesiresDuck = -1; // bool m_bDesiresDuck
 inline int g_servicesDucking = -1; // bool m_bDucking
 
-// ---- CMoveData  ----
-
-// m_vecVelocity — the velocity TryPlayerMove integrates into origin
-inline int g_moveVelocity = 56;
-
 // ---- vtable indices (CCSPlayer_MovementServices) ----
 
 #ifdef _WIN32
 inline int g_vtIdxPlayerRunCommand = 25;
-inline int g_vtIdxFinishMove = 38;
 #else
 inline int g_vtIdxPlayerRunCommand = 26;
-inline int g_vtIdxFinishMove = 39;
 #endif
 // Controller setup immediately preceding queued client commands.
 #ifdef _WIN32

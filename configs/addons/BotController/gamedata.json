@@ -228,24 +228,10 @@
     },
     "comment": "m_pawn"
   },
-  "CMoveData::Velocity": {
-    "offsets": {
-      "windows": 56,
-      "linux": 56
-    },
-    "comment": "m_vecVelocity"
-  },
   "vtidx::PlayerRunCommand": {
     "offsets": {
       "windows": 25,
       "linux": 26
-    },
-    "comment": "CCSPlayer_MovementServices vtable index."
-  },
-  "vtidx::FinishMove": {
-    "offsets": {
-      "windows": 38,
-      "linux": 39
     },
     "comment": "CCSPlayer_MovementServices vtable index."
   },

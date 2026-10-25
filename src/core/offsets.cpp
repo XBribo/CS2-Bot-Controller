@@ -27,9 +27,7 @@ void LoadFromGamedata(const nlohmann::json& gamedata)
         { &g_buyDoneBuying, "BuyState::DoneBuying" },
         { &g_entIdentityEHandle, "CEntityIdentity::EHandle" },
         { &g_servicesPawn, "CCSPlayer_MovementServices::Pawn" },
-        { &g_moveVelocity, "CMoveData::Velocity" },
         { &g_vtIdxPlayerRunCommand, "vtidx::PlayerRunCommand" },
-        { &g_vtIdxFinishMove, "vtidx::FinishMove" },
         { &g_vtIdxControllerCommandSetup, "vtidx::ControllerCommandSetup" },
         { &g_vtIdxDropWeapon, "vtidx::DropWeapon" },
     };
@@ -56,7 +54,6 @@ bool LoadFromSchema(char* error, size_t maxlen)
         { .target = &g_pawnOriginalController, .className = "CCSPlayerPawnBase", .fieldName = "m_hOriginalController" },
         { .target = &g_pawnViewAngle, .className = "CBasePlayerPawn", .fieldName = "v_angle" },
         { .target = &g_pawnViewAnglePrevious, .className = "CBasePlayerPawn", .fieldName = "v_anglePrevious" },
-        { .target = &g_pawnServerViewAngleChanges, .className = "CBasePlayerPawn", .fieldName = "m_ServerViewAngleChanges" },
         { .target = &g_pawnEyeAngles, .className = "CCSPlayerPawn", .fieldName = "m_angEyeAngles" },
         { .target = &g_wsActiveWeapon, .className = "CPlayer_WeaponServices", .fieldName = "m_hActiveWeapon" },
         { .target = &g_servicesLadderNormal, .className = "CCSPlayer_MovementServices", .fieldName = "m_vecLadderNormal" },
