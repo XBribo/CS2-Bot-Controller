@@ -84,6 +84,13 @@ namespace BotControllerApi
         private static extern int BotController_GetRecordedCommandCount(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetRecordedInputHistorySize(int slot);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_CopyRecordedInputHistoryRange(
+            int slot, int start, [Out] byte[] history, int maxBytes);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_CopyRecordedTicks(
             int slot, [Out] ReplayTick[] ticks, int maxTicks);
 
@@ -112,6 +119,13 @@ namespace BotControllerApi
             int slot, [In] ReplayTick[] ticks, int tickCount,
             [In] SubtickMove[] subs, int subCount,
             [In] ReplayCommandFrame[] commands, int commandCount, ulong pawnGeneration);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_LoadReplayWithInputHistory(
+            int slot, [In] ReplayTick[] ticks, int tickCount,
+            [In] SubtickMove[] subs, int subCount,
+            [In] ReplayCommandFrame[] commands, int commandCount,
+            [In] byte[] inputHistory, int inputHistorySize, ulong pawnGeneration);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_TransferRecordingToReplay(int srcSlot, int dstSlot);
@@ -291,6 +305,24 @@ namespace BotControllerApi
         // Reports the size of the stopped recording's command buffer.
         public static int RecordedCommandCount(int slot) => BotController_GetRecordedCommandCount(slot);
 
+        // Copies the stopped recording's protobuf history buffer.
+        public static byte[] GetRecordedInputHistory(int slot)
+        {
+            try
+            {
+                int size = BotController_GetRecordedInputHistorySize(slot);
+                if (size < 0) throw new InvalidOperationException("Recording history is unavailable.");
+                var history = new byte[size];
+                if (size > 0 && BotController_CopyRecordedInputHistoryRange(slot, 0, history, size) != size)
+                    throw new InvalidOperationException("Recording history changed during copy.");
+                return history;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return Array.Empty<byte>();
+            }
+        }
+
         // Pull a slot's recorded ticks + subticks out of native memory.
         public static (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
         {
@@ -298,7 +330,7 @@ namespace BotControllerApi
             return (ticks, subs);
         }
 
-        // Pull aligned tick, subtick, and command-frame buffers from native memory
+        // Pull aligned tick, subtick, and command buffers from native memory.
         public static (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot)
         {
@@ -340,13 +372,22 @@ namespace BotControllerApi
 
         // ---- replay ----
 
-        // Loads tick, subtick, and command buffers.
+        // Preserves the ABI 24 managed load signature.
         public static bool LoadReplay(
             int slot,
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
-            => LoadReplay(slot, ticks, subs, commands, 0);
+            => LoadReplay(slot, ticks, subs, commands, null, 0);
+
+        // Loads aligned buffers with optional input history.
+        public static bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            byte[]? inputHistory = null)
+            => LoadReplay(slot, ticks, subs, commands, inputHistory, 0);
 
         // Rejects results from a previous pawn session.
         internal static bool LoadReplay(
@@ -354,17 +395,25 @@ namespace BotControllerApi
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands,
+            byte[]? inputHistory,
             ulong pawnGeneration)
-            => ticks is { Length: > 0 }
-               && BotController_LoadReplay(
-                   slot,
-                   ticks,
-                   ticks.Length,
-                   subs ?? Array.Empty<SubtickMove>(),
-                   subs?.Length ?? 0,
-                   commands ?? Array.Empty<ReplayCommandFrame>(),
-                   commands?.Length ?? 0,
-                   pawnGeneration) == 0;
+        {
+            if (ticks is not { Length: > 0 }) return false;
+            subs ??= Array.Empty<SubtickMove>();
+            commands ??= Array.Empty<ReplayCommandFrame>();
+            if (inputHistory is not { Length: > 0 })
+                return BotController_LoadReplay(slot, ticks, ticks.Length, subs, subs.Length, commands, commands.Length, pawnGeneration) == 0;
+            try
+            {
+                return BotController_LoadReplayWithInputHistory(
+                    slot, ticks, ticks.Length, subs, subs.Length, commands, commands.Length,
+                    inputHistory, inputHistory.Length, pawnGeneration) == 0;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+        }
 
         // Move a slot's just-recorded buffers straight into another slot's
         // replay buffer, no managed round-trip.

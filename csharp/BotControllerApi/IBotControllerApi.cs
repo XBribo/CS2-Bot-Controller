@@ -35,18 +35,30 @@ namespace BotControllerApi
         // Pull a slot's recorded ticks + subticks out of memory.
         (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot);
 
-        // Pull aligned tick, subtick, and command-frame buffers out of memory
+        // Pull aligned ticks, subticks, and command frames.
         (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot);
 
+        // Optional input history, separate from the ABI 24 command layout.
+        byte[] GetRecordedInputHistory(int slot) => System.Array.Empty<byte>();
+
         // ---- replay ----
 
-        // Load ticks, subticks, and aligned command frames into a replay buffer.
+        // Loads replay buffers without input history.
         bool LoadReplay(
             int slot,
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands);
+
+        // Input history is optional; unsupported providers reject nonempty data.
+        bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            byte[]? inputHistory = null)
+            => inputHistory is not { Length: > 0 } && LoadReplay(slot, ticks, subs, commands);
 
         // Move a slot's just-recorded buffers into another slot's replay buffer.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);

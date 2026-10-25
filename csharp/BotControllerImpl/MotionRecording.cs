@@ -19,6 +19,7 @@ public sealed class MotionRecording
     public required ReplayTick[] Ticks { get; set; }
     public required SubtickMove[] Subticks { get; set; }
     public required ReplayCommandFrame[] Commands { get; set; }
+    public byte[] InputHistory { get; set; } = Array.Empty<byte>();
 }
 
 // File + capture-buffer on top of the native calls
@@ -53,6 +54,7 @@ public static class MotionStore
                 WriteTicks(writer, slot, ticks);
                 WriteSubticks(writer, slot, subticks);
                 WriteCommands(writer, slot, commands);
+                writer.WriteBase64String(nameof(MotionRecording.InputHistory), BotController.GetRecordedInputHistory(slot));
                 writer.WriteEndObject();
             }
             File.Move(temporaryPath, path, true);
@@ -122,6 +124,7 @@ public static class MotionStore
             ?? throw new InvalidDataException("Recording is empty.");
         if (recording.Ticks is null || recording.Subticks is null || recording.Commands is null)
             throw new InvalidDataException("Recording JSON is missing required data.");
+        recording.InputHistory ??= Array.Empty<byte>();
         if (recording.Commands.Length != recording.Ticks.Length)
             throw new InvalidDataException("Recording commands must match the tick count.");
 

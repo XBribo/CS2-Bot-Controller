@@ -20,10 +20,12 @@ namespace BotControllerApi
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
         public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
             => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers
+        // Returns aligned tick, subtick, and command buffers.
         public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot)
             => BotController.GetRecordedMotionExtended(slot);
+        // Returns the optional history buffer separately.
+        public byte[] GetRecordedInputHistory(int slot) => BotController.GetRecordedInputHistory(slot);
 
         // ---- replay ----
         public bool LoadReplay(
@@ -32,6 +34,14 @@ namespace BotControllerApi
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
             => BotController.LoadReplay(slot, ticks, subs, commands);
+
+        public bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            byte[]? inputHistory = null)
+            => BotController.LoadReplay(slot, ticks, subs, commands, inputHistory);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
         // Registers the authoritative native pawn pointer for replay.
