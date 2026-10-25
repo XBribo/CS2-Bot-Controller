@@ -73,6 +73,7 @@ add_library(
     src/features/buy/BuyController.cpp
     src/features/buy/BuyControllerState.cpp
     src/features/recorder/InputInjector.cpp
+    src/features/recorder/CommandHistory.cpp
     src/features/recorder/PawnBinding.cpp
     src/features/recorder/MotionRecorder.cpp
     src/features/voice/VoiceSender.cpp

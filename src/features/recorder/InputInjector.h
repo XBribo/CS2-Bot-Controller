@@ -1,4 +1,4 @@
-// KHook for CS2 movement functions (ProcessMovement / PhysicsSimulate / PlayerRunCommand)
+// CS2 movement and command hooks (ProcessMovement / OnSimulateUserCommands / PlayerRunCommand).
 
 #pragma once
 

@@ -1,7 +1,7 @@
 #include "core/cs2_sdk/src/core/gameconfig.h"
 #include "core/log.h"
 // CS2 movement hooks
-// PhysicsSimulate (record/replay frame boundary)
+// OnSimulateUserCommands (controller batch context)
 // ProcessMovement (live services discovery)
 // PlayerRunCommand(subtick record + re-inject)
 
@@ -10,6 +10,7 @@
 #include "playercommand.h"
 
 #include "InputInjector.h"
+#include "CommandHistory.h"
 #include "PawnBinding.h"
 #include "ccsbot_slot.h"
 #include "core/cs2_sdk/src/core/memory_module.h"
@@ -47,29 +48,37 @@ constexpr uint64_t kMovementButtonMask = kInForward | kInBack | kInMoveLeft | kI
 
 void* g_addrProcessMovement = nullptr;
 void* g_addrPlayerRunCommand = nullptr;
-void* g_addrPhysicsSimulate = nullptr;
+void* g_addrSimulateUserCommands = nullptr;
 
 cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookProcessMovement;
 cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookPlayerRunCommand;
-cs2_sdk::hooks::NativeHook<void, void*> g_hookPhysicsSimulate;
+cs2_sdk::hooks::NativeHook<void, void*> g_hookSimulateUserCommands;
 cs2_sdk::hooks::NativeHook<void, void*> g_hookControllerCommandSetup;
 std::atomic<bool> g_controllerHookTried{ false };
 
-struct MovementFrame
+struct CommandBatch
 {
     int slot;
     void* services;
-    bool recording;
-    bool replaying;
-    bool seeded = false;
     uint64_t generation = 0;
+    bool capturePrepared = false;
+    bool preparing = false;
 };
-thread_local std::vector<MovementFrame> g_physicsFrames;
+thread_local std::vector<CommandBatch> g_commandBatches;
+struct CommandFrame
+{
+    int slot = -1;
+    void* services = nullptr;
+    uint64_t generation = 0;
+    bool recording = false;
+    bool replayApplied = false;
+};
+thread_local std::vector<CommandFrame> g_commandFrames;
 bool g_installed = false;
-// True once PhysicsSimulate is hooked
-bool g_physicsActive = false;
+// True once the controller batch entry is hooked.
+bool g_batchActive = false;
 // True once PlayerRunCommand is hooked
-bool g_subtickActive = false;
+bool g_usercmdActive = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 
 enum class UsercmdInjectionPhase : uint8_t
@@ -148,7 +157,7 @@ int64_t MonotonicMilliseconds()
 
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs < 0 || !g_usercmdActive || motion_recorder::IsReplaying(slot)) return -1;
     if (!pawn_binding::BindCurrentPawn(slot)) return -1;
 
     int64_t id = g_nextUsercmdInjectionId.fetch_add(1, std::memory_order_relaxed);
@@ -163,7 +172,7 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 // Creates an independently cancellable persistent analog movement override
 int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 {
-    if (!ValidSlotIndex(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) || !g_subtickActive ||
+    if (!ValidSlotIndex(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) || !g_usercmdActive ||
         motion_recorder::IsReplaying(slot))
         return -1;
 
@@ -234,7 +243,7 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
 // Suppresses selected usercmd buttons until the requested duration expires
 bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return false;
+    if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 || !g_usercmdActive || motion_recorder::IsReplaying(slot)) return false;
     if (!pawn_binding::BindCurrentPawn(slot)) return false;
 
     int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
@@ -249,7 +258,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 // Creates an independently cancellable persistent usercmd suppression
 int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
-    if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_subtickActive || motion_recorder::IsReplaying(slot)) return -1;
+    if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_usercmdActive || motion_recorder::IsReplaying(slot)) return -1;
     if (!pawn_binding::BindCurrentPawn(slot)) return -1;
 
     int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
@@ -494,11 +503,20 @@ KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Returns the enclosing simulation boundary for this player.
-MovementFrame* FindPhysicsFrame(int slot)
+// Includes inactive nested batches so they cannot borrow an outer context.
+CommandBatch* FindCommandBatch(int slot)
 {
     if (slot < 0 || slot >= kMaxSlots) return nullptr;
-    for (auto it = g_physicsFrames.rbegin(); it != g_physicsFrames.rend(); ++it)
+    for (auto it = g_commandBatches.rbegin(); it != g_commandBatches.rend(); ++it)
+        if (it->slot == slot) return &*it;
+    return nullptr;
+}
+
+// Keeps recursive commands from consuming the active command's buffers.
+CommandFrame* FindCommandFrame(int slot)
+{
+    if (slot < 0 || slot >= kMaxSlots) return nullptr;
+    for (auto it = g_commandFrames.rbegin(); it != g_commandFrames.rend(); ++it)
         if (it->slot == slot) return &*it;
     return nullptr;
 }
@@ -508,8 +526,14 @@ MovementFrame* FindPhysicsFrame(int slot)
 // Serializes command fields and subticks into the pending recording frame.
 void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
-    // Read this tick's subtick_moves into SubtickMove[] and
-    // stash; OnCapturePost (PhysicsSimulate-post) commits them.
+    std::string history;
+    if (!command_history::Capture(*pc, history))
+    {
+        BC_LOG_WARN("slot %d: invalid command history; recording stopped", slot);
+        motion_recorder::StopRecord(slot);
+        return;
+    }
+    // Stash subticks until this PlayerRunCommand returns.
     int n = base->subtick_moves_size();
     n = std::min(n, motion_recorder::kMaxSubtickPerTick);
     SubtickMove moves[motion_recorder::kMaxSubtickPerTick];
@@ -574,20 +598,20 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
         command.leftHandDesired = pc->left_hand_desired() ? 1 : 0;
         command.fields |= motion_recorder::kCommandFieldLeftHand;
     }
-    motion_recorder::OnCaptureCommand(slot, command);
+    motion_recorder::OnCaptureCommand(slot, command, std::move(history));
 }
 
 // Applies one recorded command before the engine simulates it.
-void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
+bool ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
     constexpr uint64_t kGrenadeAttackMask = (1ULL << 0) | (1ULL << 11);
     motion_recorder::ReplayCommandFrame frame{};
     if (motion_recorder::ReplayCommandFrameForSimulation(slot, services, frame))
     {
-        const auto* active = FindPhysicsFrame(slot);
+        const auto* active = FindCommandFrame(slot);
         if (!active || active->services != services || active->generation != motion_recorder::PawnGeneration(slot) ||
             !motion_recorder::IsReplaying(slot))
-            return;
+            return false;
         const uint64_t generation = active->generation;
         bool suppressUnsafeUtilityAttack =
             IsThrowableUtilityDef(frame.tick.weaponDefIndex) && frame.weaponSelect < 0 &&
@@ -599,7 +623,25 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
             frame.buttons1 &= ~kGrenadeAttackMask;
             frame.buttons2 &= ~kGrenadeAttackMask;
         }
-        if (!motion_recorder::IsReplaying(slot) || generation != motion_recorder::PawnGeneration(slot)) return;
+        if (!motion_recorder::IsReplaying(slot) || generation != motion_recorder::PawnGeneration(slot)) return false;
+        if (!motion_recorder::OnReplayCommandPre(slot, services, frame.tick)) return false;
+
+        if (frame.inputHistory.has_base())
+        {
+            if (!command_history::Apply(frame.inputHistory, *pc))
+            {
+                BC_LOG_WARN("slot %d: invalid command clock; replay stopped", slot);
+                motion_recorder::StopReplay(slot);
+                return false;
+            }
+        }
+        else
+            command_history::Clear(*pc);
+        if (suppressUnsafeUtilityAttack)
+        {
+            pc->set_attack1_start_history_index(-1);
+            pc->set_attack2_start_history_index(-1);
+        }
 
         CInButtonStatePB* bp = base->mutable_buttons_pb();
         bp->set_buttonstate1(frame.buttons0);
@@ -659,38 +701,48 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
             if (frame.subticks[i].analogLeft != 0.0F) m->set_analog_left_delta(frame.subticks[i].analogLeft);
         }
 
-        // Mark before calling the engine: reentrant commands must not reseed.
-        auto* boundary = FindPhysicsFrame(slot);
-        if (boundary && !boundary->seeded)
-        {
-            boundary->seeded = true;
-            motion_recorder::OnReplayCommandPre(slot, services, frame.tick);
-        }
+        return motion_recorder::IsReplaying(slot) && generation == motion_recorder::PawnGeneration(slot);
     }
+    return false;
 }
 
 // Records or injects the user command before native simulation.
-KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
+KHook::Return<void> PlayerRunCommandPre(void* services, void* cmd) noexcept
 {
+    const size_t index = g_commandFrames.size();
+    g_commandFrames.push_back({});
     if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay() && g_usercmdWorkSlots.load(std::memory_order_acquire) == 0)
         return { KHook::Action::Ignore };
     int slot = pawn_binding::ServicesToSlot(services);
-    if (!ResolveReplayPawn(slot, services)) return { KHook::Action::Ignore };
-    auto* boundary = FindPhysicsFrame(slot);
-    if (boundary && (boundary->services != services || boundary->generation != motion_recorder::PawnGeneration(slot))) boundary = nullptr;
-    bool recording = boundary && boundary->recording && motion_recorder::IsRecording(slot);
-    bool replaying = boundary && boundary->replaying && motion_recorder::IsReplaying(slot);
+    if (!cmd || FindCommandFrame(slot) || !ResolveReplayPawn(slot, services)) return { KHook::Action::Ignore };
+    const uint64_t generation = motion_recorder::PawnGeneration(slot);
+    auto* batch = FindCommandBatch(slot);
+    if (batch && (batch->services != services || batch->generation != generation || batch->preparing))
+        return { KHook::Action::Ignore };
+    const bool recording = batch && motion_recorder::IsRecording(slot);
+    const bool replaying = batch && motion_recorder::IsReplaying(slot);
+    const bool capturePrepared = batch && batch->capturePrepared;
+    if (batch) batch->capturePrepared = false;
     const auto [hasUsercmdInjection, hasUsercmdSuppression, hasUsercmdMovement] = replaying ? UsercmdWork{} : GetUsercmdWork(slot);
 
-    if (cmd && (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement))
+    if (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement)
     {
+        g_commandFrames[index] = { slot, services, generation, recording, false };
         // Compiler computes the multiple-inheritance adjust here.
         auto* pc = reinterpret_cast<PlayerCommand*>(cmd);
         CBaseUserCmdPB* base = pc->mutable_base();
 
-        if (recording) CaptureUserCommand(slot, services, pc, base);
+        if (recording)
+        {
+            if (!capturePrepared) motion_recorder::OnRecordCommandPre(slot, services);
+            CaptureUserCommand(slot, services, pc, base);
+        }
 
-        if (replaying) ApplyReplayUserCommand(slot, services, pc, base);
+        if (replaying)
+        {
+            const bool applied = ApplyReplayUserCommand(slot, services, pc, base);
+            g_commandFrames[index].replayApplied = applied;
+        }
 
         if (hasUsercmdSuppression && !replaying) ApplyUsercmdSuppressions(slot, pc, base);
         if (hasUsercmdInjection && !replaying) ApplyUsercmdInjections(slot, pc, base);
@@ -700,18 +752,37 @@ KHook::Return<void> HookedPlayerRunCommand(void* services, void* cmd) noexcept
     return { KHook::Action::Ignore };
 }
 
-// ---- PhysicsSimulate: the per-tick boundary ----
-// Records pre/post + commits
+// Commits exactly one command, keeping its reentrancy guard through native callbacks.
+KHook::Return<void> PlayerRunCommandPost(void*, void*) noexcept
+{
+    const CommandFrame frame = g_commandFrames.back();
+    if ((frame.recording || frame.replayApplied) && ResolveReplayPawn(frame.slot, frame.services) &&
+        frame.generation == motion_recorder::PawnGeneration(frame.slot))
+    {
+        if (frame.recording) motion_recorder::OnRecordCommandPost(frame.slot, frame.services);
+        if (frame.replayApplied) motion_recorder::OnReplayCommandPost(frame.slot, frame.services);
+    }
+    g_commandFrames.pop_back();
+    return { KHook::Action::Ignore };
+}
+
+// ---- OnSimulateUserCommands: per-controller batch context ----
 
 // Dispatches drops after native command setup, at the client-command boundary.
 KHook::Return<void> ControllerCommandSetupPost(void* controller) noexcept
 {
-    if (g_physicsFrames.empty()) return { KHook::Action::Ignore };
-    // Do not cross an inactive/nested simulation frame to consume an outer event.
-    const MovementFrame frame = g_physicsFrames.back();
-    if (frame.replaying && frame.services && ControllerToSlot(controller) == frame.slot && motion_recorder::IsReplaying(frame.slot) &&
-        ResolveReplayPawn(frame.slot, frame.services) && frame.generation == motion_recorder::PawnGeneration(frame.slot))
-        ApplyReplayDrop(frame.slot, frame.services);
+    if (g_commandBatches.empty()) return { KHook::Action::Ignore };
+    const size_t index = g_commandBatches.size() - 1;
+    const CommandBatch batch = g_commandBatches[index];
+    if (!batch.services || batch.preparing || FindCommandFrame(batch.slot) || ControllerToSlot(controller) != batch.slot ||
+        !ResolveReplayPawn(batch.slot, batch.services) || batch.generation != motion_recorder::PawnGeneration(batch.slot))
+        return { KHook::Action::Ignore };
+    g_commandBatches[index].preparing = true;
+    const bool prepared = motion_recorder::IsRecording(batch.slot) &&
+                          motion_recorder::OnRecordCommandPre(batch.slot, batch.services);
+    if (motion_recorder::IsReplaying(batch.slot)) ApplyReplayDrop(batch.slot, batch.services);
+    g_commandBatches[index].capturePrepared = prepared;
+    g_commandBatches[index].preparing = false;
     return { KHook::Action::Ignore };
 }
 
@@ -729,52 +800,36 @@ void EnsureControllerCommandHook(void* controller)
     BC_LOG_WARN("record/replay: command setup unavailable");
 }
 
-// Captures the per-tick state before any subtick movement.
-KHook::Return<void> HookedPhysicsSimulate(void* controller) noexcept
+// Publishes batch ownership; individual commands own snapshots and cursor advancement.
+KHook::Return<void> SimulateUserCommandsPre(void* controller) noexcept
 {
     EnsureControllerCommandHook(controller);
     if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay())
     {
         // Keep the matching post callback from consuming an outer frame.
-        g_physicsFrames.push_back({ -1, nullptr, false, false });
+        g_commandBatches.push_back({ -1, nullptr });
         return { KHook::Action::Ignore };
     }
     int slot = ControllerToSlot(controller);
 
     void* services = pawn_binding::ServicesForSlot(slot);
 
-    bool recording = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsRecording(slot);
-    bool replaying = slot >= 0 && slot < kMaxSlots && services && motion_recorder::IsReplaying(slot);
-
-    // A nested simulation for this slot belongs to the existing outer boundary.
-    if (FindPhysicsFrame(slot))
+    // Nested batches for this slot must not consume the outer command.
+    if (FindCommandBatch(slot))
     {
-        g_physicsFrames.push_back({ -1, nullptr, false, false });
+        g_commandBatches.push_back({ slot, nullptr });
         return { KHook::Action::Ignore };
     }
     // Publish ownership before engine callbacks can reenter.
-    g_physicsFrames.push_back({ slot, services, recording, replaying, false, motion_recorder::PawnGeneration(slot) });
-
-    // pre: snapshot start-of-tick state once (before any subtick mover).
-    if (recording) motion_recorder::OnCapturePre(slot, services);
+    g_commandBatches.push_back({ slot, services, motion_recorder::PawnGeneration(slot) });
 
     return { KHook::Action::Ignore };
 }
 
-// Commits the recording and replay state for the matching simulation call.
-KHook::Return<void> PhysicsSimulatePost(void*) noexcept
+// Empty batches never record or consume a command frame.
+KHook::Return<void> SimulateUserCommandsPost(void*) noexcept
 {
-    const auto [slot, services, recording, replaying, seeded, generation] = g_physicsFrames.back();
-    g_physicsFrames.pop_back();
-    if ((!recording && !replaying) || !ResolveReplayPawn(slot, services) || generation != motion_recorder::PawnGeneration(slot))
-        return { KHook::Action::Ignore };
-
-    // post: snapshot end-of-tick state + commit one frame
-    if (recording) motion_recorder::OnCapturePost(slot, services);
-    if (replaying)
-    {
-        motion_recorder::OnReplayCommit(slot, services, seeded);
-    }
+    g_commandBatches.pop_back();
     return { KHook::Action::Ignore };
 }
 
@@ -791,9 +846,9 @@ void EnsureVtableHooks(void* services)
     // PlayerRunCommand (subtick record/re-inject)
     if (!GuardedRead(static_cast<const void*>(vt), tg::g_vtIdxPlayerRunCommand * static_cast<int>(sizeof(void*)), g_addrPlayerRunCommand))
         g_addrPlayerRunCommand = nullptr;
-    if (g_addrPlayerRunCommand && g_hookPlayerRunCommand.Install(g_addrPlayerRunCommand, &HookedPlayerRunCommand))
+    if (g_addrPlayerRunCommand && g_hookPlayerRunCommand.Install(g_addrPlayerRunCommand, &PlayerRunCommandPre, &PlayerRunCommandPost))
     {
-        g_subtickActive = true;
+        g_usercmdActive = true;
     }
     else if (g_addrPlayerRunCommand)
     {
@@ -825,22 +880,22 @@ bool Install( // NOLINT(misc-use-internal-linkage)
         return false;
     }
 
-    // PhysicsSimulate: the per-tick boundary
-    char psErr[256] = { 0 };
-    g_addrPhysicsSimulate =
-        cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", psErr, sizeof(psErr));
-    if (g_addrPhysicsSimulate && g_hookPhysicsSimulate.Install(g_addrPhysicsSimulate, &HookedPhysicsSimulate, &PhysicsSimulatePost))
+    // Controller command batches can contain several PlayerRunCommand calls.
+    char batchError[256] = { 0 };
+    g_addrSimulateUserCommands =
+        cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", batchError, sizeof(batchError));
+    if (g_addrSimulateUserCommands && g_hookSimulateUserCommands.Install(g_addrSimulateUserCommands, &SimulateUserCommandsPre, &SimulateUserCommandsPost))
     {
-        g_physicsActive = true;
+        g_batchActive = true;
     }
     else
     {
-        if (g_addrPhysicsSimulate)
+        if (g_addrSimulateUserCommands)
         {
-            g_hookPhysicsSimulate.Remove();
-            g_addrPhysicsSimulate = nullptr;
+            g_hookSimulateUserCommands.Remove();
+            g_addrSimulateUserCommands = nullptr;
         }
-        BC_LOG_WARN("record/replay: simulation hook failed (%s)", psErr[0] ? psErr : "KHook");
+        BC_LOG_WARN("record/replay: batch hook failed (%s)", batchError[0] ? batchError : "KHook");
     }
 
     // PlayerRunCommand is hooked lazily from the first live movement-services vtable.
@@ -863,12 +918,12 @@ void Remove()
     g_hookProcessMovement.Remove();
     g_hookPlayerRunCommand.Remove();
     g_hookControllerCommandSetup.Remove();
-    g_hookPhysicsSimulate.Remove();
+    g_hookSimulateUserCommands.Remove();
     g_addrProcessMovement = nullptr;
     g_addrPlayerRunCommand = nullptr;
-    g_addrPhysicsSimulate = nullptr;
-    g_physicsActive = false;
-    g_subtickActive = false;
+    g_addrSimulateUserCommands = nullptr;
+    g_batchActive = false;
+    g_usercmdActive = false;
     g_vtHooksTried.store(false, std::memory_order_release);
     g_controllerHookTried.store(false, std::memory_order_release);
     {
@@ -887,12 +942,12 @@ void Remove()
     g_status = "not_attempted";
 }
 
-// Recording and replay require frame, client-command, and movement boundaries.
+// Recording and replay require batch, command, and queued-client-command boundaries.
 bool RecorderReady()
 {
-    if (g_physicsActive && g_subtickActive && g_hookControllerCommandSetup.Active()) return true;
-    BC_LOG_WARN("record/replay unavailable: simulation=%d command=%d setup=%d", g_physicsActive,
-                g_subtickActive, g_hookControllerCommandSetup.Active());
+    if (g_batchActive && g_usercmdActive && g_hookControllerCommandSetup.Active()) return true;
+    BC_LOG_WARN("record/replay unavailable: batch=%d command=%d setup=%d", g_batchActive,
+                g_usercmdActive, g_hookControllerCommandSetup.Active());
     return false;
 }
 

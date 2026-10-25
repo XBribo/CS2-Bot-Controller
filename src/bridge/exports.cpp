@@ -36,7 +36,7 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 24 guards asynchronous loads with pawn generations.
+// ABI 24 keeps input history in separate optional exports.
 extern "C" BC_EXPORT int BotController_GetVersion() { return 24; }
 
 // Create an independently cancellable usercmd injection
@@ -199,6 +199,18 @@ extern "C" BC_EXPORT int BotController_GetRecordedSubtickCount(int slot) { retur
 // Recorded command-frame count for a slot
 extern "C" BC_EXPORT int BotController_GetRecordedCommandCount(int slot) { return cs2bc::motion_recorder::RecordedCommandCount(slot); }
 
+// Serialized history byte count for managed storage.
+extern "C" BC_EXPORT int BotController_GetRecordedInputHistorySize(int slot)
+{
+    return cs2bc::motion_recorder::RecordedInputHistorySize(slot);
+}
+
+// Copies a bounded serialized history range.
+extern "C" BC_EXPORT int BotController_CopyRecordedInputHistoryRange(int slot, int start, uint8_t* out, int maxBytes)
+{
+    return cs2bc::motion_recorder::CopyInputHistoryRange(slot, start, out, maxBytes);
+}
+
 // Copy recorded ticks / subticks into caller buffers. Returns count written.
 extern "C" BC_EXPORT int BotController_CopyRecordedTicks(int slot, cs2bc::ReplayTick* out, int maxTicks)
 {
@@ -244,7 +256,26 @@ extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                                                   int commandCount,
                                                   uint64_t pawnGeneration) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, pawnGeneration) ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(
+               slot, ticks, tickCount, subs, subCount, commands, commandCount, nullptr, 0, pawnGeneration)
+               ? 0 : -1;
+}
+
+// Adds optional input history without changing the ABI 24 load entry point.
+extern "C" BC_EXPORT int BotController_LoadReplayWithInputHistory(int slot,
+                                                  const cs2bc::ReplayTick* ticks,
+                                                  int tickCount,
+                                                  const cs2bc::SubtickMove* subs,
+                                                  int subCount,
+                                                  const cs2bc::ReplayCommandFrameData* commands,
+                                                  int commandCount,
+                                                  const uint8_t* inputHistory,
+                                                  int inputHistorySize,
+                                                  uint64_t pawnGeneration) noexcept
+{
+    return cs2bc::motion_recorder::LoadReplay(
+               slot, ticks, tickCount, subs, subCount, commands, commandCount, inputHistory, inputHistorySize, pawnGeneration)
+               ? 0 : -1;
 }
 
 // Move a slot's just-recorded buffers into another slot's replay buffer
@@ -255,15 +286,20 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
     int ns = cs2bc::motion_recorder::RecordedSubtickCount(srcSlot);
     ns = std::max(ns, 0);
     int nc = cs2bc::motion_recorder::RecordedCommandCount(srcSlot);
-    if (nc != nt) return -1;
+    int nh = cs2bc::motion_recorder::RecordedInputHistorySize(srcSlot);
+    if (nc != nt || nh < 0) return -1;
     std::vector<cs2bc::ReplayTick> ticks(nt);
     std::vector<cs2bc::SubtickMove> subs(ns > 0 ? ns : 1);
     std::vector<cs2bc::ReplayCommandFrameData> commands(nc);
+    std::vector<uint8_t> history(nh);
     int gotT = cs2bc::motion_recorder::CopyTicks(srcSlot, ticks.data(), nt);
     int gotS = ns > 0 ? cs2bc::motion_recorder::CopySubticks(srcSlot, subs.data(), ns) : 0;
     int gotC = cs2bc::motion_recorder::CopyCommands(srcSlot, commands.data(), nc);
-    if (gotT <= 0 || gotC != gotT) return -1;
-    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC) ? 0 : -1;
+    int gotH = nh > 0 ? cs2bc::motion_recorder::CopyInputHistoryRange(srcSlot, 0, history.data(), nh) : 0;
+    if (gotT <= 0 || gotC != gotT || gotH != nh) return -1;
+    return cs2bc::motion_recorder::LoadReplay(
+               dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, history.data(), gotH)
+               ? 0 : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)

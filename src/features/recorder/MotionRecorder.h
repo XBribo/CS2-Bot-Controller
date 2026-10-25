@@ -2,11 +2,13 @@
 
 #pragma once
 
+#include "cs_usercmd.pb.h"
+
 #include <cstdint>
+#include <string>
 
 namespace cs2bc {
-// State of the player at one boundary of a movement tick. Captured twice
-// per tick: pre (before the mover runs) and post (after).
+// Player state at command entry and after native command simulation.
 #pragma pack(push, 4)
 struct MovementSnapshot
 {
@@ -30,8 +32,7 @@ struct MovementSnapshot
     uint8_t actualMoveType; // m_nActualMoveType (networked, ladder anim)
 };
 
-// One recorded server tick. numSubtick subtick moves follow this tick in
-// the parallel SubtickMove buffer
+// One simulated command; the ReplayTick name and layout remain ABI-compatible.
 struct ReplayTick
 {
     MovementSnapshot pre;
@@ -148,6 +149,7 @@ struct ReplayCommandFrame
     int32_t mouseDy;
     int32_t rawWeaponSelect;
     uint8_t leftHandDesired;
+    CSGOUserCmdPB inputHistory;
 };
 
 // ---- recording ----
@@ -163,15 +165,17 @@ uint64_t PawnGeneration(int slot);
 int RecordedTickCount(int slot); // <0 on bad slot
 int RecordedSubtickCount(int slot); // <0 on bad slot
 int RecordedCommandCount(int slot); // <0 on bad slot
+// Reports the serialized history buffer size in bytes.
+int RecordedInputHistorySize(int slot);
 
-// PhysicsSimulate hook: capture pre snapshot
-void OnCapturePre(int slot, void* services);
-// PhysicsSimulate hook: capture post snapshot + commit the tick
-void OnCapturePost(int slot, void* services);
-// PlayerRunCommand hook: stash this tick's subtick moves
+// Captures command entry before queued client commands run.
+bool OnRecordCommandPre(int slot, void* services);
+// PlayerRunCommand post: commits exactly one complete frame.
+void OnRecordCommandPost(int slot, void* services);
+// Stashes the current command's subtick moves.
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
-// PlayerRunCommand hook: stash this tick's complete command frame
-void OnCaptureCommand(int slot, const ReplayCommandFrameData& command);
+// Stashes the current command's input and optional serialized history.
+void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history);
 // Track which WeaponServices* maps to this recording slot
 void SetLiveWs(int slot, void* ws);
 // SelectItem tap: update the slot's current weapon def index.
@@ -184,6 +188,8 @@ int CopySubticks(int slot, SubtickMove* out, int maxSubticks);
 int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks);
 int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands);
 int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands);
+// Copies a bounded byte range from the stopped recording's history buffer.
+int CopyInputHistoryRange(int slot, int start, uint8_t* out, int maxBytes);
 
 // ---- replay ----
 // Load all parallel replay arrays into a slot's replay buffer
@@ -194,6 +200,8 @@ bool LoadReplay(int slot,
                 int subCount,
                 const ReplayCommandFrameData* commands,
                 int commandCount,
+                const uint8_t* inputHistory = nullptr,
+                int inputHistorySize = 0,
                 uint64_t pawnGeneration = 0) noexcept;
 bool StartReplay(int slot, bool loop); // play from tick 0
 bool StopReplay(int slot); // stop + clear injection
@@ -203,11 +211,11 @@ bool HasAnyReplay();
 int ReplayCursor(int slot); // current tick index, <0 if idle
 int ReplayTotal(int slot); // loaded tick count
 
-// Current tick being applied this server tick
+// Last completed command frame, for external replay queries.
 bool CurrentReplayTick(int slot, ReplayTick& out);
-// Assemble all replay input fields for the next simulated tick
+// Assembles input for the next native command.
 bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFrame& out);
-// Command view angles for the tick currently being simulated.
+// View snapshot for the command currently being simulated.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
 
 // Switch the current live pawn to the requested weapon definition.
@@ -230,10 +238,10 @@ bool DropHookReady();
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
 // ---- replay write hooks ----
-// PlayerRunCommand (pre): seed pawn state consumed by weapon and grenade logic
-void OnReplayCommandPre(int slot, void* services, const ReplayTick& tick);
-// PhysicsSimulate (post): restore the end snapshot and advance the cursor.
-void OnReplayCommit(int slot, void* services, bool simulated);
+// PlayerRunCommand pre: seeds state consumed by weapon and grenade logic.
+bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick);
+// PlayerRunCommand post: restores end state and advances the cursor once.
+void OnReplayCommandPost(int slot, void* services);
 
 void ClearAll(); // wipe all record + replay buffers
 } // namespace motion_recorder
