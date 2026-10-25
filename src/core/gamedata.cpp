@@ -1,27 +1,13 @@
 #include "core/gamedata.h"
 #include "core/cs2_sdk/src/core/gameconfig.h"
-#include "core/cs2_sdk/src/utils/platform.h"
 #include "offsets.h"
 #include "core/cs2_sdk/src/core/memory_module.h"
 #include <cstdio>
-#include <filesystem>
 #include <string>
 namespace cs2bc::gamedata {
-std::string ComputePath()
-{
-    std::filesystem::path path(cs2_sdk::platform::SelfModulePath());
-    if (path.empty()) return "";
-    for (int i = 0; i < 3; ++i)
-    {
-        path = path.parent_path();
-        if (path.empty()) return "";
-    }
-    return (path / "gamedata.json").string();
-}
-
 bool Load(nlohmann::json& gamedata, cs2_sdk::modules::ModuleInfo& serverModule, char* error, size_t maxlen)
 {
-    const std::string gamedataPath = ComputePath();
+    const std::string gamedataPath = cs2_sdk::gameconfig::ComputePath();
     if (gamedataPath.empty())
     {
         std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
