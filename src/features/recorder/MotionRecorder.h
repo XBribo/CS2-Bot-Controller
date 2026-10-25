@@ -174,7 +174,6 @@ void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
 void OnCaptureCommand(int slot, const ReplayCommandFrameData& command);
 // Track which WeaponServices* maps to this recording slot
 void SetLiveWs(int slot, void* ws);
-void* LiveWs(int slot);
 // SelectItem tap: update the slot's current weapon def index.
 void SetCurrentDef(int slot, int defIndex);
 
@@ -207,27 +206,27 @@ int ReplayTotal(int slot); // loaded tick count
 // Current tick being applied this server tick
 bool CurrentReplayTick(int slot, ReplayTick& out);
 // Assemble all replay input fields for the next simulated tick
-bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out);
+bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFrame& out);
 // Command view angles for the tick currently being simulated.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
 
-// Switch a bot to the weapon with this def index.
-bool SwitchBotWeaponByDef(int slot, int defIndex);
+// Switch the current live pawn to the requested weapon definition.
+bool SwitchWeaponByDef(int slot, int defIndex);
 
-// Def index of the weapon the bot currently holds.
-int BotActiveWeaponDef(int slot);
+// Active weapon definition for a Bot or player slot.
+int ActiveWeaponDefForSlot(int slot);
 
 // Treats CT and T fire grenades as the same replay weapon type
 bool ReplayWeaponDefsMatch(int firstDef, int secondDef);
 
 // Consumes the current tick's drop event once
 bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event);
-// Drops the recorded item through the bot pawn's native weapon service
+// Drops the recorded item through the registered pawn's weapon service.
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event);
 
 // Reports whether the weapon drop hook is available.
 bool DropHookReady();
-// Installs the Windows release-pose capture and replay hooks.
+// Installs native release-pose capture and replay hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
 // ---- replay write hooks ----

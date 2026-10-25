@@ -69,10 +69,10 @@ namespace BotControllerApi
 
         // ---- weapons ----
 
-        // Switch a bot to the weapon with this def index.
+        // Switch a Bot or player's weapon; legacy name retained for compatibility.
         bool SwitchBotWeapon(int slot, int defIndex);
 
-        // Def index of the bot's current active weapon. <0 if unresolved.
+        // Active weapon definition for a Bot or player. <0 if unresolved.
         int BotActiveWeaponDef(int slot);
 
         // Creates an independently cancellable usercmd injection and returns its token

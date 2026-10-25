@@ -17,6 +17,7 @@
 #include "BuyController.h"
 #include "BuyControllerState.h"
 #include "InputInjector.h"
+#include "PawnBinding.h"
 #include "MotionRecorder.h"
 #include "WeaponLockerState.h"
 #include "BotControllerState.h"
@@ -66,6 +67,11 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         cs2_sdk::modules::ModuleInfo serverModule;
         if (!gamedata::Load(gd, serverModule, error, maxlen)) return false;
 
+        if (!input_injector::pawn_binding::Init())
+        {
+            std::snprintf(error, maxlen, "pawn binding unavailable");
+            return false;
+        }
         if (!cs2bc::weapon_locker_hooks::Install(gd, serverModule, error, maxlen)) return false;
 
         if (!cs2bc::bot_controller_hooks::Install(gd, serverModule, error, maxlen)) return false;
@@ -121,6 +127,7 @@ bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
     cs2bc::buy_controller_state::ClearAll();
     cs2bc::bot_controller_hooks::Remove();
     cs2bc::weapon_locker_hooks::Remove();
+    cs2bc::input_injector::pawn_binding::ClearAll();
     cs2bc::weapon_locker_state::ClearAll();
     cs2bc::bot_controller_state::ClearAllAll();
     cs2bc::bot_controller_state::ClearAllAim();

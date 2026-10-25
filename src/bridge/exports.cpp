@@ -309,13 +309,11 @@ extern "C" BC_EXPORT int BotController_GetReplayTick(int slot, cs2bc::ReplayTick
     return cs2bc::motion_recorder::CurrentReplayTick(slot, *out) ? 0 : -1;
 }
 
-// Switch a bot to the weapon with this def index
-// Returns 0 ok / -1 not found or bot not ready.
+// Switch the live slot's weapon; export name retained for ABI compatibility.
 extern "C" BC_EXPORT int BotController_SwitchBotWeapon(int slot, int defIndex)
 {
-    return cs2bc::motion_recorder::SwitchBotWeaponByDef(slot, defIndex) ? 0 : -1;
+    return cs2bc::motion_recorder::SwitchWeaponByDef(slot, defIndex) ? 0 : -1;
 }
 
-// Def index of the bot's current active weapon (same normalization as the
-// recorded WeaponDefIndex). <0 if unresolved. For C# to reconcile replay.
-extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot) { return cs2bc::motion_recorder::BotActiveWeaponDef(slot); }
+// Query any live slot; export name retained for ABI compatibility.
+extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot) { return cs2bc::motion_recorder::ActiveWeaponDefForSlot(slot); }

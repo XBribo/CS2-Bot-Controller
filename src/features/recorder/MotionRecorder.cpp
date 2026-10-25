@@ -91,11 +91,17 @@ std::atomic<uint64_t> g_recordingSlots{ 0 };
 std::atomic<uint64_t> g_replayingSlots{ 0 };
 static_assert(kMaxSlots <= 64);
 cs2_sdk::hooks::NativeHook<void, void*, void*, void*, const float*> g_hookDropWeapon;
+struct WeaponSession
+{
+    int slot{ -1 };
+    uint64_t generation{ 0 };
+    void* movementServices{ nullptr };
+    void* weaponServices{ nullptr };
+};
 struct DropFrame
 {
-    void* weaponServices;
+    WeaponSession session;
     void* weapon;
-    int recordingSlot;
     int weaponDefIndex;
     ReplayDropEvent recordedEvent;
 };
@@ -107,7 +113,7 @@ cs2_sdk::hooks::NativeHook<char, void*, void*, int, const float*> g_hookDropRele
 cs2_sdk::hooks::NativeHook<char, void*, void*> g_hookDropReleaseBuilder;
 struct DropReleaseFrame
 {
-    int slot{ -1 };
+    WeaponSession session;
     int defIndex{ -1 };
     void* weapon{ nullptr };
     void* droppedWeapon{ nullptr };
@@ -118,7 +124,7 @@ struct DropReleaseFrame
 thread_local std::vector<DropReleaseFrame> g_dropReleaseFrames;
 struct ReplayDropOverride
 {
-    int slot;
+    WeaponSession session;
     void* weapon;
     ReplayDropEvent event;
 };
@@ -140,7 +146,7 @@ bool ValidReleasePose(const float* position, const float* quaternion)
     }
     return norm > 0.5F && norm < 1.5F;
 }
-static int ReplayWeaponSelectForDef(int slot, int recordedDef);
+static int ReplayWeaponSelectForDef(const WeaponSession& session, int recordedDef);
 // Publishes the frame's pawn state before the native drop command reads it.
 bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& event);
 void* ResolveSceneNode(void* entity);
@@ -158,49 +164,48 @@ void* FindReplayWeaponByDef(void* ws, int recordedDef)
     return weapon_locker_hooks::FindWeaponByDef(ws, alternateDef);
 }
 
-// Prefers the recorder's exact cached weapon-services owner over controller handles
-int RecordingSlotForWeaponServices(void* weaponServices, void* pawn)
+// Revalidates ownership without dereferencing cached weapon services.
+bool WeaponSessionCurrent(const WeaponSession& session)
 {
-    for (int slot = 0; slot < kMaxSlots; ++slot)
-    {
-        RecordState& r = g_rec[slot];
-        if (r.recording.load(std::memory_order_acquire) && r.liveWs.load(std::memory_order_relaxed) == weaponServices) return slot;
-    }
-
-    const int slot = ControllerSlotForPawn(pawn);
-    return IsRecording(slot) ? slot : -1;
+    if (!ValidSlot(session.slot) || !session.weaponServices || session.generation != PawnGeneration(session.slot)) return false;
+    void* weapons = input_injector::pawn_binding::ServicesToWeaponServices(session.slot, session.movementServices);
+    return weapons == session.weaponServices && session.generation == PawnGeneration(session.slot);
 }
 
-// Stores one real weapon-service drop in the pending recording tick
-bool CaptureDropEvent(int slot, const ReplayDropEvent& event)
+// Captures only an explicitly registered recording or replay session.
+WeaponSession CurrentWeaponSession(void* weaponServices)
 {
-    if (!ValidSlot(slot) || event.weaponDefIndex < 0) return false;
-    RecordState& r = g_rec[slot];
-    if (!r.recording.load(std::memory_order_acquire)) return false;
-
-    std::scoped_lock lk(r.mu);
-    r.pendingEventFlags |= ReplayEventDrop;
-    r.pendingDropEvent = event;
-    return true;
+    void* pawn = nullptr;
+    if (!weaponServices || !GuardedRead(weaponServices, tg::g_servicesPawn, pawn)) return {};
+    const int slot = ControllerSlotForPawn(pawn);
+    if (!IsRecording(slot) && !IsReplaying(slot)) return {};
+    const uint64_t generation = PawnGeneration(slot);
+    WeaponSession session{ slot, generation, input_injector::pawn_binding::ServicesForSlot(slot), weaponServices };
+    return WeaponSessionCurrent(session) ? session : WeaponSession{};
 }
 
 // Records the drop event and item
 KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, const float*) noexcept
 {
-    void* pawn = nullptr;
-    if (weaponServices) GuardedRead(weaponServices, tg::g_servicesPawn, pawn);
-    const int recordingSlot = RecordingSlotForWeaponServices(weaponServices, pawn);
+    const WeaponSession session = CurrentWeaponSession(weaponServices);
+    const int recordingSlot = session.slot;
     const int weaponDefIndex = weapon_locker_hooks::ReadDefIndex(weapon);
 
     ReplayDropEvent recordedEvent{};
     recordedEvent.weaponDefIndex = -1;
     // Keep the raw definition for detachment checks, but record knives by role.
-    if (ValidSlot(recordingSlot))
+    if (IsRecording(recordingSlot))
     {
         recordedEvent.weaponDefIndex =
             weapon_locker_hooks::WeaponDefForEntityIndex(weaponServices, weapon_locker_hooks::WeaponEntIndex(weapon));
         if (recordedEvent.weaponDefIndex < 0) recordedEvent.weaponDefIndex = weaponDefIndex;
-        void* node = ResolveSceneNode(pawn);
+        if (!WeaponSessionCurrent(session) || !IsRecording(recordingSlot))
+        {
+            recordedEvent.weaponDefIndex = -1;
+            g_dropFrames.push_back({ session, weapon, weaponDefIndex, recordedEvent });
+            return { KHook::Action::Ignore };
+        }
+        void* node = ResolveSceneNode(input_injector::ResolveReplayPawn(recordingSlot, session.movementServices));
         float bodyAngles[3]{};
         if (node && tg::g_nodeAbsRotation >= 0 && TryReadMemory(node, tg::g_nodeAbsRotation, bodyAngles, sizeof(bodyAngles)) &&
             std::isfinite(bodyAngles[1]))
@@ -211,7 +216,8 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
         if (!g_dropReleaseFrames.empty())
         {
             const DropReleaseFrame& frame = g_dropReleaseFrames.back();
-            if (frame.droppedWeapon == weapon && frame.haveReleasePose)
+            if (frame.session.slot == session.slot && frame.session.generation == session.generation &&
+                frame.droppedWeapon == weapon && frame.haveReleasePose)
             {
                 recordedEvent.vectorFlags |= ReplayDropReleasePose;
                 std::copy_n(frame.releasePosition, 3, recordedEvent.releasePosition);
@@ -219,26 +225,31 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
             }
         }
     }
-    g_dropFrames.push_back({ weaponServices, weapon, recordingSlot, weaponDefIndex, recordedEvent });
+    g_dropFrames.push_back({ session, weapon, weaponDefIndex, recordedEvent });
     return { KHook::Action::Ignore };
 }
 
-// Records only physical detachments
+// Commits physical detachments only to the original pawn session.
 KHook::Return<void> DropWeaponPost(void*, void*, void*, const float*) noexcept
 {
-    const auto [weaponServices, weapon, recordingSlot, weaponDefIndex, recordedEvent] = g_dropFrames.back();
+    const auto [session, weapon, weaponDefIndex, recordedEvent] = g_dropFrames.back();
     g_dropFrames.pop_back();
-    if (recordedEvent.weaponDefIndex < 0) return { KHook::Action::Ignore };
+    if (recordedEvent.weaponDefIndex < 0 || !IsRecording(session.slot) || !WeaponSessionCurrent(session))
+        return { KHook::Action::Ignore };
     const bool detached =
-        weaponServices && weapon && weaponDefIndex >= 0 && weapon_locker_hooks::FindWeaponByDef(weaponServices, weaponDefIndex) != weapon;
-    if (detached && ValidSlot(recordingSlot))
+        weapon && weaponDefIndex >= 0 && weapon_locker_hooks::FindWeaponByDef(session.weaponServices, weaponDefIndex) != weapon;
+    if (!WeaponSessionCurrent(session)) return { KHook::Action::Ignore };
+    RecordState& r = g_rec[session.slot];
+    std::scoped_lock lk(r.mu);
+    if (!r.recording.load(std::memory_order_acquire) || session.generation != PawnGeneration(session.slot))
+        return { KHook::Action::Ignore };
+    if (detached)
     {
-        CaptureDropEvent(recordingSlot, recordedEvent);
+        r.pendingEventFlags |= ReplayEventDrop;
+        r.pendingDropEvent = recordedEvent;
     }
-    else if (ValidSlot(recordingSlot) && weapon && weaponDefIndex >= 0)
+    else if (weapon && weaponDefIndex >= 0)
     {
-        RecordState& r = g_rec[recordingSlot];
-        std::scoped_lock lk(r.mu);
         bool found = false;
         for (RecordState::DropCandidate& candidate : r.pendingDropCandidates)
         {
@@ -305,23 +316,9 @@ void* ResolveSceneNode(void* entity)
 KHook::Return<char> DropReleaseOuterPre(void* weaponServices, void* weapon, int, const float*) noexcept
 {
     DropReleaseFrame frame{};
+    frame.session = CurrentWeaponSession(weaponServices);
     frame.weapon = weapon;
     frame.defIndex = weapon_locker_hooks::ReadDefIndex(weapon);
-    void* pawn = nullptr;
-    if (weaponServices) GuardedRead(weaponServices, tg::g_servicesPawn, pawn);
-    frame.slot = RecordingSlotForWeaponServices(weaponServices, pawn);
-    if (!ValidSlot(frame.slot))
-    {
-        frame.slot = -1;
-        for (int slot = 0; slot < kMaxSlots; ++slot)
-        {
-            if (IsReplaying(slot) && weapon_locker_hooks::WsForSlot(slot) == weaponServices)
-            {
-                frame.slot = slot;
-                break;
-            }
-        }
-    }
     g_dropReleaseFrames.push_back(frame);
     return { KHook::Action::Ignore };
 }
@@ -339,7 +336,7 @@ KHook::Return<char> DropReleaseBuilderPre(void* weapon, void*) noexcept
     if (!g_dropReleaseFrames.empty())
     {
         DropReleaseFrame& frame = g_dropReleaseFrames.back();
-        if (frame.slot >= 0 && weapon_locker_hooks::ReadDefIndex(weapon) == frame.defIndex) frame.droppedWeapon = weapon;
+        if (WeaponSessionCurrent(frame.session) && weapon_locker_hooks::ReadDefIndex(weapon) == frame.defIndex) frame.droppedWeapon = weapon;
     }
     return { KHook::Action::Ignore };
 }
@@ -349,25 +346,26 @@ KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexce
 {
     if (g_dropReleaseFrames.empty()) return { KHook::Action::Ignore };
     DropReleaseFrame& frame = g_dropReleaseFrames.back();
-    if (frame.slot < 0 || frame.droppedWeapon != weapon) return { KHook::Action::Ignore };
+    if (frame.droppedWeapon != weapon || !WeaponSessionCurrent(frame.session)) return { KHook::Action::Ignore };
     float output[8]{};
     const bool readable = transform && TryReadMemoryGuarded(transform, 0, output, sizeof(output));
-    if (readable && IsRecording(frame.slot) && ValidReleasePose(output, output + 4))
+    if (readable && IsRecording(frame.session.slot) && ValidReleasePose(output, output + 4))
     {
         std::copy_n(output, 3, frame.releasePosition);
         std::copy_n(output + 4, 4, frame.releaseQuaternion);
         frame.haveReleasePose = true;
     }
-    else if (readable && IsReplaying(frame.slot) && !g_replayDropEvents.empty())
+    else if (readable && IsReplaying(frame.session.slot) && !g_replayDropEvents.empty())
     {
         const ReplayDropOverride& override = g_replayDropEvents.back();
         const ReplayDropEvent& event = override.event;
-        if (override.slot == frame.slot && override.weapon == frame.weapon && (event.vectorFlags & ReplayDropReleasePose) != 0)
+        if (override.session.slot == frame.session.slot && override.session.generation == frame.session.generation &&
+            override.weapon == frame.weapon && (event.vectorFlags & ReplayDropReleasePose) != 0)
         {
             std::copy_n(event.releasePosition, 3, output);
             std::copy_n(event.releaseQuaternion, 4, output + 4);
             if (!TryWriteMemoryGuarded(transform, 0, output, sizeof(output)))
-                BC_LOG_WARN("slot %d: drop pose failed", frame.slot);
+                BC_LOG_WARN("slot %d: drop pose failed", frame.session.slot);
         }
     }
     return { KHook::Action::Ignore };
@@ -506,8 +504,6 @@ void SetLiveWs(int slot, void* ws)
     g_rec[slot].liveWs.store(ws, std::memory_order_relaxed);
     EnsureDropWeaponHook(ws);
 }
-
-void* LiveWs(int slot) { return ValidSlot(slot) ? g_rec[slot].liveWs.load(std::memory_order_relaxed) : nullptr; }
 
 void SetCurrentDef(int slot, int defIndex)
 {
@@ -812,15 +808,16 @@ bool CurrentReplayTick(int slot, ReplayTick& out)
 }
 
 // Assembles one complete PlayerRunCommand input frame from parallel replay buffers
-bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
+bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFrame& out)
 {
     out = {};
     out.weaponSelect = -1;
     out.rawWeaponSelect = -1;
-    if (!ValidSlot(slot)) return false;
+    if (!ValidSlot(slot) || !services) return false;
 
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
+    const uint64_t generation = PawnGeneration(slot);
 
     int recordedDef = -1;
     bool recordedWeaponChanged = false;
@@ -883,18 +880,23 @@ bool ReplayCommandFrameForSimulation(int slot, ReplayCommandFrame& out)
             out.subticks[i] = p.subs[static_cast<size_t>(begin) + static_cast<size_t>(i)];
     }
 
-    // Replay requests
+    void* ws = input_injector::pawn_binding::ServicesToWeaponServices(slot, services);
+    const WeaponSession session{ slot, generation, services, ws };
+    if (!WeaponSessionCurrent(session)) return false;
+
+    // Resolve selections only against this replay's registered inventory.
     if (out.rawWeaponSelect > 0)
     {
-        void* weapon = FindReplayWeaponByDef(weapon_locker_hooks::WsForSlot(slot), out.rawWeaponSelect);
+        void* weapon = FindReplayWeaponByDef(ws, out.rawWeaponSelect);
+        if (!WeaponSessionCurrent(session)) return false;
         if (weapon) out.weaponSelect = weapon_locker_hooks::WeaponEntIndex(weapon);
     }
     else if (p.needsInitialTeleport.load(std::memory_order_acquire) || recordedWeaponChanged)
     {
         // Preserve selections issued through client commands rather than UserCmd.
-        out.weaponSelect = ReplayWeaponSelectForDef(slot, recordedDef);
+        out.weaponSelect = ReplayWeaponSelectForDef(session, recordedDef);
     }
-    return true;
+    return IsReplaying(slot) && WeaponSessionCurrent(session);
 }
 
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
@@ -910,22 +912,26 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
     return true;
 }
 
-bool SwitchBotWeaponByDef(int slot, int defIndex)
+// Ordinary switches support any live pawn and respect selection hooks.
+bool SwitchWeaponByDef(int slot, int defIndex)
 {
     if (!ValidSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
     if (!weapon_locker_hooks::WeaponHooksReady()) return false;
-    void* ws = weapon_locker_hooks::WsForSlot(slot);
+    void* ws = input_injector::pawn_binding::CurrentWeaponServices(slot);
     if (!ws) return false;
     void* weapon = weapon_locker_hooks::FindWeaponByDef(ws, defIndex);
     if (!weapon) return false;
+    if (IsReplaying(slot) || input_injector::pawn_binding::CurrentWeaponServices(slot) != ws) return false;
     return weapon_locker_hooks::SelectWeapon(ws, weapon);
 }
 
-// Def index of the bot's current active weapon
-int BotActiveWeaponDef(int slot)
+// Active sessions query their registration; ordinary queries read the live pawn.
+int ActiveWeaponDefForSlot(int slot)
 {
     if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
-    void* ws = weapon_locker_hooks::WsForSlot(slot);
+    const bool activeSession = IsRecording(slot) || IsReplaying(slot);
+    void* ws = activeSession ? input_injector::pawn_binding::RegisteredWeaponServices(slot)
+                            : input_injector::pawn_binding::CurrentWeaponServices(slot);
     if (!ws) return -1;
     return weapon_locker_hooks::ActiveWeaponDef(ws);
 }
@@ -939,20 +945,20 @@ bool ReplayWeaponDefsMatch(int firstDef, int secondDef)
 namespace {
 
 // Selects the recorded weapon when it differs from the active item.
-int ReplayWeaponSelectForDef(int slot, int recordedDef)
+int ReplayWeaponSelectForDef(const WeaponSession& session, int recordedDef)
 {
-    if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
+    if (!weapon_locker_hooks::WeaponHooksReady() || !WeaponSessionCurrent(session)) return -1;
     if (recordedDef < 0) return -1;
 
-    void* ws = weapon_locker_hooks::WsForSlot(slot);
-    if (!ws) return -1;
+    void* ws = session.weaponServices;
 
     // Already holding the recorded weapon -> no switch
-    if (ReplayWeaponDefsMatch(weapon_locker_hooks::ActiveWeaponDef(ws), recordedDef)) return -1;
+    const int activeDef = weapon_locker_hooks::ActiveWeaponDef(ws);
+    if (!WeaponSessionCurrent(session) || ReplayWeaponDefsMatch(activeDef, recordedDef)) return -1;
 
     void* weapon = FindReplayWeaponByDef(ws, recordedDef);
-    if (!weapon) return -1;
-    weapon_locker_hooks::SelectWeaponRaw(ws, weapon);
+    if (!weapon || !WeaponSessionCurrent(session)) return -1;
+    if (!weapon_locker_hooks::SelectWeaponRaw(ws, weapon) || !WeaponSessionCurrent(session)) return -1;
     return weapon_locker_hooks::WeaponEntIndex(weapon);
 }
 } // namespace
@@ -994,22 +1000,26 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
         !g_hookDropReleaseBuilder.Active() || (event.vectorFlags & ReplayDropReleasePose) == 0)
         return false;
 
-    void* pawn = input_injector::ResolveReplayPawn(slot, services);
-    void* ws = nullptr;
-    if (!pawn || !GuardedRead(pawn, tg::g_pawnWeaponServices, ws) || !ws) return false;
+    const uint64_t generation = PawnGeneration(slot);
+    void* ws = input_injector::pawn_binding::ServicesToWeaponServices(slot, services);
+    const WeaponSession session{ slot, generation, services, ws };
+    if (!WeaponSessionCurrent(session)) return false;
     void* weapon = weapon_locker_hooks::FindWeaponByDef(ws, weaponDefIndex);
-    if (!weapon) return false;
+    if (!weapon || !WeaponSessionCurrent(session)) return false;
     const int replayDef = weapon_locker_hooks::WeaponDefForEntityIndex(ws, weapon_locker_hooks::WeaponEntIndex(weapon));
-    if (replayDef != weaponDefIndex) return false;
-    if (weapon_locker_hooks::ActiveWeaponDef(ws) != weaponDefIndex && !weapon_locker_hooks::SelectWeaponRaw(ws, weapon)) return false;
-    if (weapon_locker_hooks::ActiveWeaponDef(ws) != weaponDefIndex) return false;
+    if (replayDef != weaponDefIndex || !WeaponSessionCurrent(session)) return false;
+    const int activeDef = weapon_locker_hooks::ActiveWeaponDef(ws);
+    if (!WeaponSessionCurrent(session)) return false;
+    if (activeDef != weaponDefIndex && !weapon_locker_hooks::SelectWeaponRaw(ws, weapon)) return false;
+    if (!WeaponSessionCurrent(session)) return false;
+    if (weapon_locker_hooks::ActiveWeaponDef(ws) != weaponDefIndex || !WeaponSessionCurrent(session)) return false;
 
     if (!dispatch::g_gameClients) return false;
     CCommand command;
     if (!command.Tokenize("drop")) return false;
 
-    if (!PrepareReplayDropPawn(slot, services, event)) return false;
-    g_replayDropEvents.push_back({ slot, weapon, event });
+    if (!PrepareReplayDropPawn(slot, services, event) || !WeaponSessionCurrent(session)) return false;
+    g_replayDropEvents.push_back({ session, weapon, event });
     dispatch::g_gameClients->ClientCommand(CPlayerSlot(slot), command);
     g_replayDropEvents.pop_back();
     return true;

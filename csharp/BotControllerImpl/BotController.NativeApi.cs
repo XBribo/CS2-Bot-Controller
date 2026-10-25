@@ -404,12 +404,11 @@ namespace BotControllerApi
         public static bool TryGetReplayTick(int slot, out ReplayTick tick)
             => BotController_GetReplayTick(slot, out tick) == 0;
 
-        // Switch a bot to the weapon with this def index.
+        // Switch a Bot or player's weapon; legacy name retained for compatibility.
         public static bool SwitchBotWeapon(int slot, int defIndex)
             => BotController_SwitchBotWeapon(slot, defIndex) == 0;
 
-        // Def index of the bot's current active weapon, same normalization as the
-        // recorded WeaponDefIndex. <0 if unresolved.
+        // Active weapon definition for a Bot or player. <0 if unresolved.
         public static int BotActiveWeaponDef(int slot)
             => BotController_GetBotActiveWeaponDef(slot);
 

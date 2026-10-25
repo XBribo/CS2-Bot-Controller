@@ -488,10 +488,9 @@ KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
 {
     EnsureVtableHooks(services);
     if (!motion_recorder::HasAnyRecording()) return { KHook::Action::Ignore };
-    void* validatedPawn = nullptr;
-    int slot = pawn_binding::ServicesToSlot(services, &validatedPawn);
+    int slot = pawn_binding::ServicesToSlot(services);
     if (motion_recorder::IsRecording(slot))
-        motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services, validatedPawn));
+        motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services));
     return { KHook::Action::Ignore };
 }
 
@@ -566,7 +565,7 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
     {
         command.weaponSelect = base->weaponselect() > 0
                                    ? weapon_locker_hooks::WeaponDefForEntityIndex(
-                                         pawn_binding::ServicesToWeaponServices(slot, services, nullptr), base->weaponselect())
+                                         pawn_binding::ServicesToWeaponServices(slot, services), base->weaponselect())
                                    : 0;
         command.fields |= motion_recorder::kCommandFieldWeaponSelect;
     }
@@ -583,7 +582,7 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
 {
     constexpr uint64_t kGrenadeAttackMask = (1ULL << 0) | (1ULL << 11);
     motion_recorder::ReplayCommandFrame frame{};
-    if (motion_recorder::ReplayCommandFrameForSimulation(slot, frame))
+    if (motion_recorder::ReplayCommandFrameForSimulation(slot, services, frame))
     {
         const auto* active = FindPhysicsFrame(slot);
         if (!active || active->services != services || active->generation != motion_recorder::PawnGeneration(slot) ||
@@ -592,7 +591,8 @@ void ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
         const uint64_t generation = active->generation;
         bool suppressUnsafeUtilityAttack =
             IsThrowableUtilityDef(frame.tick.weaponDefIndex) && frame.weaponSelect < 0 &&
-            !motion_recorder::ReplayWeaponDefsMatch(motion_recorder::BotActiveWeaponDef(slot), frame.tick.weaponDefIndex);
+            !motion_recorder::ReplayWeaponDefsMatch(
+                weapon_locker_hooks::ActiveWeaponDef(pawn_binding::ServicesToWeaponServices(slot, services)), frame.tick.weaponDefIndex);
         if (suppressUnsafeUtilityAttack)
         {
             frame.buttons0 &= ~kGrenadeAttackMask;
@@ -810,12 +810,6 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char* errorOut,
     size_t errorOutLen) // NOLINT(misc-use-internal-linkage)
 {
-    if (!pawn_binding::Init())
-    {
-        std::snprintf(errorOut, errorOutLen, "pawn binding unavailable");
-        g_status = "failed: pawn binding";
-        return false;
-    }
     g_addrProcessMovement =
         cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSPlayer_MovementServices::ProcessMovement", errorOut, errorOutLen);
     if (!g_addrProcessMovement)
@@ -865,11 +859,7 @@ bool Install( // NOLINT(misc-use-internal-linkage)
 
 void Remove()
 {
-    if (!g_installed)
-    {
-        pawn_binding::ClearAll();
-        return;
-    }
+    if (!g_installed) return;
     g_hookProcessMovement.Remove();
     g_hookPlayerRunCommand.Remove();
     g_hookControllerCommandSetup.Remove();
@@ -881,7 +871,6 @@ void Remove()
     g_subtickActive = false;
     g_vtHooksTried.store(false, std::memory_order_release);
     g_controllerHookTried.store(false, std::memory_order_release);
-    pawn_binding::ClearAll();
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
         for (auto& injections : g_usercmdInjections)
