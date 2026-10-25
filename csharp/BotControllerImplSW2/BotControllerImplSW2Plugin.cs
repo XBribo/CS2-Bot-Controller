@@ -314,15 +314,17 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private static string Tag(string msg) =>
         $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
 
-    // Registers the live pawn before the first recording or replay frame.
-    private bool RegisterPawnForSlot(int slot)
+    // Registers the live pawn or returns the failed stage.
+    private string? RegisterPawnForSlot(int slot)
     {
+        if (slot is < 0 or >= 64) return "Slot must be 0..63.";
         var player = Core.PlayerManager.GetPlayer(slot);
-        var pawn = player?.PlayerPawn;
-        return pawn is { IsValid: true } &&
-               BotController.SetReplayPawn(
-                   slot,
-                   ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address);
+        if (player is not { IsValid: true }) return $"Slot {slot}: controller unavailable.";
+        var pawn = player.PlayerPawn;
+        if (pawn is not { IsValid: true }) return $"Slot {slot}: pawn unavailable.";
+        return BotController.SetReplayPawn(slot, ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address)
+            ? null
+            : $"Slot {slot}: native pawn registration failed.";
     }
 
     // Returns the cached bridge state, probing once on first use.
@@ -374,7 +376,12 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             context.Reply(Tag("Usage: !record [fileName]"));
             return;
         }
-        if (!RegisterPawnForSlot(player.Slot) || !BotController.StartRecord(player.Slot))
+        if (RegisterPawnForSlot(player.Slot) is { } failure)
+        {
+            context.Reply(Tag(failure));
+            return;
+        }
+        if (!BotController.StartRecord(player.Slot))
         {
             context.Reply(Tag("Failed to start recording."));
             return;
@@ -460,9 +467,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             context.Reply(Tag("Replay is still loading on that slot."));
             return;
         }
-        if (BotController.IsReplaying(botSlot) || !RegisterPawnForSlot(botSlot))
+        if (BotController.IsReplaying(botSlot))
         {
-            context.Reply(Tag("Replay target unavailable."));
+            context.Reply(Tag($"Slot {botSlot}: replay already running."));
+            return;
+        }
+        if (RegisterPawnForSlot(botSlot) is { } failure)
+        {
+            context.Reply(Tag(failure));
             return;
         }
         ulong generation = BotController.PawnGeneration(botSlot);

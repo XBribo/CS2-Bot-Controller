@@ -142,15 +142,18 @@ public partial class BotControllerPlugin : BasePlugin
         return null;
     }
 
-    // Registers the live pawn before the first recording or replay frame.
-    private static bool RegisterPawnForSlot(int slot)
+    // Resolves the slot directly without GetPlayers enumeration filters.
+    private static string? RegisterPawnForSlot(int slot)
     {
-        var player = ControllerForSlot(slot);
-        if (player is not { IsValid: true } ||
-            player.PlayerPawn is not { IsValid: true, Value.IsValid: true })
-            return false;
+        if (slot is < 0 or >= 64) return "Slot must be 0..63.";
+        var player = Utilities.GetPlayerFromSlot(slot);
+        if (player is not { IsValid: true }) return $"Slot {slot}: controller unavailable.";
+        var pawn = player.PlayerPawn;
+        if (pawn is not { IsValid: true, Value.IsValid: true }) return $"Slot {slot}: pawn unavailable.";
 
-        return BotController.SetReplayPawn(slot, player.PlayerPawn.Value.Handle);
+        return BotController.SetReplayPawn(slot, pawn.Value.Handle)
+            ? null
+            : $"Slot {slot}: native pawn registration failed.";
     }
 
     // Starts recording under the optional file name
@@ -171,7 +174,12 @@ public partial class BotControllerPlugin : BasePlugin
             cmd.ReplyToCommand("[BotController] Usage: !record [fileName]");
             return;
         }
-        if (!RegisterPawnForSlot(player.Slot) || !BotController.StartRecord(player.Slot))
+        if (RegisterPawnForSlot(player.Slot) is { } failure)
+        {
+            cmd.ReplyToCommand($"[BotController] {failure}");
+            return;
+        }
+        if (!BotController.StartRecord(player.Slot))
         {
             cmd.ReplyToCommand("[BotController] Failed to start recording.");
             return;
@@ -255,9 +263,14 @@ public partial class BotControllerPlugin : BasePlugin
             cmd.ReplyToCommand("[BotController] Replay is still loading on that slot.");
             return;
         }
-        if (BotController.IsReplaying(botSlot) || !RegisterPawnForSlot(botSlot))
+        if (BotController.IsReplaying(botSlot))
         {
-            cmd.ReplyToCommand("[BotController] Replay target unavailable.");
+            cmd.ReplyToCommand($"[BotController] Slot {botSlot}: replay already running.");
+            return;
+        }
+        if (RegisterPawnForSlot(botSlot) is { } failure)
+        {
+            cmd.ReplyToCommand($"[BotController] {failure}");
             return;
         }
         ulong generation = BotController.PawnGeneration(botSlot);
