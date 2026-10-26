@@ -21,7 +21,7 @@ INetworkMessageInternal* g_voiceMessage = nullptr;
 
 } // namespace
 
-// Store engine interfaces and reset the cached voice message type
+// Stores interfaces and resets the cached message type.
 void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages)
 {
     g_engine = engine;
@@ -31,7 +31,7 @@ void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages)
 
 namespace {
 
-// Resolve the CSVCMsg_VoiceData network message type lazily
+// Resolves the voice message type on demand.
 INetworkMessageInternal* FindVoiceMessage()
 {
     if (g_voiceMessage) return g_voiceMessage;
@@ -45,7 +45,7 @@ INetworkMessageInternal* FindVoiceMessage()
 
 } // namespace
 
-// Return the current voice sender setup status
+// Reports voice setup status.
 int GetStatus()
 {
     if (!g_engine) return -1;
@@ -54,10 +54,10 @@ int GetStatus()
     return 0;
 }
 
-// Return whether all voice sender dependencies are available
+// Checks voice availability.
 bool IsAvailable() { return GetStatus() == 0; }
 
-// Allocate and send one CSVCMsg_VoiceData frame to a recipient
+// Allocates and sends a voice frame.
 int SendVoiceFrame(int recipientSlot,
                    int senderClient,
                    uint64_t senderXuid,

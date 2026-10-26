@@ -33,7 +33,7 @@ class CUserCmdBase
     virtual void unk6();
 };
 
-// Brings the protobuf message in as a base, not a member.
+// Protobuf base subobject.
 template <typename T> class CUserCmdBaseHost : public CUserCmdBase, public T
 {
 };

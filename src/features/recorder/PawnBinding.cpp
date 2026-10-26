@@ -45,7 +45,7 @@ int g_controllerTickBase = -1;
 // Checks the fixed slot table.
 bool ValidSlot(int slot) { return slot >= 0 && slot < kMaxSlots; }
 
-// Resolves both entities before touching their services.
+// Resolves the live controller, Pawn, and services.
 Binding CurrentBinding(int slot, const char** failure = nullptr)
 {
     const auto fail = [failure](const char* reason) {
@@ -79,7 +79,7 @@ Binding CurrentBinding(int slot, const char** failure = nullptr)
     return { pawn.m_pEntityInstance, services, pawnHandle, controllerHandle, controller.m_pEntityInstance };
 }
 
-// Invalidates stale registrations instead of following a replacement pawn.
+// Invalidates changed Pawn registrations.
 Binding RegisteredBinding(int slot)
 {
     if (!ValidSlot(slot)) return {};
@@ -98,7 +98,7 @@ Binding RegisteredBinding(int slot)
     return {};
 }
 
-// Reads inventory only from a validated, living pawn.
+// Reads a living Pawn's weapon services.
 void* ReadWeaponServices(const Binding& binding)
 {
     uint8_t lifeState = 0xFF;
@@ -143,7 +143,7 @@ bool SetReplayPawn(int slot, void* pawn)
     return true;
 }
 
-// Detaches both pawn and services without touching stored recordings.
+// Clears Pawn registration; retains recordings.
 void ClearReplayPawn(int slot)
 {
     if (!ValidSlot(slot)) return;
@@ -152,7 +152,7 @@ void ClearReplayPawn(int slot)
     g_registeredSlots.fetch_and(~(uint64_t{ 1 } << slot), std::memory_order_release);
 }
 
-// Never falls back to an unregistered pawn.
+// Resolves the registered Pawn.
 void* ResolveReplayPawn(int slot, void* services)
 {
     const Binding binding = RegisteredBinding(slot);
@@ -160,7 +160,7 @@ void* ResolveReplayPawn(int slot, void* services)
 }
 
 namespace pawn_binding {
-// Caches the same player pawn field used by the managed providers.
+// Caches controller and Pawn offsets.
 bool Init()
 {
     g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
@@ -173,10 +173,10 @@ bool Init()
 // Returns only the registered, live services.
 void* ServicesForSlot(int slot) { return RegisteredBinding(slot).services; }
 
-// Ordinary weapon requests do not create replay registrations.
+// Reads live weapon services.
 void* CurrentWeaponServices(int slot) { return ReadWeaponServices(CurrentBinding(slot)); }
 
-// Replay weapon queries retain the registered pawn's identity checks.
+// Reads registered weapon services.
 void* RegisteredWeaponServices(int slot) { return ReadWeaponServices(RegisteredBinding(slot)); }
 
 // New input requests explicitly bind the current pawn.
@@ -186,7 +186,7 @@ bool BindCurrentPawn(int slot)
     return SetReplayPawn(slot, CurrentBinding(slot).pawn);
 }
 
-// Reads a movement or weapon service's owner without adopting its pawn.
+// Reads the service's owner slot.
 int ServicesToSlot(void* services)
 {
     void* pawn = nullptr;
@@ -194,7 +194,7 @@ int ServicesToSlot(void* services)
     return ControllerSlotForPawn(pawn);
 }
 
-// Uses the same registration as the enclosing movement callback.
+// Resolves the registered callback's weapon services.
 void* ServicesToWeaponServices(int slot, void* services)
 {
     const Binding binding = RegisteredBinding(slot);
@@ -217,7 +217,7 @@ bool CommandSimulationTick(int slot, void* services, const PlayerCommand& comman
     return true;
 }
 
-// Checks only registered slots, once per provider tick.
+// Checks registered Pawn sessions.
 void Refresh()
 {
     uint64_t slots = g_registeredSlots.load(std::memory_order_acquire);
@@ -228,14 +228,14 @@ void Refresh()
     }
 }
 
-// Ends sessions on map changes and provider unload.
+// Ends sessions on map change or provider unload.
 void Reset()
 {
     for (int slot = 0; slot < kMaxSlots; ++slot)
         motion_recorder::InvalidateSlot(slot);
 }
 
-// Clears registrations after callbacks have drained.
+// Clears registrations after callbacks drain.
 void ClearAll()
 {
     for (int slot = 0; slot < kMaxSlots; ++slot)

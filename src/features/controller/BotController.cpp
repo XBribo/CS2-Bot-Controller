@@ -36,7 +36,7 @@ cs2_sdk::hooks::NativeHook<void, void*> g_hookUpkeep;
 cs2_sdk::hooks::NativeHook<void, void*> g_hookUpdateLookAngles;
 cs2_sdk::hooks::NativeHook<void, void*, float*> g_hookSetEyeAngles;
 
-// Normalizes an angle to the engine's expected [-180, 180) range.
+// Normalizes angles to [-180, 180).
 float NormalizeDeg(float angle)
 {
     angle = std::fmod(angle + 180.0F, 360.0F);
@@ -44,7 +44,7 @@ float NormalizeDeg(float angle)
     return angle - 180.0F;
 }
 
-// Publishes replay angles through the native engine function.
+// Publishes replay eye angles.
 bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
 {
     if (!pawn || !ReplayViewReady()) return false;
@@ -54,7 +54,7 @@ bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
     return true;
 }
 
-// Skip the Bot tick under All lock OR while replaying
+// Skips AI during All locks or replay.
 KHook::Return<void> HookedUpdate(void* bot) noexcept
 {
     if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
@@ -68,7 +68,7 @@ KHook::Return<void> HookedUpdate(void* bot) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Blocks native view updates owned by a lock or replay.
+// Blocks AI view updates during locks or replay.
 KHook::Return<void> HookedViewUpdate(void* bot) noexcept
 {
     if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
@@ -88,7 +88,7 @@ KHook::Return<void> HookedSetEyeAngles(void* pawn, float* angle) noexcept
 }
 } // namespace
 
-// Installs AI hooks even when replay view support is unavailable.
+// Installs AI hooks and optional view hooks.
 bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
     g_addrUpdate = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::Update", errorOut, errorOutLen);
@@ -177,10 +177,10 @@ void* UpdateAddress() { return g_addrUpdate; }
 void* UpkeepAddress() { return g_addrUpkeep; }
 void* UpdateLookAnglesAddress() { return g_addrUpdateLookAngles; }
 
-// Requires the native eye-angle hook on both platforms.
+// Checks the eye-angle hook.
 bool ReplayViewReady() { return g_hookSetEyeAngles.Active(); }
 
-// Stops only the replay whose eye-angle update failed.
+// Stops the affected replay on view failure.
 bool ApplyReplayEyeAngles(int slot, void* pawn, float pitch, float yaw)
 {
     if (!motion_recorder::IsReplaying(slot)) return false;

@@ -30,7 +30,7 @@ cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookOnUpdate;
 bool g_installed = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 
-// Per-slot last seen m_isInitialDelay, for rising-edge detection
+// Previous m_isInitialDelay for entry detection.
 uint8_t g_lastInitDelay[64] = { 0 };
 
 // Run "buy <alias>" server-side for a bot slot
@@ -44,7 +44,7 @@ void IssueBuy(int slot, const char* alias)
     dispatch::g_gameClients->ClientCommand(CPlayerSlot(slot), cmd);
 }
 
-// Execute a slot's whole plan in one tick, then mark vanilla done
+// Executes the buy plan and finishes native buying.
 void ApplyPlan(void* self, int slot)
 {
     BuyPlan plan;
@@ -54,12 +54,12 @@ void ApplyPlan(void* self, int slot)
         for (const auto& alias : plan.items)
             IssueBuy(slot, alias.c_str());
 
-    // Tell vanilla buying is finished so it stops here and exits state
+    // Finish native buying.
     const uint8_t done = 1;
     WriteField(self, tg::g_buyDoneBuying, done);
 }
 
-// Applies the custom buy plan before vanilla advances its state.
+// Applies the plan before native buying.
 KHook::Return<void> HookedOnUpdate(void* self, void* me) noexcept
 {
     int slot = CCSBotToSlot(me);
@@ -74,7 +74,7 @@ KHook::Return<void> HookedOnUpdate(void* self, void* me) noexcept
     {
         return { KHook::Action::Ignore };
     }
-    // Rising edge of m_isInitialDelay = freshly entered BuyState this round
+    // Rising m_isInitialDelay marks BuyState entry.
     if (init && !g_lastInitDelay[slot]) ApplyPlan(self, slot);
     g_lastInitDelay[slot] = init;
 

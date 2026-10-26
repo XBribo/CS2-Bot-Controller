@@ -1,11 +1,11 @@
-// Read a bot's BotProfile (personality / aim / weapon preference) by slot.
+// Bot profile access by slot.
 
 #pragma once
 
 #include <cstdint>
 
 namespace cs2bc {
-// Mirror of the fields read from BotProfile. Fixed layout for C-ABI / C#.
+// Fixed BotProfile layout for C ABI and C#.
 #pragma pack(push, 4)
 struct BotProfileData
 {
@@ -25,8 +25,7 @@ struct BotProfileData
 #pragma pack(pop)
 
 namespace bot_profile {
-// Read the profile of the bot currently on this slot. Returns false if
-// the slot has no live bot or the profile pointer is null.
+// Reads the current Bot profile; false if unavailable.
 bool ReadProfile(int slot, BotProfileData& out);
 } // namespace bot_profile
 } // namespace cs2bc

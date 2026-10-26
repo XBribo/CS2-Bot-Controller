@@ -56,7 +56,7 @@ struct RecordState
     std::atomic<int> currentDef{ -1 };
     std::mutex mu; // guards ticks/subs/pending/pre
 
-    // Resets one command while retaining unresolved drop candidates.
+    // Resets the command; retains pending drops.
     void ResetCommand()
     {
         pendingSubs.clear();
@@ -69,7 +69,7 @@ struct RecordState
         pendingDropEvent.weaponDefIndex = -1;
     }
 
-    // Ends all incomplete capture state for a pawn session.
+    // Clears pending session capture.
     void ResetPending()
     {
         ResetCommand();
@@ -144,7 +144,7 @@ constexpr int kMolotovDef = 46;
 constexpr int kIncendiaryDef = 48;
 
 bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
-// Rejects missing or corrupted engine release transforms before replay consumes them.
+// Validates the drop release transform.
 bool ValidReleasePose(const float* position, const float* quaternion)
 {
     for (int i = 0; i < 3; ++i)
@@ -158,11 +158,11 @@ bool ValidReleasePose(const float* position, const float* quaternion)
     return norm > 0.5F && norm < 1.5F;
 }
 static int ReplayWeaponSelectForDef(const WeaponSession& session, int recordedDef);
-// Publishes the frame's pawn state before the native drop command reads it.
+// Restores Pawn state before native drops.
 bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& event);
 void* ResolveSceneNode(void* entity);
 
-// Returns whether an item definition is either faction's fire grenade
+// Checks either faction's fire grenade.
 bool IsFireGrenadeDef(int defIndex) { return defIndex == kMolotovDef || defIndex == kIncendiaryDef; }
 
 // Prefers the recorded fire grenade
@@ -175,7 +175,7 @@ void* FindReplayWeaponByDef(void* ws, int recordedDef)
     return weapon_locker_hooks::FindWeaponByDef(ws, alternateDef);
 }
 
-// Revalidates ownership without dereferencing cached weapon services.
+// Revalidates drop ownership.
 bool WeaponSessionCurrent(const WeaponSession& session)
 {
     if (!ValidSlot(session.slot) || !session.weaponServices || session.generation != PawnGeneration(session.slot)) return false;
@@ -183,7 +183,7 @@ bool WeaponSessionCurrent(const WeaponSession& session)
     return weapons == session.weaponServices && session.generation == PawnGeneration(session.slot);
 }
 
-// Captures only an explicitly registered recording or replay session.
+// Resolves the registered capture session.
 WeaponSession CurrentWeaponSession(void* weaponServices)
 {
     void* pawn = nullptr;
@@ -204,7 +204,7 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
 
     ReplayDropEvent recordedEvent{};
     recordedEvent.weaponDefIndex = -1;
-    // Keep the raw definition for detachment checks, but record knives by role.
+    // Keep raw definitions for detach checks; normalize recorded knives.
     if (IsRecording(recordingSlot))
     {
         recordedEvent.weaponDefIndex =
@@ -240,7 +240,7 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
     return { KHook::Action::Ignore };
 }
 
-// Commits physical detachments only to the original pawn session.
+// Commits detachments to the original Pawn session.
 KHook::Return<void> DropWeaponPost(void*, void*, void*, const float*) noexcept
 {
     const auto [session, weapon, weaponDefIndex, recordedEvent] = g_dropFrames.back();
@@ -276,7 +276,7 @@ KHook::Return<void> DropWeaponPost(void*, void*, void*, const float*) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Installs the drop hook from a live weapon-services vtable once
+// Hooks drops from the live weapon-services vtable.
 void EnsureDropWeaponHook(void* weaponServices)
 {
     if (!weaponServices || g_dropHookTried.exchange(true, std::memory_order_acq_rel)) return;
@@ -297,7 +297,7 @@ void EnsureDropWeaponHook(void* weaponServices)
     g_addrDropWeapon = nullptr;
 }
 
-// Reads a three-float engine vector through one guarded memory operation.
+// Reads an engine vector with one guarded copy.
 bool ReadVector3(void* base, int offset, float& x, float& y, float& z)
 {
     float values[3] = {};
@@ -323,7 +323,7 @@ void* ResolveSceneNode(void* entity)
     return GuardedRead(body, tg::g_bodySceneNode, node) ? node : nullptr;
 }
 
-// Tracks the source item while the engine may split a stacked grenade into a new entity.
+// Tracks stacked-grenade splits during drops.
 KHook::Return<char> DropReleaseOuterPre(void* weaponServices, void* weapon, int, const float*) noexcept
 {
     DropReleaseFrame frame{};
@@ -334,14 +334,14 @@ KHook::Return<char> DropReleaseOuterPre(void* weaponServices, void* weapon, int,
     return { KHook::Action::Ignore };
 }
 
-// Balances the per-thread drop frame after the native outer call returns.
+// Pops the drop frame after the native call.
 KHook::Return<char> DropReleaseOuterPost(void*, void*, int, const float*) noexcept
 {
     if (!g_dropReleaseFrames.empty()) g_dropReleaseFrames.pop_back();
     return { KHook::Action::Ignore };
 }
 
-// Associates the transform builder with the actual item, including split grenades.
+// Binds release transforms to the dropped item.
 KHook::Return<char> DropReleaseBuilderPre(void* weapon, void*) noexcept
 {
     if (!g_dropReleaseFrames.empty())
@@ -352,7 +352,7 @@ KHook::Return<char> DropReleaseBuilderPre(void* weapon, void*) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Captures the release pose on recording or applies it to the matching replay drop.
+// Captures or restores the drop release pose.
 KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexcept
 {
     if (g_dropReleaseFrames.empty()) return { KHook::Action::Ignore };
@@ -382,7 +382,7 @@ KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexce
     return { KHook::Action::Ignore };
 }
 
-// Read a MovementSnapshot from live engine state (services -> pawn).
+// Reads a snapshot from the registered Pawn.
 bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 {
     if (!services) return false;
@@ -406,7 +406,7 @@ bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 
 } // namespace
 
-// Installs the release-pose hooks used by both recording and replay.
+// Installs drop release-pose hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform)
 {
     if (!outerDrop || !buildTransform) return false;
@@ -452,7 +452,7 @@ bool StopRecord(int slot)
     return true;
 }
 
-// Ends ownership while preserving complete data for saving or explicit reuse.
+// Ends the session and retains recorded data.
 void InvalidateSlot(int slot)
 {
     if (!ValidSlot(slot)) return;
@@ -474,7 +474,7 @@ void InvalidateSlot(int slot)
     input_injector::ClearUsercmdInjections(slot);
 }
 
-// Zero denotes an invalid slot, never a live session.
+// Session generation 0 is invalid.
 uint64_t PawnGeneration(int slot)
 {
     return ValidSlot(slot) ? g_rep[slot].generation.load(std::memory_order_acquire) : 0;
@@ -482,7 +482,7 @@ uint64_t PawnGeneration(int slot)
 
 bool IsRecording(int slot) { return ValidSlot(slot) && g_rec[slot].recording.load(std::memory_order_acquire); }
 
-// Skips recording-only work without scanning per-slot state.
+// Checks for active recordings.
 bool HasAnyRecording() { return g_recordingSlots.load(std::memory_order_acquire) != 0; }
 
 int RecordedTickCount(int slot)
@@ -501,7 +501,7 @@ int RecordedSubtickCount(int slot)
     return static_cast<int>(r.subs.size());
 }
 
-// Returns the number of complete command frames captured for a slot
+// Counts complete recorded commands.
 int RecordedCommandCount(int slot)
 {
     if (!ValidSlot(slot)) return -1;
@@ -510,7 +510,7 @@ int RecordedCommandCount(int slot)
     return static_cast<int>(r.commands.size());
 }
 
-// Counts bytes rather than protobuf entries for managed storage.
+// Recorded history size in bytes.
 int RecordedInputHistorySize(int slot)
 {
     if (!ValidSlot(slot)) return -1;
@@ -531,7 +531,7 @@ void SetCurrentDef(int slot, int defIndex)
     if (ValidSlot(slot)) g_rec[slot].currentDef.store(defIndex, std::memory_order_relaxed);
 }
 
-// Snapshots command entry before queued drops or native movement.
+// Captures state before queued drops and movement.
 bool OnRecordCommandPre(int slot, void* services)
 {
     if (!ValidSlot(slot) || !services) return false;
@@ -565,7 +565,7 @@ void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
         r.pendingSubs.push_back(moves[i]);
 }
 
-// Stashes input until the matching PlayerRunCommand returns.
+// Holds input until command completion.
 void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history)
 {
     if (!ValidSlot(slot)) return;
@@ -578,7 +578,7 @@ void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::stri
     r.havePendingCommand = true;
 }
 
-// Commits one complete command without holding locks across engine calls.
+// Commits one command; engine calls run unlocked.
 void OnRecordCommandPost(int slot, void* services)
 {
     if (!ValidSlot(slot) || !services) return;
@@ -643,7 +643,7 @@ void OnRecordCommandPost(int slot, void* services)
             r.subs.push_back(sm);
         r.ticks.push_back(t);
         r.commands.push_back(r.pendingCommand);
-        // Keep optional history framing outside the ABI 24 command layout.
+        // Keep history separate from the ABI 24 command layout.
         const auto historySize = static_cast<uint32_t>(r.pendingHistory.size());
         for (unsigned shift = 0; shift < 32; shift += 8)
             r.inputHistory.push_back(static_cast<uint8_t>(historySize >> shift));
@@ -654,7 +654,7 @@ void OnRecordCommandPost(int slot, void* services)
 
 int CopyTicks(int slot, ReplayTick* out, int maxTicks) { return CopyTicksRange(slot, 0, out, maxTicks); }
 
-// Copies one bounded range without locking for the full recording length.
+// Copies a bounded tick range.
 int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks)
 {
     if (!ValidSlot(slot) || start < 0 || !out || maxTicks <= 0) return 0;
@@ -668,7 +668,7 @@ int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks)
 
 int CopySubticks(int slot, SubtickMove* out, int maxSubticks) { return CopySubticksRange(slot, 0, out, maxSubticks); }
 
-// Copies one bounded subtick range from the stopped recording.
+// Copies a bounded recorded subtick range.
 int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks)
 {
     if (!ValidSlot(slot) || start < 0 || !out || maxSubticks <= 0) return 0;
@@ -683,7 +683,7 @@ int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks)
 // Copies captured command frames into a caller-owned buffer
 int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands) { return CopyCommandsRange(slot, 0, out, maxCommands); }
 
-// Copies one bounded command range from the stopped recording.
+// Copies a bounded recorded command range.
 int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands)
 {
     if (!ValidSlot(slot) || start < 0 || !out || maxCommands <= 0) return 0;
@@ -695,7 +695,7 @@ int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxC
     return n;
 }
 
-// Copies serialized histories without exposing native protobuf objects.
+// Copies serialized input history.
 int CopyInputHistoryRange(int slot, int start, uint8_t* out, int maxBytes)
 {
     if (!ValidSlot(slot) || start < 0 || !out || maxBytes <= 0) return 0;
@@ -729,7 +729,7 @@ bool LoadReplay(int slot,
             return false;
         }
 
-        // Every frame needs a length prefix, including frames with no history.
+        // Each frame has a length prefix, even when empty.
         if (inputHistorySize > 0 && static_cast<size_t>(tickCount) > static_cast<size_t>(inputHistorySize) / sizeof(uint32_t))
             return false;
 
@@ -842,7 +842,7 @@ bool StopReplay(int slot)
 
 bool IsReplaying(int slot) { return ValidSlot(slot) && g_rep[slot].playing.load(std::memory_order_acquire); }
 
-// Skips replay-only work without dereferencing engine objects.
+// Checks for active replays.
 bool HasAnyReplay() { return g_replayingSlots.load(std::memory_order_acquire) != 0; }
 
 int ReplayCursor(int slot)
@@ -861,7 +861,7 @@ int ReplayTotal(int slot)
     return static_cast<int>(p.ticks.size());
 }
 
-// Keeps the completed-frame query stable when playback wraps to the first command.
+// Keeps completed-frame queries stable across loops.
 bool CurrentReplayTick(int slot, ReplayTick& out)
 {
     if (!ValidSlot(slot)) return false;
@@ -875,7 +875,7 @@ bool CurrentReplayTick(int slot, ReplayTick& out)
     return true;
 }
 
-// Assembles one complete PlayerRunCommand input frame from parallel replay buffers
+// Assembles the next replay command.
 bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFrame& out)
 {
     out = {};
@@ -953,7 +953,7 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
     const WeaponSession session{ slot, generation, services, ws };
     if (!WeaponSessionCurrent(session)) return false;
 
-    // Resolve selections only against this replay's registered inventory.
+    // Resolve the registered replay inventory.
     if (out.rawWeaponSelect > 0)
     {
         void* weapon = FindReplayWeaponByDef(ws, out.rawWeaponSelect);
@@ -962,7 +962,7 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
     }
     else if (p.needsInitialTeleport.load(std::memory_order_acquire) || recordedWeaponChanged)
     {
-        // Preserve selections issued through client commands rather than UserCmd.
+        // Preserve client-command weapon selections.
         out.weaponSelect = ReplayWeaponSelectForDef(session, recordedDef);
     }
     return IsReplaying(slot) && WeaponSessionCurrent(session);
@@ -981,7 +981,7 @@ bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
     return true;
 }
 
-// Ordinary switches support any live pawn and respect selection hooks.
+// Switches a live Pawn through selection hooks.
 bool SwitchWeaponByDef(int slot, int defIndex)
 {
     if (!ValidSlot(slot) || defIndex < 0 || IsReplaying(slot)) return false;
@@ -994,7 +994,7 @@ bool SwitchWeaponByDef(int slot, int defIndex)
     return weapon_locker_hooks::SelectWeapon(ws, weapon);
 }
 
-// Active sessions query their registration; ordinary queries read the live pawn.
+// Queries registered sessions or the current live Pawn.
 int ActiveWeaponDefForSlot(int slot)
 {
     if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
@@ -1005,7 +1005,7 @@ int ActiveWeaponDefForSlot(int slot)
     return weapon_locker_hooks::ActiveWeaponDef(ws);
 }
 
-// Treats CT and T fire grenades as the same replay weapon type
+// Matches CT and T fire grenades.
 bool ReplayWeaponDefsMatch(int firstDef, int secondDef)
 {
     return firstDef == secondDef || (IsFireGrenadeDef(firstDef) && IsFireGrenadeDef(secondDef));
@@ -1013,7 +1013,7 @@ bool ReplayWeaponDefsMatch(int firstDef, int secondDef)
 
 namespace {
 
-// Selects the recorded weapon when it differs from the active item.
+// Selects the recorded weapon as needed.
 int ReplayWeaponSelectForDef(const WeaponSession& session, int recordedDef)
 {
     if (!weapon_locker_hooks::WeaponHooksReady() || !WeaponSessionCurrent(session)) return -1;
@@ -1021,7 +1021,7 @@ int ReplayWeaponSelectForDef(const WeaponSession& session, int recordedDef)
 
     void* ws = session.weaponServices;
 
-    // Already holding the recorded weapon -> no switch
+    // Skip the active weapon.
     const int activeDef = weapon_locker_hooks::ActiveWeaponDef(ws);
     if (!WeaponSessionCurrent(session) || ReplayWeaponDefsMatch(activeDef, recordedDef)) return -1;
 
@@ -1061,7 +1061,7 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
     return true;
 }
 
-// Dispatches the same client command path used when a player presses G
+// Drops through the native client-command path.
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event)
 {
     const int weaponDefIndex = event.weaponDefIndex;
@@ -1094,20 +1094,20 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
     return true;
 }
 
-// Reports whether the native weapon-service drop hook is installed
+// Checks the native drop hook.
 bool DropHookReady() { return g_dropHookReady.load(std::memory_order_acquire); }
 
-// Write replay velocity onto the pawn. View replay is driven by SetEyeAngles.
+// Restores replay velocity.
 namespace {
 
-// Writes velocity using the pawn validated by the current replay phase.
+// Restores the registered Pawn's velocity.
 void WriteVelocityToPawn(void* pawn, const MovementSnapshot& s)
 {
     if (!pawn) return;
     WriteVector3(pawn, tg::g_entAbsVelocity, s.velX, s.velY, s.velZ);
 }
 
-// Writes replay origin through the current body-component scene node.
+// Restores scene-node origin.
 void WriteSceneNodeOrigin(void* pawn, const MovementSnapshot& s)
 {
     if (!pawn) return;
@@ -1119,7 +1119,7 @@ void WriteSceneNodeOrigin(void* pawn, const MovementSnapshot& s)
     TryWriteMemoryGuarded(node, tg::g_nodeAbsOrigin, values, sizeof(values));
 }
 
-// Restores duck and ladder state through guarded field writes.
+// Restores duck and ladder state.
 void WriteMovementServiceState(void* services, const MovementSnapshot& s)
 {
     WriteField(services, tg::g_servicesDuckAmount, s.duckAmount);
@@ -1130,7 +1130,7 @@ void WriteMovementServiceState(void* services, const MovementSnapshot& s)
     WriteField(services, tg::g_servicesDesiresDuck, s.desiresDuck);
 }
 
-// Normalizes replay yaw to the engine's signed degree range
+// Normalizes replay yaw.
 float NormalizeReplayYaw(float yaw)
 {
     yaw = std::fmod(yaw + 180.0F, 360.0F);
@@ -1138,7 +1138,7 @@ float NormalizeReplayYaw(float yaw)
     return yaw - 180.0F;
 }
 
-// Restores frame-entry angles read by the native grenade parameter cache.
+// Restores entry angles for grenade parameter caching.
 void WriteRawViewAnglesToPawn(void* pawn, float pitch, float yaw)
 {
     const float normalizedYaw = NormalizeReplayYaw(yaw);
@@ -1146,7 +1146,7 @@ void WriteRawViewAnglesToPawn(void* pawn, float pitch, float yaw)
     WriteVector3(pawn, tg::g_pawnEyeAngles, pitch, normalizedYaw, 0.0F);
 }
 
-// Seeds view history from the frame boundary, not the command's later angle.
+// Seeds view history with command-entry angles.
 void WriteReplayViewHistory(void* services, void* pawn, float pitch, float yaw)
 {
     const float normalizedYaw = NormalizeReplayYaw(yaw);
@@ -1154,7 +1154,7 @@ void WriteReplayViewHistory(void* services, void* pawn, float pitch, float yaw)
     WriteVector3(services, tg::g_servicesOldViewAngles, pitch, normalizedYaw, 0.0F);
 }
 
-// Restores drop inputs without consuming first-command positioning.
+// Restores drop inputs; retains initial replay positioning.
 bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& event)
 {
     const uint64_t generation = PawnGeneration(slot);
@@ -1168,10 +1168,10 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
         !SafeRead(vtable, tg::g_vtIdxTeleport * static_cast<int>(sizeof(void*)), target) || !target)
         return false;
 
-    // Teleport updates engine spatial state even for a stationary or first-frame drop.
+    // Teleport updates spatial state for idle drops.
     const float position[3] = { pre.originX, pre.originY, pre.originZ };
     const float velocity[3] = { pre.velX, pre.velY, pre.velZ };
-    // Align grounded idle body facing with the recorded drop pose before the native bone read.
+    // Align idle body facing before the native bone read.
     const bool alignStationaryBody = (pre.entityFlags & tg::kFlOnGround) != 0 && std::fabs(pre.velX) < 0.01F && std::fabs(pre.velY) < 0.01F;
     const bool hasRecordedBodyYaw = (event.vectorFlags & ReplayDropBodyYaw) != 0 && std::isfinite(event.target[0]);
     const float bodyYaw = hasRecordedBodyYaw ? event.target[0] : pre.yaw;
@@ -1200,7 +1200,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
 }
 } // namespace
 
-// Seeds pawn state before native command simulation.
+// Restores Pawn state before simulation.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
 {
     if (!ValidSlot(slot) || !services || !g_rep[slot].playing.load(std::memory_order_acquire)) return false;
@@ -1210,7 +1210,7 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
     if (!pawn || generation != PawnGeneration(slot)) return false;
     if (g_rep[slot].needsInitialTeleport.exchange(false, std::memory_order_acq_rel))
     {
-        // Publish the initial origin through the engine even when movement is idle.
+        // Publish the initial origin through Teleport.
         void** vtable = nullptr;
         void* target = nullptr;
         if (tg::g_vtIdxTeleport < 0 || !SafeRead(pawn, 0, vtable) || !vtable ||
@@ -1242,7 +1242,7 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
     return IsReplaying(slot) && generation == PawnGeneration(slot);
 }
 
-// Restores one command's end state and selects the next frame immediately.
+// Restores end state and advances the replay cursor.
 void OnReplayCommandPost(int slot, void* services)
 {
     if (!ValidSlot(slot) || !services) return;
@@ -1267,7 +1267,7 @@ void OnReplayCommandPost(int slot, void* services)
     {
         WriteField(pawn, tg::g_entMoveType, t.post.moveType);
         WriteField(pawn, tg::g_entActualMoveType, t.post.actualMoveType);
-        // Merge ground + ducking bits from the recording, keep the rest live.
+        // Restore only ground and ducking flags.
         uint32_t live = 0;
         uint32_t mask = tg::kFlOnGround | tg::kFlDucking;
         if (SafeRead(pawn, tg::g_entFlags, live))
@@ -1278,7 +1278,7 @@ void OnReplayCommandPost(int slot, void* services)
         if (!bot_controller_hooks::ApplyReplayEyeAngles(slot, pawn, t.post.pitch, t.post.yaw)) return;
     }
 
-    // SetEyeAngles calls the engine; reacquire ownership after that boundary.
+    // Revalidate ownership after SetEyeAngles.
     pawn = input_injector::ResolveReplayPawn(slot, services);
     if (!pawn || !IsReplaying(slot) || generation != PawnGeneration(slot)) return;
     WriteVelocityToPawn(pawn, t.post);

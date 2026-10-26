@@ -21,10 +21,10 @@ void* UpdateAddress();
 void* UpkeepAddress();
 void* UpdateLookAnglesAddress();
 
-// Reports whether native replay eye-angle publishing is available.
+// Checks replay view support.
 bool ReplayViewReady();
 
-// Publishes eye angles or stops the affected replay on failure.
+// Publishes eye angles; stops replay on failure.
 bool ApplyReplayEyeAngles(int slot, void* pawn, float pitch, float yaw);
 } // namespace bot_controller_hooks
 } // namespace cs2bc

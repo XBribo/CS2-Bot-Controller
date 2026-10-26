@@ -8,32 +8,32 @@ namespace cs2bc {
 class BotControllerPlugin : public ISmmPlugin
 {
   public:
-    // Rolls back partially installed features when loading fails.
+    // Loads features with rollback on failure.
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
-    // Drains hooks before releasing feature state, interfaces, and logging.
+    // Drains hooks, then releases plugin state.
     bool Unload(char* error, size_t maxlen) override;
-    // Accepts a plugin pause request.
+    // Handles pause requests.
     bool Pause(char* error, size_t maxlen) override;
-    // Accepts a plugin resume request.
+    // Handles resume requests.
     bool Unpause(char* error, size_t maxlen) override;
-    // No additional cross-plugin initialization is needed.
+    // Handles plugin-load completion.
     void AllPluginsLoaded() override;
 
-    // Returns plugin author metadata.
+    // Plugin author.
     const char* GetAuthor() override;
-    // Returns the plugin name.
+    // Plugin name.
     const char* GetName() override;
-    // Returns the plugin description.
+    // Plugin description.
     const char* GetDescription() override;
-    // Returns the plugin project URL.
+    // Project URL.
     const char* GetURL() override;
-    // Returns the plugin license.
+    // Plugin license.
     const char* GetLicense() override;
-    // Returns the version supplied by the build.
+    // Build version.
     const char* GetVersion() override;
-    // Returns the compilation date and time.
+    // Build timestamp.
     const char* GetDate() override;
-    // Returns the plugin log tag.
+    // Log tag.
     const char* GetLogTag() override;
 
   private:

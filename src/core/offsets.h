@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 
 namespace cs2bc::offsets {
-// Engine Teleport virtual slot, required for replay start positioning.
+// Teleport slot for replay positioning.
 #ifdef _WIN32
 inline int g_vtIdxTeleport = 165;
 #else
@@ -13,7 +13,7 @@ inline int g_vtIdxTeleport = 164;
 #endif
 // ---- CCSBot ----
 
-// AI-ran-this-tick byte flag; set to 1 to fake a completed tick
+// AI tick-complete flag; 1 skips the native tick.
 inline int g_botAiTickedFlag = -1;
 // CCSBot -> pawn (CCSPlayerPawn*)
 inline int g_botPawn = -1;
@@ -48,13 +48,13 @@ inline int g_buyDoneBuying = 0x18;
 inline int g_entIdentity = -1;
 // CEntityIdentity -> m_EHandle (low 15 bits = entity index)
 inline int g_entIdentityEHandle = 0x10;
-// m_MoveType (MoveType_t, 1 byte) — restored each replay tick
+// m_MoveType (MoveType_t, 1 byte); restored during replay.
 inline int g_entMoveType = -1;
-// m_nActualMoveType (MoveType_t, 1 byte) — networked move type
+// m_nActualMoveType (MoveType_t, 1 byte); networked.
 inline int g_entActualMoveType = -1;
 // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
 inline int g_entFlags = -1;
-// m_fFlags bit masks restored on replay (constants, not offsets)
+// Replay-restored m_fFlags bits.
 inline constexpr unsigned kFlOnGround = 1U << 0;
 inline constexpr unsigned kFlDucking = 1U << 1;
 // m_vecAbsVelocity
@@ -81,7 +81,7 @@ inline int g_pawnOriginalController = -1;
 inline int g_pawnViewAngle = -1;
 // CCSPlayerPawn -> v_anglePrevious (QAngle)
 inline int g_pawnViewAnglePrevious = -1;
-// m_angEyeAngles (QAngle) — written each replay tick alongside v_angle
+// m_angEyeAngles (QAngle); restored with v_angle.
 inline int g_pawnEyeAngles = -1;
 
 // ---- CCSPlayer_WeaponServices ----
@@ -98,7 +98,7 @@ inline int g_weaponItemDefIndex = -1;
 
 // m_pawn (CCSPlayerPawn*)
 inline int g_servicesPawn = 56;
-// m_nButtons.m_pButtonStates[0..2] — engine button state block (CInButtonState)
+// m_nButtons.m_pButtonStates[0..2] (CInButtonState).
 inline int g_servicesButtons = -1; // states[0] (pressed)
 inline int g_servicesButtons1 = -1; // states[1]
 inline int g_servicesButtons2 = -1; // states[2]
@@ -133,10 +133,10 @@ inline int g_vtIdxDropWeapon = 28;
 inline int g_vtIdxDropWeapon = 29;
 #endif
 
-// Overrides platform offsets; missing entries retain their current values.
+// Overrides supplied platform offsets.
 void LoadFromGamedata(const nlohmann::json& gamedata);
 
-// Resolves every required Schema-backed target or reports the first failure
+// Resolves required Schema offsets; reports the first failure.
 bool LoadFromSchema(char* error, size_t maxlen);
 
 } // namespace cs2bc::offsets

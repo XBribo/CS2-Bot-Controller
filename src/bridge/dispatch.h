@@ -18,7 +18,7 @@ enum class LockKind : int // NOLINT(performance-enum-size)
 
 namespace dispatch {
 extern IVEngineServer2* g_engine;
-// Server-side console command executor; runs "buy" for a bot slot.
+// Bot buy command executor.
 extern ISource2GameClients* g_gameClients;
 
 // arg = LockTarget int for Weapon kind

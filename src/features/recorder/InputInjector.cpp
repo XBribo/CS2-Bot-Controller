@@ -126,10 +126,10 @@ std::atomic<int64_t> g_nextUsercmdMovementId{ 1 };
 
 bool IsThrowableUtilityDef(int def) { return def >= 43 && def <= 48; }
 
-// Reports whether a slot can index the fixed replay state arrays.
+// Checks slot bounds.
 bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
 
-// Publishes whether a slot still has command overrides after a locked mutation.
+// Updates the active-input mask under lock.
 void RefreshUsercmdWorkSlot(int slot)
 {
     const uint64_t bit = uint64_t{ 1 } << slot;
@@ -146,13 +146,13 @@ float NormalizeDeg(float a)
     return a - 180.0F;
 }
 
-// Returns monotonic time in milliseconds for injection expiry checks
+// Monotonic milliseconds for input expiry.
 int64_t MonotonicMilliseconds()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// Creates an independently cancellable usercmd button injection
+// Starts button injection; returns a token.
 } // namespace
 
 int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
@@ -169,7 +169,7 @@ int64_t InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
     return id;
 }
 
-// Creates an independently cancellable persistent analog movement override
+// Starts persistent movement; returns a token.
 int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
 {
     if (!ValidSlotIndex(slot) || !std::isfinite(forwardMove) || !std::isfinite(leftMove) || !g_usercmdActive ||
@@ -186,7 +186,7 @@ int64_t StartUsercmdMovement(int slot, float forwardMove, float leftMove)
     return id;
 }
 
-// Updates one persistent analog movement override
+// Updates a movement token.
 bool UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, float leftMove)
 {
     if (!ValidSlotIndex(slot) || movementId <= 0 || !std::isfinite(forwardMove) || !std::isfinite(leftMove)) return false;
@@ -203,7 +203,7 @@ bool UpdateUsercmdMovement(int slot, int64_t movementId, float forwardMove, floa
     return false;
 }
 
-// Cancels one persistent analog movement override
+// Cancels a movement token.
 bool CancelUsercmdMovement(int slot, int64_t movementId)
 {
     if (!ValidSlotIndex(slot) || movementId <= 0) return false;
@@ -220,7 +220,7 @@ bool CancelUsercmdMovement(int slot, int64_t movementId)
     return false;
 }
 
-// Cancels one injection without affecting other active tokens
+// Cancels a button-injection token.
 bool CancelUsercmdInjection(int slot, int64_t injectionId)
 {
     if (!ValidSlotIndex(slot) || injectionId <= 0) return false;
@@ -240,7 +240,7 @@ bool CancelUsercmdInjection(int slot, int64_t injectionId)
     return false;
 }
 
-// Suppresses selected usercmd buttons until the requested duration expires
+// Suppresses buttons for a fixed duration.
 bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || durationMs <= 0 || !g_usercmdActive || motion_recorder::IsReplaying(slot)) return false;
@@ -255,7 +255,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
     return true;
 }
 
-// Creates an independently cancellable persistent usercmd suppression
+// Starts persistent suppression; returns a token.
 int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
 {
     if (!ValidSlotIndex(slot) || buttonMask == 0 || !g_usercmdActive || motion_recorder::IsReplaying(slot)) return -1;
@@ -270,7 +270,7 @@ int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
     return id;
 }
 
-// Cancels one persistent usercmd suppression by its token
+// Cancels a suppression token.
 bool CancelUsercmdSuppression(int slot, int64_t suppressionId)
 {
     if (!ValidSlotIndex(slot) || suppressionId <= 0) return false;
@@ -287,7 +287,7 @@ bool CancelUsercmdSuppression(int slot, int64_t suppressionId)
     return false;
 }
 
-// Removes every injection and suppression so replay starts without deferred input
+// Clears all pending input controls.
 void ClearUsercmdInjections(int slot)
 {
     if (!ValidSlotIndex(slot)) return;
@@ -301,7 +301,7 @@ void ClearUsercmdInjections(int slot)
     g_movementHeldMasks[slot] = 0;
 }
 
-// Queries pending input ownership without changing press/release state.
+// Checks pending input controls.
 namespace {
 
 struct UsercmdWork
@@ -311,7 +311,7 @@ struct UsercmdWork
     bool movement;
 };
 
-// Takes one consistent snapshot instead of locking once per input kind.
+// Snapshots pending input under one lock.
 UsercmdWork GetUsercmdWork(int slot)
 {
     if (!ValidSlotIndex(slot)) return {};
@@ -320,7 +320,7 @@ UsercmdWork GetUsercmdWork(int slot)
     return { !g_usercmdInjections[slot].empty(), !g_usercmdSuppressions[slot].empty(), !g_usercmdMovements[slot].empty() };
 }
 
-// Replaces Bot AI analog movement after the final command is generated
+// Applies movement to the generated command.
 bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
     if (!ValidSlotIndex(slot) || pc == nullptr || base == nullptr) return false;
@@ -373,7 +373,7 @@ bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // 
     return true;
 }
 
-// Merges active injections and emits aggregate press and release edges
+// Merges injections into press/release edges.
 bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
     if (!ValidSlotIndex(slot) || !pc || !base) return false;
@@ -427,7 +427,7 @@ bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
     return true;
 }
 
-// Removes suppressed buttons after Bot AI has produced the final command
+// Applies suppression to the generated command.
 bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
 {
     if (!ValidSlotIndex(slot) || !pc || !base) return false;
@@ -481,7 +481,7 @@ bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
     return true;
 }
 
-// Applies one recorded G-drop event through the bot client-command path
+// Applies the recorded drop command.
 void ApplyReplayDrop(int slot, void* services)
 {
     ReplayDropEvent event{};
@@ -489,10 +489,10 @@ void ApplyReplayDrop(int slot, void* services)
     motion_recorder::DropReplayEventWeapon(slot, services, event);
 }
 
-// Installs the command hook from the live movement-services vtable.
+// Hooks commands from the live services vtable.
 void EnsureVtableHooks(void* services);
 
-// Discovers command hooks and records the registered pawn's weapon service.
+// Discovers hooks and the recording's weapon services.
 KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
 {
     EnsureVtableHooks(services);
@@ -503,7 +503,7 @@ KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Includes inactive nested batches so they cannot borrow an outer context.
+// Inactive nested batches shadow outer contexts.
 CommandBatch* FindCommandBatch(int slot)
 {
     if (slot < 0 || slot >= kMaxSlots) return nullptr;
@@ -512,7 +512,7 @@ CommandBatch* FindCommandBatch(int slot)
     return nullptr;
 }
 
-// Keeps recursive commands from consuming the active command's buffers.
+// Finds the active frame for reentrancy checks.
 CommandFrame* FindCommandFrame(int slot)
 {
     if (slot < 0 || slot >= kMaxSlots) return nullptr;
@@ -523,7 +523,7 @@ CommandFrame* FindCommandFrame(int slot)
 
 // ---- PlayerRunCommand: subtick record + re-inject ----
 
-// Serializes command fields and subticks into the pending recording frame.
+// Captures command input and subticks.
 void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
     std::string history;
@@ -603,7 +603,7 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
     motion_recorder::OnCaptureCommand(slot, command, std::move(history));
 }
 
-// Applies one recorded command before the engine simulates it.
+// Applies replay input before simulation.
 bool ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
     constexpr uint64_t kGrenadeAttackMask = (1ULL << 0) | (1ULL << 11);
@@ -682,7 +682,7 @@ bool ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
         else
             base->clear_weaponselect();
 
-        // Replace the command's subtick moves with the recorded set for this tick
+        // Restore recorded subtick moves.
         base->clear_subtick_moves();
         for (int i = 0; i < frame.subtickCount; ++i)
         {
@@ -756,7 +756,7 @@ KHook::Return<void> PlayerRunCommandPre(void* services, void* cmd) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Commits exactly one command, keeping its reentrancy guard through native callbacks.
+// Commits one command under the reentrancy guard.
 KHook::Return<void> PlayerRunCommandPost(void*, void*) noexcept
 {
     const CommandFrame frame = g_commandFrames.back();
@@ -772,7 +772,7 @@ KHook::Return<void> PlayerRunCommandPost(void*, void*) noexcept
 
 // ---- OnSimulateUserCommands: per-controller batch context ----
 
-// Dispatches drops after native command setup, at the client-command boundary.
+// Applies queued drops after native command setup.
 KHook::Return<void> ControllerCommandSetupPost(void* controller) noexcept
 {
     if (g_commandBatches.empty()) return { KHook::Action::Ignore };
@@ -790,7 +790,7 @@ KHook::Return<void> ControllerCommandSetupPost(void* controller) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Resolves the controller's per-command setup independently of movement services.
+// Hooks controller command setup.
 void EnsureControllerCommandHook(void* controller)
 {
     if (!controller || g_controllerHookTried.exchange(true, std::memory_order_acq_rel)) return;
@@ -804,13 +804,13 @@ void EnsureControllerCommandHook(void* controller)
     BC_LOG_WARN("record/replay: command setup unavailable");
 }
 
-// Publishes batch ownership; individual commands own snapshots and cursor advancement.
+// Tracks batch ownership; frames advance per command.
 KHook::Return<void> SimulateUserCommandsPre(void* controller) noexcept
 {
     EnsureControllerCommandHook(controller);
     if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay())
     {
-        // Keep the matching post callback from consuming an outer frame.
+        // Pair the post callback with an inactive batch.
         g_commandBatches.push_back({ -1, nullptr });
         return { KHook::Action::Ignore };
     }
@@ -818,19 +818,19 @@ KHook::Return<void> SimulateUserCommandsPre(void* controller) noexcept
 
     void* services = pawn_binding::ServicesForSlot(slot);
 
-    // Nested batches for this slot must not consume the outer command.
+    // Guard nested batches for this slot.
     if (FindCommandBatch(slot))
     {
         g_commandBatches.push_back({ slot, nullptr });
         return { KHook::Action::Ignore };
     }
-    // Publish ownership before engine callbacks can reenter.
+    // Publish ownership before native callbacks.
     g_commandBatches.push_back({ slot, services, motion_recorder::PawnGeneration(slot) });
 
     return { KHook::Action::Ignore };
 }
 
-// Empty batches never record or consume a command frame.
+// Empty batches do not advance frames.
 KHook::Return<void> SimulateUserCommandsPost(void*) noexcept
 {
     g_commandBatches.pop_back();
@@ -884,7 +884,7 @@ bool Install( // NOLINT(misc-use-internal-linkage)
         return false;
     }
 
-    // Controller command batches can contain several PlayerRunCommand calls.
+    // A batch may contain multiple commands.
     char batchError[256] = { 0 };
     g_addrSimulateUserCommands =
         cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", batchError, sizeof(batchError));
@@ -902,7 +902,7 @@ bool Install( // NOLINT(misc-use-internal-linkage)
         BC_LOG_WARN("record/replay: batch hook failed (%s)", batchError[0] ? batchError : "KHook");
     }
 
-    // PlayerRunCommand is hooked lazily from the first live movement-services vtable.
+    // Hook PlayerRunCommand from the first live services.
     char dropReleaseError[256]{};
     void* outerDrop =
         cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "DropReleasePose::OuterDrop", dropReleaseError, sizeof(dropReleaseError));
@@ -946,7 +946,7 @@ void Remove()
     g_status = "not_attempted";
 }
 
-// Recording and replay require batch, command, and queued-client-command boundaries.
+// Checks batch, command, and command-setup hooks.
 bool RecorderReady()
 {
     if (g_batchActive && g_usercmdActive && g_hookControllerCommandSetup.Active()) return true;

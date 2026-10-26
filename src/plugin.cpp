@@ -76,7 +76,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
 
         if (!cs2bc::bot_controller_hooks::Install(gd, serverModule, error, maxlen)) return false;
 
-        // BuyController is optional; missing sig only disables buy control
+        // Missing buy signatures disable buy control.
         char buyErr[256] = { 0 };
         if (!cs2bc::buy_controller_hooks::Install(gd, serverModule, buyErr, sizeof(buyErr)))
         {
@@ -120,7 +120,7 @@ const char* BotControllerPlugin::GetLogTag() { return "BC"; }
 
 bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
 {
-    // Drain movement callbacks before releasing their recording and replay state.
+    // Drain movement callbacks before releasing sessions.
     cs2bc::input_injector::Remove();
     cs2bc::motion_recorder::ClearAll();
     cs2bc::buy_controller_hooks::Remove();

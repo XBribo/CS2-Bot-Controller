@@ -1,4 +1,4 @@
-// BotController console commands: bc_lock / bc_unlock / bc_unlock_all / bc_status.
+// BotController console commands.
 
 #include "commands.h"
 #include "dispatch.h"
@@ -28,7 +28,7 @@ namespace cs2bc {
 namespace commands {
 IVEngineServer2* g_engine = nullptr;
 
-// ClientPrintf to the calling player, or server log if from console.
+// Prints to the caller or server console.
 void PrintToCaller(const CCommandContext& context, const char* fmt, ...) // NOLINT(modernize-avoid-variadic-functions)
 {
     char buf[1024];

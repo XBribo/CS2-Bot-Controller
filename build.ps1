@@ -21,7 +21,7 @@ $DistLin = Join-Path $Root "dist/linux"
 $DistCss = Join-Path $Root "dist/CounterStrikeSharp"
 $DistSw2 = Join-Path $Root "dist/SwiftlyS2"
 
-# Default: build both platforms when no platform switch is given
+# Default to both platforms.
 if (-not ($Windows -or $Linux)) {
     $Windows = $true; $Linux = $true
 }
@@ -29,7 +29,7 @@ if (-not ($Windows -or $Linux)) {
 function Write-Step([string]$msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-Ok([string]$msg) { Write-Host "  $msg" -ForegroundColor Green }
 
-# Convert a Windows path to its WSL /mnt mount equivalent
+# Convert a Windows path to WSL.
 function ConvertTo-WslPath([string]$p) {
     $full = (Resolve-Path -LiteralPath $p).Path
     $drive = $full.Substring(0, 1).ToLower()
@@ -38,7 +38,7 @@ function ConvertTo-WslPath([string]$p) {
 }
 
 # --- Clean ---------------------------------------------------------------
-# Remove local build/dist dirs and the WSL build dir
+# Remove build and package outputs.
 if ($Clean) {
     Write-Step "Clean"
     foreach ($d in @("build", "dist")) {
@@ -52,7 +52,7 @@ if ($Clean) {
 }
 
 # --- Windows -------------------------------------------------------------
-# Configure and build the Windows DLL via Visual Studio
+# Build the Windows DLL.
 function Build-Windows {
     Write-Step "Windows"
     $build = Join-Path $Root "build"
@@ -69,7 +69,7 @@ function Build-Windows {
 }
 
 # --- Linux ---------------------------------------------------------------
-# Build the .so inside WSL, then stage the package tree back to Windows
+# Build in WSL and stage the Linux package.
 function Build-Linux {
     Write-Step "Linux (WSL: $WslDistro)"
     $srcWsl = ConvertTo-WslPath $Root
@@ -83,7 +83,7 @@ echo "BUILD_OK"
     $bash = $bash -replace "`r`n", "`n"
     wsl.exe -d $WslDistro -e bash -lc $bash | Out-Host
     if ($LASTEXITCODE) { throw "WSL linux build failed" }
-    # Copy package out of WSL into a Windows staging dir
+    # Stage the WSL package locally.
     $stage = Join-Path $Root "build/linux-package"
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
     New-Item -ItemType Directory -Force $stage | Out-Null
@@ -95,13 +95,13 @@ echo "BUILD_OK"
 }
 
 # --- Dist ----------------------------------------------------------------
-# Recreate a dist root so each artifact family is packaged independently.
+# Reset the package output directory.
 function Reset-DistRoot([string]$destRoot) {
     if (Test-Path $destRoot) { Remove-Item -Recurse -Force $destRoot }
     New-Item -ItemType Directory -Force $destRoot | Out-Null
 }
 
-# Copy the Metamod package files into a per-platform dist folder.
+# Assemble the platform's Metamod package.
 function Build-Dist([string]$packageRoot, [string]$destRoot) {
     Reset-DistRoot $destRoot
     if ($packageRoot) {
@@ -118,7 +118,7 @@ function Build-Dist([string]$packageRoot, [string]$destRoot) {
 }
 
 # --- C# plugins ----------------------------------------------------------
-# Build the shared API DLL + the BotControllerImpl provider plugin.
+# Build the CounterStrikeSharp provider and API.
 function Build-CSharp {
     Write-Step "C# (shared API + provider plugin)"
     $impl = Join-Path $Root "csharp/BotControllerImpl"
@@ -133,7 +133,7 @@ function Build-CSharp {
     return @{ Shared = $sharedDll; Plugin = $pluginDll }
 }
 
-# Deploy managed DLLs into a dist tree's CounterStrikeSharp layout.
+# Package CounterStrikeSharp assemblies.
 function Deploy-CSharp([hashtable]$csOut, [string]$destRoot) {
     if (-not $csOut) { return }
     Reset-DistRoot $destRoot
@@ -148,7 +148,7 @@ function Deploy-CSharp([hashtable]$csOut, [string]$destRoot) {
 }
 
 # --- SwiftlyS2 plugin ----------------------------------------------------
-# Build the BotControllerImplSW2 plugin for SwiftlyS2.
+# Build the SwiftlyS2 provider.
 function Build-CSharpSW2 {
     Write-Step "C# SwiftlyS2 (BotControllerImplSW2)"
     $sw2 = Join-Path $Root "csharp/BotControllerImplSW2"
@@ -180,7 +180,7 @@ Write-Step "Dist (Metamod)"
 if ($Windows) { Build-Dist $winPkg $DistWin }
 if ($Linux) { Build-Dist $linPkg $DistLin }
 
-# C# managed plugins: build once, deploy into each assembled dist tree
+# Build and package both managed providers.
 $csOut = $null; $sw2Out = $null
 if (-not $SkipCsharp) {
     $csOut = Build-CSharp

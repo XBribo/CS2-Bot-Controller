@@ -1,4 +1,4 @@
-// Read a bot's BotProfile by slot. CCSBot* -> +kBot_Profile -> members.
+// Bot profile access by slot.
 
 #include "BotProfile.h"
 #include "ccsbot_slot.h"
@@ -17,7 +17,7 @@ namespace tg = cs2bc::offsets;
 
 namespace cs2bc {
 namespace bot_profile {
-// Resolves the current bot only when its profile is requested.
+// Resolves and reads the current Bot profile.
 bool ReadProfile(int slot, BotProfileData& out)
 {
     if (slot < 0 || slot >= 64 || !g_SMAPI) return false;

@@ -4,10 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace BotControllerApi
 {
-    // Lock category.
-    //   All    - freezes both CCSBot::Update and CCSBot::Upkeep
-    //   Aim    - freezes CCSBot::Upkeep only
-    //   Weapon - locks the bot's weapon to a specific engine slot
+    // All: Update + Upkeep. Aim: Upkeep. Weapon: engine weapon slot.
     public enum LockKind
     {
         All = 0,

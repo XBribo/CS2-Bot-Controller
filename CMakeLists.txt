@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(BotController VERSION 0.8.0 LANGUAGES CXX)
 
-# The base version lives here; -DPLUGIN_VERSION overrides it for a build.
+# Override the base version with -DPLUGIN_VERSION.
 if(NOT DEFINED PLUGIN_VERSION)
     set(PLUGIN_VERSION "${PROJECT_VERSION}")
 endif()
@@ -23,7 +23,7 @@ endif()
 
 find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format clang-format.exe)
 set(BOT_CONTROLLER_FORMAT_FILES "")
-# Do not traverse the SDK's recursive dependencies when checking plugin formatting.
+# Format plugin sources only.
 foreach(extension c cc cpp cxx h hh hpp hxx inl)
     file(GLOB plugin_format_top CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/src/*.${extension}" "${CMAKE_SOURCE_DIR}/src/core/*.${extension}")
@@ -144,7 +144,7 @@ set_target_properties(
     LIBRARY_OUTPUT_DIRECTORY_DEBUG   "${BC_PACKAGE_BIN_DIR}"
 )
 
-# Stage vdf into addons/metamod + gamedata.json into addons/BotController
+# Stage the Metamod entry and gamedata.
 add_custom_command(
     TARGET BotController
     POST_BUILD

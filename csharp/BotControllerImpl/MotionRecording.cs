@@ -12,7 +12,7 @@ namespace BotControllerImplSW2;
 namespace BotControllerImpl;
 #endif
 
-// Recorded motion plus the tickrate it was captured at
+// Recorded motion and capture tickrate.
 public sealed class MotionRecording
 {
     public required int Tickrate { get; set; }
@@ -22,7 +22,7 @@ public sealed class MotionRecording
     public byte[] InputHistory { get; set; } = Array.Empty<byte>();
 }
 
-// File + capture-buffer on top of the native calls
+// Recording file storage.
 public static class MotionStore
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -82,7 +82,7 @@ public static class MotionStore
         writer.WriteEndArray();
     }
 
-    // Copies and serializes subticks in bounded batches.
+    // Serializes subticks in bounded batches.
     private static void WriteSubticks(Utf8JsonWriter writer, int slot, int total)
     {
         writer.WritePropertyName(nameof(MotionRecording.Subticks));
@@ -98,7 +98,7 @@ public static class MotionStore
         writer.WriteEndArray();
     }
 
-    // Copies and serializes commands in bounded batches.
+    // Serializes commands in bounded batches.
     private static void WriteCommands(Utf8JsonWriter writer, int slot, int total)
     {
         writer.WritePropertyName(nameof(MotionRecording.Commands));
@@ -114,7 +114,7 @@ public static class MotionStore
         writer.WriteEndArray();
     }
 
-    // Load a Brotli-compressed JSON recording from disk
+    // Loads Brotli-compressed JSON.
     public static MotionRecording LoadFromFile(string path)
     {
         using var file = File.OpenRead(path);

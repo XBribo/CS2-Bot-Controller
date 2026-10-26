@@ -11,17 +11,17 @@ namespace BotControllerApi
         // All / Aim
         bool Lock(int slot, LockKind kind);
 
-        // Weapon: lock the bot onto a specific engine weapon slot.
+        // Locks an engine weapon slot.
         bool Lock(int slot, LockTarget target);
 
         bool Unlock(int slot, LockKind kind);
 
         bool UnlockAll(LockKind kind);
 
-        // For All/Aim returns true if locked; for Weapon use GetWeaponLock.
+        // Queries All/Aim locks; weapon locks use GetWeaponLock.
         bool IsLocked(int slot, LockKind kind);
 
-        // Weapon-only query: the locked weapon slot, or None.
+        // Locked weapon slot, or None.
         LockTarget GetWeaponLock(int slot);
 
         // ---- recording ----
@@ -32,10 +32,10 @@ namespace BotControllerApi
 
         int RecordedTickCount(int slot);
 
-        // Pull a slot's recorded ticks + subticks out of memory.
+        // Copies recorded ticks and subticks.
         (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot);
 
-        // Pull aligned ticks, subticks, and command frames.
+        // Copies aligned tick, subtick, and command buffers.
         (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot);
 
@@ -44,7 +44,7 @@ namespace BotControllerApi
 
         // ---- replay ----
 
-        // Loads replay buffers without input history.
+        // Loads tick, subtick, and command buffers.
         bool LoadReplay(
             int slot,
             ReplayTick[] ticks,
@@ -60,10 +60,10 @@ namespace BotControllerApi
             byte[]? inputHistory = null)
             => inputHistory is not { Length: > 0 } && LoadReplay(slot, ticks, subs, commands);
 
-        // Move a slot's just-recorded buffers into another slot's replay buffer.
+        // Transfers recorded buffers to a replay slot.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);
 
-        // Registers the current native pawn pointer before replay starts.
+        // Registers the current native Pawn.
         bool SetReplayPawn(int slot, nint pawn);
 
         bool StartReplay(int slot, bool loop = false);
@@ -76,49 +76,48 @@ namespace BotControllerApi
 
         bool IsReplaying(int slot);
 
-        // The tick currently being replayed on this slot, for driving weapon/fire.
+        // Last completed frame; starts with frame 0.
         bool TryGetReplayTick(int slot, out ReplayTick tick);
 
         // ---- weapons ----
 
-        // Switch a Bot or player's weapon; legacy name retained for compatibility.
+        // Switches a Bot/player weapon; API name retained.
         bool SwitchBotWeapon(int slot, int defIndex);
 
-        // Active weapon definition for a Bot or player. <0 if unresolved.
+        // Bot/player weapon definition; negative if unresolved.
         int BotActiveWeaponDef(int slot);
 
-        // Creates an independently cancellable usercmd injection and returns its token
+        // Starts button injection; returns a token.
         long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0);
 
-        // Cancels one usercmd injection by its token
+        // Cancels a button-injection token.
         bool CancelUsercmdInjection(int slot, long injectionId);
 
-        // Creates an independently cancellable persistent analog movement override
+        // Starts persistent movement; returns a token.
         long StartUsercmdMovement(int slot, float forwardMove, float leftMove);
 
-        // Updates one persistent analog movement override
+        // Updates a movement token.
         bool UpdateUsercmdMovement(
             int slot,
             long movementId,
             float forwardMove,
             float leftMove);
 
-        // Cancels one persistent analog movement override
+        // Cancels a movement token.
         bool CancelUsercmdMovement(int slot, long movementId);
 
-        // Suppresses selected usercmd buttons for a fixed duration
+        // Suppresses buttons for a fixed duration.
         bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs);
 
-        // Creates an independently cancellable persistent usercmd suppression
+        // Starts persistent suppression; returns a token.
         long StartUsercmdSuppression(int slot, ulong buttonMask);
 
-        // Cancels one persistent usercmd suppression by its token
+        // Cancels a suppression token.
         bool CancelUsercmdSuppression(int slot, long suppressionId);
 
         // ---- profile ----
 
-        // Read the BotProfile of the bot on this slot. False if the slot has no
-        // live bot or a null profile.
+        // Reads the current Bot profile; false if unavailable.
         bool GetBotProfile(int slot, out BotProfileData profile);
 
         // ---- buy plans ----
@@ -129,23 +128,23 @@ namespace BotControllerApi
         // Force a bot to buy nothing each round.
         bool SetBuySkip(int slot);
 
-        // Remove a bot's buy plan (back to vanilla AI buying).
+        // Clears the plan and restores native buying.
         bool ClearBuyPlan(int slot);
 
         bool ClearAllBuyPlans();
 
-        // Plan item count: -1 none, 0 skip/empty, >0 alias count.
+        // Buy count: -1 no plan, 0 skip/empty, >0 alias count.
         int BuyPlanItemCount(int slot);
 
         // ---- voice ----
 
-        // Returns true when the native plugin can send voice net messages.
+        // Checks voice availability.
         bool CanSendVoice();
 
-        // Returns 0 when voice sending is ready, otherwise a negative setup code.
+        // Returns 0 when ready; negative values report setup errors.
         int GetVoiceStatus();
 
-        // Sends one encoded Opus voice frame to a recipient player slot.
+        // Sends an Opus frame to the recipient slot.
         int SendVoiceFrame(
             int recipientSlot,
             int senderClient,

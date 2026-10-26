@@ -8,7 +8,7 @@
 #include <string>
 
 namespace cs2bc {
-// Player state at command entry and after native command simulation.
+// Pawn state at command entry and completion.
 #pragma pack(push, 4)
 struct MovementSnapshot
 {
@@ -32,7 +32,7 @@ struct MovementSnapshot
     uint8_t actualMoveType; // m_nActualMoveType (networked, ladder anim)
 };
 
-// One simulated command; the ReplayTick name and layout remain ABI-compatible.
+// One command; ReplayTick retains its ABI layout.
 struct ReplayTick
 {
     MovementSnapshot pre;
@@ -130,7 +130,7 @@ constexpr uint32_t kCommandFieldWeaponSelect = 1U << 6;
 constexpr uint32_t kCommandFieldLeftHand = 1U << 7;
 constexpr uint32_t kCommandFieldWeaponSelectDef = 1U << 8;
 
-// Complete replay input frame assembled for PlayerRunCommand
+// Complete replay command input.
 struct ReplayCommandFrame
 {
     ReplayTick tick;
@@ -156,43 +156,43 @@ struct ReplayCommandFrame
 bool StartRecord(int slot); // clears old buffer, begins capture
 bool StopRecord(int slot); // stops
 bool IsRecording(int slot);
-// Reports whether any slot has an active recording.
+// Checks for active recordings.
 bool HasAnyRecording();
-// Invalidates runtime state while retaining complete recorded data.
+// Ends runtime state and retains recordings.
 void InvalidateSlot(int slot);
-// Identifies one pawn session, including its asynchronous work.
+// Pawn session ID for callbacks and async work.
 uint64_t PawnGeneration(int slot);
 int RecordedTickCount(int slot); // <0 on bad slot
 int RecordedSubtickCount(int slot); // <0 on bad slot
 int RecordedCommandCount(int slot); // <0 on bad slot
-// Reports the serialized history buffer size in bytes.
+// Serialized history size in bytes.
 int RecordedInputHistorySize(int slot);
 
-// Captures command entry before queued client commands run.
+// Captures state before queued client commands.
 bool OnRecordCommandPre(int slot, void* services);
-// PlayerRunCommand post: commits exactly one complete frame.
+// Commits one completed command.
 void OnRecordCommandPost(int slot, void* services);
 // Stashes the current command's subtick moves.
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
-// Stashes the current command's input and optional serialized history.
+// Stores command input and optional history.
 void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history);
-// Track which WeaponServices* maps to this recording slot
+// Tracks the recording's weapon services.
 void SetLiveWs(int slot, void* ws);
-// SelectItem tap: update the slot's current weapon def index.
+// Tracks SelectItem's weapon definition.
 void SetCurrentDef(int slot, int defIndex);
 
-// Copy recorded data out to caller buffers; returns elements written.
+// Copies recorded data; returns the count written.
 int CopyTicks(int slot, ReplayTick* out, int maxTicks);
 int CopyTicksRange(int slot, int start, ReplayTick* out, int maxTicks);
 int CopySubticks(int slot, SubtickMove* out, int maxSubticks);
 int CopySubticksRange(int slot, int start, SubtickMove* out, int maxSubticks);
 int CopyCommands(int slot, ReplayCommandFrameData* out, int maxCommands);
 int CopyCommandsRange(int slot, int start, ReplayCommandFrameData* out, int maxCommands);
-// Copies a bounded byte range from the stopped recording's history buffer.
+// Copies a bounded recorded history range.
 int CopyInputHistoryRange(int slot, int start, uint8_t* out, int maxBytes);
 
 // ---- replay ----
-// Load all parallel replay arrays into a slot's replay buffer
+// Loads aligned replay buffers.
 bool LoadReplay(int slot,
                 const ReplayTick* ticks,
                 int tickCount,
@@ -206,41 +206,41 @@ bool LoadReplay(int slot,
 bool StartReplay(int slot, bool loop); // play from tick 0
 bool StopReplay(int slot); // stop + clear injection
 bool IsReplaying(int slot);
-// Reports whether any slot has an active replay.
+// Checks for active replays.
 bool HasAnyReplay();
 int ReplayCursor(int slot); // current tick index, <0 if idle
 int ReplayTotal(int slot); // loaded tick count
 
-// Last completed command frame, for external replay queries.
+// Last completed frame; starts with frame 0.
 bool CurrentReplayTick(int slot, ReplayTick& out);
 // Assembles input for the next native command.
 bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFrame& out);
-// View snapshot for the command currently being simulated.
+// Current command's view snapshot.
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out);
 
-// Switch the current live pawn to the requested weapon definition.
+// Switches the live Pawn's weapon.
 bool SwitchWeaponByDef(int slot, int defIndex);
 
-// Active weapon definition for a Bot or player slot.
+// Active Bot/player weapon definition.
 int ActiveWeaponDefForSlot(int slot);
 
-// Treats CT and T fire grenades as the same replay weapon type
+// Matches CT and T fire grenades.
 bool ReplayWeaponDefsMatch(int firstDef, int secondDef);
 
 // Consumes the current tick's drop event once
 bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event);
-// Drops the recorded item through the registered pawn's weapon service.
+// Drops the recorded item from the registered Pawn.
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event);
 
-// Reports whether the weapon drop hook is available.
+// Checks drop-hook availability.
 bool DropHookReady();
-// Installs native release-pose capture and replay hooks.
+// Installs drop release-pose hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 
 // ---- replay write hooks ----
-// PlayerRunCommand pre: seeds state consumed by weapon and grenade logic.
+// Restores state before weapon and grenade processing.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick);
-// PlayerRunCommand post: restores end state and advances the cursor once.
+// Restores end state and advances one command.
 void OnReplayCommandPost(int slot, void* services);
 
 void ClearAll(); // wipe all record + replay buffers

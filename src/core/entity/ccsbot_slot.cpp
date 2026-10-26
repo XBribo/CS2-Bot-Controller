@@ -11,7 +11,7 @@ namespace tg = cs2bc::offsets;
 namespace cs2bc {
 
 namespace {
-// Zero is not a player handle, even though the SDK can decode it.
+// Player handles must be nonzero.
 int EntIndexFromHandle(uint32_t h)
 {
     if (h == 0U || h == 0xFFFFFFFFU) return -1;
@@ -25,7 +25,7 @@ int SlotFromEntityIndex(int idx)
     return idx - 1;
 }
 
-// Retains the plugin's low-address rejection as well as overflow checks.
+// Rejects low addresses and overflow.
 uintptr_t FieldAddress(const void* base, int offset, size_t size)
 {
     if (!base || offset < 0 || size == 0) return 0;

@@ -1,4 +1,4 @@
-// Detour for BuyState::OnUpdate to force a bot's per-round buy plan.
+// BuyState::OnUpdate hook for custom buy plans.
 
 #pragma once
 

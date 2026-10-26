@@ -14,7 +14,7 @@ namespace dispatch {
 IVEngineServer2* g_engine = nullptr;
 ISource2GameClients* g_gameClients = nullptr;
 
-// Set lock; Weapon also triggers a one-shot switch.
+// Sets a lock; weapon locks also switch once.
 int Lock(int slot, LockKind kind, int arg)
 {
     if (motion_recorder::IsReplaying(slot)) return -3;
@@ -44,7 +44,7 @@ int Lock(int slot, LockKind kind, int arg)
     return -2;
 }
 
-// Clear the per-kind lock for this slot.
+// Clears the slot's lock.
 int Unlock(int slot, LockKind kind)
 {
     switch (kind)
@@ -67,7 +67,7 @@ int Unlock(int slot, LockKind kind)
     return -2;
 }
 
-// Clear every slot under kind.
+// Clears this lock kind on all slots.
 int UnlockAll(LockKind kind)
 {
     switch (kind)
@@ -85,7 +85,7 @@ int UnlockAll(LockKind kind)
     return -2;
 }
 
-// Return lock state for this slot under kind.
+// Queries the slot's lock.
 int IsLocked(int slot, LockKind kind)
 {
     switch (kind)

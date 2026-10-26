@@ -52,7 +52,7 @@ bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 
 // ---- detours ----
 
-// Blocks automatic weapon selection while a lock or replay owns it.
+// Blocks AI weapon selection during locks or replay.
 KHook::Return<void> HookedEquipBestWeapon(void* bot, char mustEquip) noexcept
 {
     const auto sr = ResolveSlot(bot);
@@ -62,7 +62,7 @@ KHook::Return<void> HookedEquipBestWeapon(void* bot, char mustEquip) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Applies the same ownership rule to pistol selection.
+// Blocks AI pistol selection during locks or replay.
 KHook::Return<void> HookedEquipPistol(void* bot, char mustEquip) noexcept
 {
     const auto sr = ResolveSlot(bot);
@@ -72,7 +72,7 @@ KHook::Return<void> HookedEquipPistol(void* bot, char mustEquip) noexcept
     return { KHook::Action::Ignore };
 }
 
-// Records weapon changes and rejects switches away from the locked slot.
+// Records switches and enforces the locked slot.
 KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 {
     const int slot = input_injector::pawn_binding::ServicesToSlot(ws);
@@ -96,15 +96,15 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     if (engineSlot == 3 && weapon && IsGrenadeDef(ReadDefIndex(weapon))) return { KHook::Action::Ignore };
 
     void* targetWeapon = g_getSlot(ws, engineSlot, 0xFFFFFFFFU);
-    // No weapon in the locked slot -> can't enforce, let it through.
+    // Allow switches when the locked slot is empty.
     if (!targetWeapon) return { KHook::Action::Ignore };
     if (motion_recorder::IsReplaying(slot) || input_injector::pawn_binding::CurrentWeaponServices(slot) != ws)
         return { KHook::Action::Ignore };
 
-    // Switch is to the lock target -> allow.
+    // Allow the locked weapon.
     if (weapon == targetWeapon) return { KHook::Action::Ignore };
 
-    // Switch is to something else -> block.
+    // Block other weapons.
     return { KHook::Action::Supersede, 0 };
 }
 
@@ -203,7 +203,7 @@ int ReadDefIndex(void* weapon)
 
 namespace {
 
-// Decodes the entity's current identity handle through s2sdk.
+// Reads the entity identity handle.
 int EntIndexOf(void* entity)
 {
     if (!entity) return -1;
@@ -218,10 +218,10 @@ int EntIndexOf(void* entity)
 
 } // namespace
 
-// entity index of a weapon, for cmd.weaponselect on replay.
+// Weapon entity index for replay selection.
 int WeaponEntIndex(void* weapon) { return EntIndexOf(weapon); }
 
-// Records the requested item, which may differ from the active item during a throw.
+// Resolves an owned weapon index to its definition.
 int WeaponDefForEntityIndex(void* ws, int entityIndex)
 {
     if (!ws || !g_getSlot || entityIndex <= 0 || entityIndex >= 0x7FFF) return -1;
@@ -239,7 +239,7 @@ int WeaponDefForEntityIndex(void* ws, int entityIndex)
     return -1;
 }
 
-// Stops the inventory search as soon as the active item is found.
+// Reads the active inventory item.
 int ActiveWeaponDef(void* ws)
 {
     uint32_t handle = 0;
@@ -250,7 +250,7 @@ int ActiveWeaponDef(void* ws)
 void* FindWeaponByDef(void* ws, int def)
 {
     if (!ws || def < 0 || !g_getSlot) return nullptr;
-    // kKnifeDef selects the owner's slot-2 knife, regardless of skin.
+    // kKnifeDef matches any slot-2 knife.
     if (def == kKnifeDef) return g_getSlot(ws, 2, 0xFFFFFFFFU);
     // Non-grenade gear slots hold one weapon each
     for (int slot = 0; slot <= 4; ++slot)
@@ -259,7 +259,7 @@ void* FindWeaponByDef(void* ws, int def)
         void* w = g_getSlot(ws, slot, 0xFFFFFFFFU);
         if (w && ReadDefIndex(w) == def) return w;
     }
-    // GEAR_SLOT_GRENADES (3) holds every grenade type at once
+    // Grenade slot 3 holds multiple items.
     for (unsigned int pos = 0; pos < 8; ++pos)
     {
         void* w = g_getSlot(ws, 3, pos);
@@ -271,7 +271,7 @@ void* FindWeaponByDef(void* ws, int def)
 bool SelectWeapon(void* ws, void* weapon)
 {
     if (!ws || !weapon || !g_installed || !g_addrSelectItem) return false;
-    // Ordinary requests must respect all registered weapon-selection hooks.
+    // Use selection hooks for ordinary switches.
     return reinterpret_cast<SelectItemT>(g_addrSelectItem)(ws, weapon, 0) != 0;
 }
 
@@ -282,7 +282,7 @@ bool SelectWeaponRaw(void* ws, void* weapon)
     return true;
 }
 
-// Applies a weapon lock to the current live pawn, Bot or player.
+// Applies the weapon lock to a Bot or player.
 int SwitchToLockTarget(int slot)
 {
     if (!g_installed || !g_hookSelectItem.Active() || !g_getSlot) return 3;

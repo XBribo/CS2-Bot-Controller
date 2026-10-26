@@ -20,11 +20,11 @@ namespace BotControllerApi
         public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
         public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
             => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command buffers.
+        // Copies aligned tick, subtick, and command buffers.
         public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot)
             => BotController.GetRecordedMotionExtended(slot);
-        // Returns the optional history buffer separately.
+        // Copies optional input history.
         public byte[] GetRecordedInputHistory(int slot) => BotController.GetRecordedInputHistory(slot);
 
         // ---- replay ----
@@ -44,7 +44,7 @@ namespace BotControllerApi
             => BotController.LoadReplay(slot, ticks, subs, commands, inputHistory);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
             => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
-        // Registers the authoritative native pawn pointer for replay.
+        // Registers the current native Pawn.
         public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
         public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
         public bool StopReplay(int slot) => BotController.StopReplay(slot);
@@ -58,16 +58,16 @@ namespace BotControllerApi
         public bool SwitchBotWeapon(int slot, int defIndex)
             => BotController.SwitchBotWeapon(slot, defIndex);
         public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
-        // Creates an independently cancellable native usercmd injection
+        // Starts button injection; returns a token.
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
             => BotController.InjectUsercmd(slot, buttonMask, durationMs);
-        // Cancels one native usercmd injection by its token
+        // Cancels a button-injection token.
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => BotController.CancelUsercmdInjection(slot, injectionId);
-        // Creates an independently cancellable persistent analog movement override
+        // Starts persistent movement; returns a token.
         public long StartUsercmdMovement(int slot, float forwardMove, float leftMove)
             => BotController.StartUsercmdMovement(slot, forwardMove, leftMove);
-        // Updates one persistent analog movement override
+        // Updates a movement token.
         public bool UpdateUsercmdMovement(
             int slot,
             long movementId,
@@ -75,16 +75,16 @@ namespace BotControllerApi
             float leftMove)
             => BotController.UpdateUsercmdMovement(
                 slot, movementId, forwardMove, leftMove);
-        // Cancels one persistent analog movement override
+        // Cancels a movement token.
         public bool CancelUsercmdMovement(int slot, long movementId)
             => BotController.CancelUsercmdMovement(slot, movementId);
-        // Suppresses selected usercmd buttons for a fixed duration
+        // Suppresses buttons for a fixed duration.
         public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
             => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
-        // Creates an independently cancellable persistent native usercmd suppression
+        // Starts persistent suppression; returns a token.
         public long StartUsercmdSuppression(int slot, ulong buttonMask)
             => BotController.StartUsercmdSuppression(slot, buttonMask);
-        // Cancels one persistent native usercmd suppression by its token
+        // Cancels a suppression token.
         public bool CancelUsercmdSuppression(int slot, long suppressionId)
             => BotController.CancelUsercmdSuppression(slot, suppressionId);
 

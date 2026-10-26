@@ -6,7 +6,7 @@ namespace cs2bc {
 namespace bot_controller_state {
 constexpr int kMaxSlots = 64;
 
-// Lets idle view hooks skip resolving native bot/pawn/controller pointers.
+// Checks for active locks before resolving entities.
 bool HasAnyLock();
 
 // All lock: Update + Upkeep.

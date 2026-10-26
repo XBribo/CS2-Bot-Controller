@@ -1,10 +1,4 @@
-// SwiftlyS2 plugin: record a player's per-tick input and replay it on a bot.
-// Commands:
-//   !record [fileName] / !stoprecord  capture your own input, save to disk
-//   !replay <botSlot> [fileName]      play a recording back on a bot
-//   !stopreplay <botSlot>        stop a bot's replay
-//
-// Also exposes IBotControllerApi via IInterfaceManager for cross-plugin use.
+// SwiftlyS2 recording provider and shared API.
 
 using System.IO;
 using System.Collections.Concurrent;
@@ -30,7 +24,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 {
     public ILogger<BotControllerImplSW2Plugin> Logger => Core.LoggerFactory.CreateLogger<BotControllerImplSW2Plugin>();
 
-    // Record and replay must share a tickrate; adjust if your server differs.
+    // Recording and replay must use the same tickrate.
     private const int Tickrate = 64;
     private const string InterfaceKey = "botcontroller:api";
 
@@ -45,17 +39,17 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     // ---- Lifecycle ----
 
-    // Registers the shared API only when the BotController bridge is usable.
+    // Registers the API when the bridge is ready.
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
         if (!EnsureBridgeAvailable()) return;
 
-        // Consumers call: interfaceManager.TryGetSharedInterface<IBotControllerApi>("botcontroller:api", out var api)
+        // Publish the botcontroller:api shared interface.
         interfaceManager.AddSharedInterface<IBotControllerApi, BotControllerApiImpl>(
             InterfaceKey, new BotControllerApiImpl());
     }
 
-    // Registers file-job callbacks when the bridge is ready.
+    // Registers file-job callbacks.
     public override void Load(bool _)
     {
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
@@ -88,13 +82,13 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         }
     }
 
-    // Starts each map with explicit pawn registration.
+    // Resets Pawn registrations on map start.
     private void OnMapLoad(IOnMapLoadEvent _) => ResetSessions();
 
-    // Invalidates jobs before entity indices can be reused.
+    // Invalidates jobs before entity reuse.
     private void OnMapUnload(IOnMapUnloadEvent _) => ResetSessions();
 
-    // Invalidates ownership before a disconnected slot can be reused.
+    // Invalidates sessions before slot reuse.
     private void OnDisconnect(IOnClientDisconnectedEvent @event)
     {
         if (!_bridgeAvailable) return;
@@ -104,7 +98,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         BotController.ResetPawn(slot);
     }
 
-    // Keeps in-flight saves pinned to their stopped native buffers.
+    // Pins pending saves to stopped buffers.
     private void ResetSessions()
     {
         ++_mapGeneration;
@@ -115,7 +109,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     // ---- Helpers ----
 
-    // Applies completed file jobs on the game thread.
+    // Completes file jobs on the game thread.
     private void OnTick()
     {
         BotController.RefreshPawns();
@@ -123,7 +117,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         _jobs.RemoveAll(job => job.IsCompleted);
     }
 
-    // Reports an asynchronous result only to the player who issued the command.
+    // Reports job results to the requesting player.
     private void NotifyPlayer(int slot, ulong steamId, string message)
     {
         var player = Core.PlayerManager.GetPlayer(slot);
@@ -134,7 +128,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Returns the plugin-local recordings directory.
     private string RecordingsDir => Path.Combine(Core.PluginPath, "recordings");
 
-    // Resolves an optional recording name to a safe plugin-local compressed JSON path
+    // Resolves a safe plugin-local recording path.
     private bool TryGetRecordingFile(string? fileName, ulong steamId, out string file)
     {
         string name = string.IsNullOrWhiteSpace(fileName)
@@ -161,11 +155,11 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         return true;
     }
 
-    // Formats a colored chat tag for BotController replies.
+    // Formats the reply tag.
     private static string Tag(string msg) =>
         $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
 
-    // Registers the live pawn or returns the failed stage.
+    // Registers the live Pawn; reports the failed stage.
     private string? RegisterPawnForSlot(int slot)
     {
         if (slot is < 0 or >= 64) return "Slot must be 0..63.";
@@ -178,7 +172,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             : $"Slot {slot}: native pawn registration failed.";
     }
 
-    // Returns the cached bridge state, probing once on first use.
+    // Caches the bridge availability check.
     private bool EnsureBridgeAvailable()
     {
         if (_bridgeChecked) return _bridgeAvailable;
@@ -188,7 +182,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         return _bridgeAvailable;
     }
 
-    // Checks bridge availability and ABI compatibility.
+    // Checks the bridge and ABI.
     private bool ProbeBridge()
     {
         try
@@ -208,7 +202,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     // ---- Chat Commands ----
 
-    // Starts recording the invoking player's movement.
+    // Starts recording the requesting player.
     [Command("record")]
     public void OnRecord(ICommandContext context)
     {
@@ -241,7 +235,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         context.Reply(Tag("Recording. Use !stoprecord to finish."));
     }
 
-    // Stops recording and persists the invoking player's captured motion.
+    // Stops and saves the recording.
     [Command("stoprecord")]
     public void OnStopRecord(ICommandContext context)
     {
@@ -292,7 +286,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         }));
     }
 
-    // Loads the invoking player's recording and starts replay on a target bot slot.
+    // Loads a recording for the target slot.
     [Command("replay")]
     public void OnReplay(ICommandContext context)
     {
