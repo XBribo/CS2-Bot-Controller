@@ -10,10 +10,10 @@ namespace {
 constexpr size_t kMaxHistoryBytes = 65536;
 constexpr int kMaxHistoryEntries = 128;
 
-// Fractions may include the endpoint; native time conversion normalizes it.
+// Accepts fractions in [0, 1].
 bool ValidFraction(float value) { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; }
 
-// Accepts absent interpolation, but not malformed ranges or fractions.
+// Validates interpolation endpoints and fraction.
 bool ValidInterpolation(const CSGOInterpolationInfoPB& value)
 {
     return value.src_tick() >= -1 && value.dst_tick() >= -1 &&
@@ -21,7 +21,7 @@ bool ValidInterpolation(const CSGOInterpolationInfoPB& value)
            ValidFraction(value.frac());
 }
 
-// Keeps attack indices tied to complete, finite history entries.
+// Validates history entries and attack indices.
 bool ValidHistory(const CSGOUserCmdPB& history)
 {
     const int count = history.input_history_size();
@@ -47,7 +47,7 @@ bool ValidHistory(const CSGOUserCmdPB& history)
     return true;
 }
 
-// Retains -1 sentinels and rejects overflow instead of wrapping a clock.
+// Shifts ticks and preserves -1 sentinels.
 bool ShiftTick(int source, int64_t delta, int& result)
 {
     const int64_t shifted = source < 0 ? source : source + delta;
@@ -56,7 +56,7 @@ bool ShiftTick(int source, int64_t delta, int& result)
     return true;
 }
 
-// Normalizes a translated timestamp without rounding its tick to a float.
+// Shifts and normalizes a tick/fraction timestamp.
 bool ShiftTime(int sourceTick, float sourceFraction, double delta, int& tick, float& fraction)
 {
     const double whole = std::floor(delta);
@@ -71,7 +71,7 @@ bool ShiftTime(int sourceTick, float sourceFraction, double delta, int& tick, fl
     return ShiftTick(sourceTick, static_cast<int64_t>(whole) + carry, tick);
 }
 
-// Translates the represented interpolation time, retaining missing endpoints.
+// Shifts interpolation time and preserves missing endpoints.
 bool RebaseInterpolation(CSGOInterpolationInfoPB& value, double delta)
 {
     int64_t whole = static_cast<int64_t>(std::floor(delta));
@@ -116,7 +116,7 @@ bool Capture(const CSGOUserCmdPB& command, int simulationTick, std::string& byte
     if (simulationTick < 0) return false;
     CSGOUserCmdPB history;
     history.mutable_base()->set_client_tick(simulationTick);
-    // Presence distinguishes simulation-clock captures from earlier client-clock buffers.
+    // Command-number presence marks a simulation-clock capture.
     history.mutable_base()->set_legacy_command_number(command.base().legacy_command_number());
     if (command.base().has_random_seed()) history.mutable_base()->set_random_seed(command.base().random_seed());
     history.mutable_input_history()->CopyFrom(command.input_history());
@@ -147,10 +147,10 @@ bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick)
     double sourceEnd = 0.0;
     for (const auto& entry : history.input_history())
         sourceEnd = std::max(sourceEnd, entry.player_tick_count() + static_cast<double>(entry.player_tick_fraction()));
-    // Earlier captures lack a simulation anchor; keep their latest entry within this command.
+    // Older captures use the latest history time as the anchor.
     if (history.base().has_legacy_command_number())
         sourceEnd = std::max(sourceEnd, static_cast<double>(history.base().client_tick()));
-    // One offset preserves entry spacing instead of clamping individual attacks.
+    // A shared offset preserves relative times.
     const double delta = simulationTick - sourceEnd;
     for (auto& entry : *history.mutable_input_history())
     {
@@ -166,7 +166,7 @@ bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick)
             (entry.has_sv_interp1() && !RebaseInterpolation(*entry.mutable_sv_interp1(), delta)) ||
             (entry.has_player_interp() && !RebaseInterpolation(*entry.mutable_player_interp(), delta)))
             return false;
-        // Client-side diagnostics refer to the original world, not this replay.
+        // Clear source-world diagnostics.
         entry.clear_frame_number();
         entry.clear_target_ent_index();
         entry.clear_target_head_pos_check();

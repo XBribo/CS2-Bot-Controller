@@ -6,12 +6,12 @@
 #include <string_view>
 
 namespace cs2bc::command_history {
-// Stores the simulation anchor and attack history, not live movement fields.
+// Captures the simulation clock and attack history.
 bool Capture(const CSGOUserCmdPB& command, int simulationTick, std::string& bytes);
-// Validates serialized history before it enters a replay buffer.
+// Validates serialized input history.
 bool Parse(std::string_view bytes, CSGOUserCmdPB& history);
-// Rebases a frame-local history without changing relative entry times.
+// Rebases input history, preserving relative times.
 bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick);
-// Removes unrelated client history when none is supplied.
+// Clears input history and attack indices.
 void Clear(CSGOUserCmdPB& command);
 } // namespace cs2bc::command_history
