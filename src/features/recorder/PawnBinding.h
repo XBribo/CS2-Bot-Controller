@@ -1,6 +1,8 @@
 // Shared pawn-service resolution; public registration API stays in InputInjector.h.
 #pragma once
 
+class PlayerCommand;
+
 namespace cs2bc::input_injector::pawn_binding {
 // Initializes shared pawn and weapon resolution.
 bool Init();
@@ -20,6 +22,8 @@ void Reset();
 int ServicesToSlot(void* services);
 // Resolves weapons only for the registered pawn.
 void* ServicesToWeaponServices(int slot, void* services);
+// Reads the clock that native simulation will use for this command.
+bool CommandSimulationTick(int slot, void* services, const PlayerCommand& command, int& tick);
 // Clears registrations after all pawn-service hooks have drained.
 void ClearAll();
 } // namespace cs2bc::input_injector::pawn_binding

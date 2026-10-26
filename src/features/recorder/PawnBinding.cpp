@@ -6,7 +6,11 @@
 #include "core/log.h"
 #include "offsets.h"
 #include "plugin.h"
+#include "dispatch.h"
+#include "playercommand.h"
 
+#include <engine2/ivengineserver2.h>
+#include <engine2/gameshareddefs.h>
 #include <engine2/isource2server.h>
 #include <game/entitynetworkable.h>
 #include <entityhandle.h>
@@ -15,6 +19,7 @@
 #include <atomic>
 #include <bit>
 #include <cstring>
+#include <limits>
 #include <mutex>
 
 namespace tg = cs2bc::offsets;
@@ -27,6 +32,7 @@ struct Binding
     void* services = nullptr;
     uint32_t pawnHandle = 0;
     uint32_t controllerHandle = 0;
+    void* controller = nullptr;
 };
 std::array<Binding, kMaxSlots> g_bindings{};
 std::array<std::mutex, kMaxSlots> g_bindingMutexes;
@@ -34,6 +40,7 @@ std::atomic<uint64_t> g_registeredSlots{ 0 };
 ISource2Server* g_server = nullptr;
 int g_controllerPawn = -1;
 int g_lifeState = -1;
+int g_controllerTickBase = -1;
 
 // Checks the fixed slot table.
 bool ValidSlot(int slot) { return slot >= 0 && slot < kMaxSlots; }
@@ -69,7 +76,7 @@ Binding CurrentBinding(int slot, const char** failure = nullptr)
     if (!GuardedRead(pawn.m_pEntityInstance, tg::g_pawnMovementServices, services) || !services ||
         !GuardedRead(services, tg::g_servicesPawn, fieldPawn) || fieldPawn != pawn.m_pEntityInstance)
         return fail("movement services mismatch");
-    return { pawn.m_pEntityInstance, services, pawnHandle, controllerHandle };
+    return { pawn.m_pEntityInstance, services, pawnHandle, controllerHandle, controller.m_pEntityInstance };
 }
 
 // Invalidates stale registrations instead of following a replacement pawn.
@@ -84,7 +91,7 @@ Binding RegisteredBinding(int slot)
     if (!registered.pawn) return {};
     const Binding current = CurrentBinding(slot);
     if (current.pawn == registered.pawn && current.services == registered.services && current.pawnHandle == registered.pawnHandle &&
-        current.controllerHandle == registered.controllerHandle)
+        current.controllerHandle == registered.controllerHandle && current.controller == registered.controller)
         return registered;
     motion_recorder::InvalidateSlot(slot);
     BC_LOG_WARN("slot %d: pawn changed; stopped", slot);
@@ -159,6 +166,7 @@ bool Init()
     g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
     g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CCSPlayerController", "m_hPlayerPawn");
     g_lifeState = cs2_sdk::schema::GetFieldOffset("CBaseEntity", "m_lifeState");
+    g_controllerTickBase = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
     return g_server && g_controllerPawn >= 0 && g_lifeState >= 0;
 }
 
@@ -193,6 +201,22 @@ void* ServicesToWeaponServices(int slot, void* services)
     return services && binding.services == services ? ReadWeaponServices(binding) : nullptr;
 }
 
+// PlayerRunCommand advances full commands before installing the simulation clock.
+bool CommandSimulationTick(int slot, void* services, const PlayerCommand& command, int& tick)
+{
+    const Binding binding = RegisteredBinding(slot);
+    auto* globals = dispatch::g_engine ? dispatch::g_engine->GetServerGlobals() : nullptr;
+    if (!services || binding.services != services || !globals ||
+        !GuardedRead(binding.controller, g_controllerTickBase, tick) || tick < 0)
+        return false;
+    if (!command.parentcmd && globals->frametime != 0.0F)
+    {
+        if (tick == std::numeric_limits<int>::max()) return false;
+        ++tick;
+    }
+    return true;
+}
+
 // Checks only registered slots, once per provider tick.
 void Refresh()
 {
@@ -219,6 +243,7 @@ void ClearAll()
     g_server = nullptr;
     g_controllerPawn = -1;
     g_lifeState = -1;
+    g_controllerTickBase = -1;
 }
 } // namespace pawn_binding
 } // namespace cs2bc::input_injector
