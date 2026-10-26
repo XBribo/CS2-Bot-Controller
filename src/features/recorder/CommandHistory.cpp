@@ -1,9 +1,6 @@
 #include "CommandHistory.h"
-#include "dispatch.h"
 
-#include <engine2/ivengineserver2.h>
-#include <engine2/gameshareddefs.h>
-
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -12,20 +9,6 @@ namespace cs2bc::command_history {
 namespace {
 constexpr size_t kMaxHistoryBytes = 65536;
 constexpr int kMaxHistoryEntries = 128;
-
-// Bot commands may omit the client clock; their native simulation uses server time.
-bool CommandTick(const CSGOUserCmdPB& command, int& tick)
-{
-    if (command.has_base() && command.base().has_client_tick())
-    {
-        tick = command.base().client_tick();
-        if (tick != 0) return tick > 0;
-    }
-    auto* globals = dispatch::g_engine ? dispatch::g_engine->GetServerGlobals() : nullptr;
-    if (!globals) return false;
-    tick = globals->tickcount;
-    return tick >= 0;
-}
 
 // Fractions may include the endpoint; native time conversion normalizes it.
 bool ValidFraction(float value) { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; }
@@ -73,30 +56,68 @@ bool ShiftTick(int source, int64_t delta, int& result)
     return true;
 }
 
-// Moves both interpolation endpoints by the same whole-tick offset.
-bool RebaseInterpolation(CSGOInterpolationInfoPB& value, int64_t delta)
+// Normalizes a translated timestamp without rounding its tick to a float.
+bool ShiftTime(int sourceTick, float sourceFraction, double delta, int& tick, float& fraction)
 {
+    const double whole = std::floor(delta);
+    const double shiftedFraction = sourceFraction + (delta - whole);
+    int64_t carry = static_cast<int64_t>(std::floor(shiftedFraction));
+    fraction = static_cast<float>(shiftedFraction - static_cast<double>(carry));
+    if (fraction == 1.0F)
+    {
+        ++carry;
+        fraction = 0.0F;
+    }
+    return ShiftTick(sourceTick, static_cast<int64_t>(whole) + carry, tick);
+}
+
+// Translates the represented interpolation time, retaining missing endpoints.
+bool RebaseInterpolation(CSGOInterpolationInfoPB& value, double delta)
+{
+    int64_t whole = static_cast<int64_t>(std::floor(delta));
+    int endAdvance = 0;
+    if (value.src_tick() >= 0 && value.dst_tick() >= 0)
+    {
+        const int span = value.dst_tick() - value.src_tick();
+        const double remainder = delta - static_cast<double>(whole);
+        if (span == 0 && remainder > 0.0)
+        {
+            endAdvance = 1;
+            value.set_frac(static_cast<float>(remainder));
+        }
+        else if (span > 0)
+        {
+            double fraction = value.frac() + remainder / span;
+            if (fraction > 1.0)
+            {
+                ++whole;
+                fraction -= 1.0 / span;
+            }
+            value.set_frac(static_cast<float>(fraction));
+        }
+    }
     int tick;
     if (value.has_src_tick())
     {
-        if (!ShiftTick(value.src_tick(), delta, tick)) return false;
+        if (!ShiftTick(value.src_tick(), whole, tick)) return false;
         value.set_src_tick(tick);
     }
     if (value.has_dst_tick())
     {
-        if (!ShiftTick(value.dst_tick(), delta, tick)) return false;
+        if (!ShiftTick(value.dst_tick(), whole + endAdvance, tick)) return false;
         value.set_dst_tick(tick);
     }
     return true;
 }
 } // namespace
 
-bool Capture(const CSGOUserCmdPB& command, std::string& bytes)
+bool Capture(const CSGOUserCmdPB& command, int simulationTick, std::string& bytes)
 {
-    int tick;
-    if (!CommandTick(command, tick)) return false;
+    if (simulationTick < 0) return false;
     CSGOUserCmdPB history;
-    history.mutable_base()->set_client_tick(tick);
+    history.mutable_base()->set_client_tick(simulationTick);
+    // Presence distinguishes simulation-clock captures from earlier client-clock buffers.
+    history.mutable_base()->set_legacy_command_number(command.base().legacy_command_number());
     if (command.base().has_random_seed()) history.mutable_base()->set_random_seed(command.base().random_seed());
     history.mutable_input_history()->CopyFrom(command.input_history());
     history.set_attack1_start_history_index(command.attack1_start_history_index());
@@ -120,18 +141,27 @@ void Clear(CSGOUserCmdPB& command)
     command.clear_is_predicting_kill_ragdolls();
 }
 
-bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command)
+bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick)
 {
-    int tick;
-    if (!CommandTick(command, tick)) return false;
-    const int64_t delta = static_cast<int64_t>(tick) - history.base().client_tick();
+    if (simulationTick < 0) return false;
+    double sourceEnd = 0.0;
+    for (const auto& entry : history.input_history())
+        sourceEnd = std::max(sourceEnd, entry.player_tick_count() + static_cast<double>(entry.player_tick_fraction()));
+    // Earlier captures lack a simulation anchor; keep their latest entry within this command.
+    if (history.base().has_legacy_command_number())
+        sourceEnd = std::max(sourceEnd, static_cast<double>(history.base().client_tick()));
+    // One offset preserves entry spacing instead of clamping individual attacks.
+    const double delta = simulationTick - sourceEnd;
     for (auto& entry : *history.mutable_input_history())
     {
         int shifted;
-        if (!ShiftTick(entry.player_tick_count(), delta, shifted)) return false;
+        float fraction;
+        if (!ShiftTime(entry.player_tick_count(), entry.player_tick_fraction(), delta, shifted, fraction)) return false;
         entry.set_player_tick_count(shifted);
-        if (!ShiftTick(entry.render_tick_count(), delta, shifted)) return false;
+        entry.set_player_tick_fraction(fraction);
+        if (!ShiftTime(entry.render_tick_count(), entry.render_tick_fraction(), delta, shifted, fraction)) return false;
         entry.set_render_tick_count(shifted);
+        entry.set_render_tick_fraction(fraction);
         if ((entry.has_sv_interp0() && !RebaseInterpolation(*entry.mutable_sv_interp0(), delta)) ||
             (entry.has_sv_interp1() && !RebaseInterpolation(*entry.mutable_sv_interp1(), delta)) ||
             (entry.has_player_interp() && !RebaseInterpolation(*entry.mutable_player_interp(), delta)))

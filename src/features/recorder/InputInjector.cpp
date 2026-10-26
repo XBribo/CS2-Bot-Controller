@@ -527,7 +527,9 @@ CommandFrame* FindCommandFrame(int slot)
 void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
 {
     std::string history;
-    if (!command_history::Capture(*pc, history))
+    int simulationTick;
+    if (!pawn_binding::CommandSimulationTick(slot, services, *pc, simulationTick) ||
+        !command_history::Capture(*pc, simulationTick, history))
     {
         BC_LOG_WARN("slot %d: invalid command history; recording stopped", slot);
         motion_recorder::StopRecord(slot);
@@ -628,7 +630,9 @@ bool ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
 
         if (frame.inputHistory.has_base())
         {
-            if (!command_history::Apply(frame.inputHistory, *pc))
+            int simulationTick;
+            if (!pawn_binding::CommandSimulationTick(slot, services, *pc, simulationTick) ||
+                !command_history::Apply(frame.inputHistory, *pc, simulationTick))
             {
                 BC_LOG_WARN("slot %d: invalid command clock; replay stopped", slot);
                 motion_recorder::StopReplay(slot);
