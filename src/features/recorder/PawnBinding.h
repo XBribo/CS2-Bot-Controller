@@ -22,7 +22,7 @@ void Reset();
 int ServicesToSlot(void* services);
 // Resolves weapons only for the registered pawn.
 void* ServicesToWeaponServices(int slot, void* services);
-// Reads the clock that native simulation will use for this command.
+// Reads the command's simulation tick.
 bool CommandSimulationTick(int slot, void* services, const PlayerCommand& command, int& tick);
 // Clears registrations after all pawn-service hooks have drained.
 void ClearAll();

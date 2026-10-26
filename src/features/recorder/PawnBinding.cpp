@@ -201,7 +201,7 @@ void* ServicesToWeaponServices(int slot, void* services)
     return services && binding.services == services ? ReadWeaponServices(binding) : nullptr;
 }
 
-// PlayerRunCommand advances full commands before installing the simulation clock.
+// Full commands advance tickbase before simulation.
 bool CommandSimulationTick(int slot, void* services, const PlayerCommand& command, int& tick)
 {
     const Binding binding = RegisteredBinding(slot);
