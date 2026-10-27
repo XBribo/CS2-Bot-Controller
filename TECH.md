@@ -1,6 +1,6 @@
 # BotController Developer Guide
 
-Build and C# API guide. Installation and commands: [README.md](README.md).
+Installation and usage: [README.md](README.md).
 
 - [Build](#build)
 - [C# Integration](#c-integration)
@@ -13,17 +13,17 @@ Run commands from the repository root.
 
 ### Requirements
 
-- CMake and C++ tools: Visual Studio on Windows; `g++` and Make on Linux.
-- .NET 10 SDK for C# providers.
-- PowerShell 7+ for `build.ps1`; WSL for Linux builds.
-
-Initialize dependencies:
+- **Windows:** Visual Studio 2026 C++ build tools and CMake.
+- **Linux:** `g++`, CMake, and Make.
+- **C#:** .NET 10 SDK.
+- **Build script:** PowerShell 7+; WSL for Linux builds.
+- **Dependencies:** Git and the `cs2_sdk` submodule.
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### Build and Package
+### Build Script
 
 On a Windows host:
 
@@ -38,14 +38,14 @@ On a Windows host:
 - Overrides: `-Generator`, `-WslDistro`, `-Config`.
 - `dist/` is regenerated; `-Clean` also clears build outputs.
 
-| Package directory | Contents |
+| Directory | Contents |
 | --- | --- |
 | `dist/windows/` | Windows Metamod plugin |
 | `dist/linux/` | Linux Metamod plugin |
 | `dist/CounterStrikeSharp/` | CounterStrikeSharp provider and API contract |
 | `dist/SwiftlyS2/` | SwiftlyS2 provider and API contract |
 
-### Manual Builds
+### Manual Build
 
 Windows:
 
@@ -77,9 +77,9 @@ Native output: `<build-directory>/package/addons/`. Use `build.ps1` for complete
 - Native plugin and provider: **ABI 24**; Metamod requires KHook support.
 - Shared API: `IBotControllerApi`, key `botcontroller:api`.
 - Reference `BotControllerApi.dll`; preserve its struct layouts.
-- Slots: engine player slots `0..63`, not user IDs or entity indices.
+- Slots: engine player slots `0–63`.
 
-Set `HintPath` to the contract DLL; keep `Private=false`:
+Set `HintPath` and `Private=false`:
 
 ```xml
 <ItemGroup>
@@ -94,7 +94,7 @@ Set `HintPath` to the contract DLL; keep `Private=false`:
 
 Contract: `addons/counterstrikesharp/shared/BotControllerApi/BotControllerApi.dll`.
 
-Inside an existing `BasePlugin`:
+In your `BasePlugin`:
 
 ```csharp
 using System.Collections.Generic;
@@ -104,7 +104,7 @@ using CounterStrikeSharp.API.Core.Capabilities;
 private static readonly PluginCapability<IBotControllerApi> Bots = new("botcontroller:api");
 private IBotControllerApi? _bots;
 
-// Missing providers leave no capability.
+// Resolve the API after providers load.
 public override void OnAllPluginsLoaded(bool hotReload)
 {
     try { _bots = Bots.Get(); }
@@ -116,7 +116,7 @@ public override void OnAllPluginsLoaded(bool hotReload)
 
 Contract: `addons/swiftlys2/plugins/BotControllerImplSW2/resources/exports/BotControllerApi.dll`.
 
-Inside an existing SwiftlyS2 plugin:
+In your SwiftlyS2 plugin:
 
 ```csharp
 using BotControllerApi;
@@ -132,11 +132,11 @@ public override void UseSharedInterface(IInterfaceManager interfaceManager)
 }
 ```
 
-API registration requires a compatible native bridge. Check `_bots` for null; release it on provider unload.
+Requires a compatible native bridge. Null-check `_bots`; release it on provider unload.
 
 ## Record and Replay
 
-One frame per `PlayerRunCommand`; Bot and player targets are supported.
+Records one frame per `PlayerRunCommand` for bots and players.
 
 ### Workflow
 
@@ -145,11 +145,11 @@ One frame per `PlayerRunCommand`; Bot and player targets are supported.
 3. Target: `SetReplayPawn` → load or transfer → `StartReplay`.
 4. Stop with `StopReplay`; loop with `StartReplay(slot, loop: true)`.
 
-`SetReplayPawn` takes the current native Pawn address (`nint`). Check operation results.
+`SetReplayPawn` takes the current Pawn address (`nint`). Check each result.
 
 ### In-Memory Transfer
 
-Active recording to replay, including InputHistory:
+Transfer a recording with InputHistory:
 
 ```csharp
 // Stop, transfer, and replay.
@@ -163,7 +163,7 @@ private static bool ReplayRecording(IBotControllerApi api, int sourceSlot, int t
 }
 ```
 
-### Explicit Buffers and Optional InputHistory
+### Buffers and InputHistory
 
 After stopping the source and registering the target:
 
@@ -180,25 +180,25 @@ byte[] history = api.GetRecordedInputHistory(sourceSlot);
 bool loaded = api.LoadReplay(targetSlot, ticks, subs, commands, inputHistory: history);
 ```
 
-- `inputHistory`: optional; `null` or empty to omit.
-- Use opaque history from the same recording and matching native/provider builds.
-- History restores attack timing, history angles, and interpolation, not full weapon/world state.
-- Call `StartReplay` after loading. `GetRecordedMotionExtended` includes command frames; `GetRecordedMotion` does not.
+- `inputHistory`: optional; `null` or empty skips history.
+- Use opaque history from the same recording with matching native/provider builds.
+- History scope: attack timing, history angles, and interpolation.
+- `GetRecordedMotion` returns ticks/subticks; `GetRecordedMotionExtended` adds command frames. Load, then `StartReplay`.
 
-Storage: Brotli JSON (`.json.br`), including available history. See [MotionRecording.cs](csharp/BotControllerImpl/MotionRecording.cs).
+Storage: Brotli JSON (`.json.br`) with available history. See [MotionRecording.cs](csharp/BotControllerImpl/MotionRecording.cs).
 
 ### Lifecycle and Threading
 
-- Pawn change or disconnect stops the session; re-register and explicitly restart.
-- Engine calls: main thread. Stopped-buffer copies and `LoadReplay`: workers allowed.
+- Pawn changes and disconnects stop the session. Re-register and restart.
+- Main thread: engine calls. Workers: stopped-buffer copies and `LoadReplay`.
 - Finish buffer reads before restarting recording on that slot.
-- Use the same tickrate; bundled providers use 64 tick.
-- Replay suppresses Bot AI; independent locks remain after stopping.
-- Missing view control rejects or stops replay.
+- Match tickrates; bundled providers use 64 tick.
+- Replay suppresses bot AI; independent locks remain after stopping.
+- Replay requires view control; losing it stops replay.
 
 ## API Reference
 
-Signatures: [IBotControllerApi.cs](csharp/BotControllerApi/IBotControllerApi.cs). Types: [Types.cs](csharp/BotControllerApi/Types.cs).
+Contract: [IBotControllerApi.cs](csharp/BotControllerApi/IBotControllerApi.cs). Types: [Types.cs](csharp/BotControllerApi/Types.cs).
 
 | Area | Members |
 | --- | --- |
@@ -219,7 +219,7 @@ Signatures: [IBotControllerApi.cs](csharp/BotControllerApi/IBotControllerApi.cs)
 
 - `Aim`: blocks `Upkeep`. `All`: blocks `Update` and `Upkeep`. Physics continues.
 - Query AI locks with `IsLocked`, weapon slots with `GetWeaponLock`.
-- Weapon helpers support Bots and players, using item definition IDs. Switching is blocked during replay.
+- Weapon helpers use item definition IDs for bots and players. Switch weapons while replay is stopped.
 
 | Target | Engine slot | Weapon |
 | --- | --- | --- |
