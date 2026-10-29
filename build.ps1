@@ -168,7 +168,9 @@ function Deploy-CSharpSW2([hashtable]$sw2Out, [string]$destRoot) {
     Reset-DistRoot $destRoot
     $sw2Dir = Join-Path $destRoot "addons/swiftlys2/plugins/BotControllerImplSW2"
     New-Item -ItemType Directory -Force $sw2Dir | Out-Null
-    Copy-Item -Recurse -Force -Path "$($sw2Out.BuildDir)/*" -Destination $sw2Dir
+    Get-ChildItem -LiteralPath $sw2Out.BuildDir -Force |
+        Where-Object Name -ne "publish" |
+        Copy-Item -Recurse -Force -Destination $sw2Dir
     Write-Ok "deployed SwiftlyS2 into $((Resolve-Path $sw2Dir).Path)"
 }
 
