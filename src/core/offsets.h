@@ -6,11 +6,7 @@
 
 namespace cs2bc::offsets {
 // Teleport slot for replay positioning.
-#ifdef _WIN32
-inline int g_vtIdxTeleport = 165;
-#else
-inline int g_vtIdxTeleport = 164;
-#endif
+inline int g_vtIdxTeleport = -1;
 // ---- CCSBot ----
 
 // AI tick-complete flag; 1 skips the native tick.
@@ -18,36 +14,36 @@ inline int g_botAiTickedFlag = -1;
 // CCSBot -> pawn (CCSPlayerPawn*)
 inline int g_botPawn = -1;
 // CCSBot -> m_profile (BotProfile*)
-inline int g_botProfile = 0x08;
+inline int g_botProfile = -1;
 
 // ---- BotProfile (CCSBot+kBot_Profile) ----
 
-inline int g_profAggression = 0x08; // float, 0..1
-inline int g_profSkill = 0x0C; // float, 0..1
-inline int g_profTeamwork = 0x10; // float, 0..1
-inline int g_profWeaponPref = 0x24; // WORD[16] item def index, stride 2
-inline int g_profWeaponPrefCount = 0x44; // int
-inline int g_profCost = 0x48; // int
-inline int g_profDifficulty = 0x50; // u8 bitflags EASY/NORMAL/HARD/EXPERT
-inline int g_profReactionTime = 0x58; // float
-inline int g_profAttackDelay = 0x5C; // float
-inline int g_profLookAccelAtk = 0x78; // float m_lookAngleMaxAccelAttacking
-inline int g_profLookStiffAtk = 0x7C; // float m_lookAngleStiffnessAttacking
-inline int g_profLookDampAtk = 0x80; // float m_lookAngleDampingAttacking
+inline int g_profAggression = -1; // float, 0..1
+inline int g_profSkill = -1; // float, 0..1
+inline int g_profTeamwork = -1; // float, 0..1
+inline int g_profWeaponPref = -1; // WORD[16] item def index, stride 2
+inline int g_profWeaponPrefCount = -1; // int
+inline int g_profCost = -1; // int
+inline int g_profDifficulty = -1; // u8 bitflags EASY/NORMAL/HARD/EXPERT
+inline int g_profReactionTime = -1; // float
+inline int g_profAttackDelay = -1; // float
+inline int g_profLookAccelAtk = -1; // float m_lookAngleMaxAccelAttacking
+inline int g_profLookStiffAtk = -1; // float m_lookAngleStiffnessAttacking
+inline int g_profLookDampAtk = -1; // float m_lookAngleDampingAttacking
 
 // ---- BuyState ----
 
 // m_isInitialDelay (bool)
-inline int g_buyInitialDelay = 0x08;
+inline int g_buyInitialDelay = -1;
 // m_doneBuying (bool)
-inline int g_buyDoneBuying = 0x18;
+inline int g_buyDoneBuying = -1;
 
 // ---- CBaseEntity / CEntityIdentity ----
 
 // entity -> CEntityIdentity*
 inline int g_entIdentity = -1;
 // CEntityIdentity -> m_EHandle (low 15 bits = entity index)
-inline int g_entIdentityEHandle = 0x10;
+inline int g_entIdentityEHandle = -1;
 // m_MoveType (MoveType_t, 1 byte); restored during replay.
 inline int g_entMoveType = -1;
 // m_nActualMoveType (MoveType_t, 1 byte); networked.
@@ -97,11 +93,11 @@ inline int g_weaponItemDefIndex = -1;
 // ---- CCSPlayer_MovementServices ----
 
 // m_pawn (CCSPlayerPawn*)
-inline int g_servicesPawn = 56;
+inline int g_servicesPawn = -1;
 // m_nButtons.m_pButtonStates[0..2] (CInButtonState).
-inline int g_servicesButtons = -1; // states[0] (pressed)
-inline int g_servicesButtons1 = -1; // states[1]
-inline int g_servicesButtons2 = -1; // states[2]
+inline int g_servicesButtons = -1; // final held state
+inline int g_servicesButtons1 = -1; // transition count bit 0
+inline int g_servicesButtons2 = -1; // transition count bit 1
 // Previous command view angles consumed by PlayerRunCommand
 inline int g_servicesOldViewAngles = -1;
 
@@ -115,26 +111,14 @@ inline int g_servicesDucking = -1; // bool m_bDucking
 
 // ---- vtable indices (CCSPlayer_MovementServices) ----
 
-#ifdef _WIN32
-inline int g_vtIdxPlayerRunCommand = 25;
-#else
-inline int g_vtIdxPlayerRunCommand = 26;
-#endif
+inline int g_vtIdxPlayerRunCommand = -1;
 // Controller setup immediately preceding queued client commands.
-#ifdef _WIN32
-inline int g_vtIdxControllerCommandSetup = 240;
-#else
-inline int g_vtIdxControllerCommandSetup = 241;
-#endif
+inline int g_vtIdxControllerCommandSetup = -1;
 // CCSPlayer_WeaponServices::DropWeapon
-#ifdef _WIN32
-inline int g_vtIdxDropWeapon = 28;
-#else
-inline int g_vtIdxDropWeapon = 29;
-#endif
+inline int g_vtIdxDropWeapon = -1;
 
-// Overrides supplied platform offsets.
-void LoadFromGamedata(const nlohmann::json& gamedata);
+// Loads required platform offsets.
+bool LoadFromGamedata(const nlohmann::json& gamedata, char* error, size_t maxlen);
 
 // Resolves required Schema offsets; reports the first failure.
 bool LoadFromSchema(char* error, size_t maxlen);

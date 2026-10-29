@@ -34,8 +34,8 @@ int Lock(int slot, LockKind kind, int arg)
         case LockKind::Weapon:
         {
             if (slot < 0 || slot >= weapon_locker_state::kMaxSlots) return -2;
+            if (arg < static_cast<int>(LockTarget::Slot1) || arg > static_cast<int>(LockTarget::Slot5)) return -2;
             const auto tgt = static_cast<LockTarget>(arg);
-            if (tgt == LockTarget::None) return -2;
             weapon_locker_state::Set(slot, tgt);
             (void)weapon_locker_hooks::SwitchToLockTarget(slot);
             return 0;

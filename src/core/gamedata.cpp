@@ -29,8 +29,6 @@ bool Load(nlohmann::json& gamedata, cs2_sdk::modules::ModuleInfo& serverModule, 
     }
     serverModule = cs2_sdk::modules::server->Code();
 
-    cs2bc::offsets::LoadFromGamedata(gamedata);
-
-    return true;
+    return cs2bc::offsets::LoadFromGamedata(gamedata, error, maxlen);
 }
 } // namespace cs2bc::gamedata
