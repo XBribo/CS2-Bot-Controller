@@ -18,9 +18,9 @@ struct MovementSnapshot
     uint32_t entityFlags; // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
     uint8_t moveType; // m_MoveType (MoveType_t)
     uint8_t pad[3]; // keep 4-byte alignment explicit
-    uint64_t buttons; // services button states[0] (pressed)
-    uint64_t buttons1; // states[1]
-    uint64_t buttons2; // states[2]
+    uint64_t buttons; // final held state
+    uint64_t buttons1; // transition count bit 0
+    uint64_t buttons2; // transition count bit 1
     float duckAmount; // m_flDuckAmount (0=stand, 1=full crouch)
     float duckSpeed; // m_flDuckSpeed
     float ladderNormalX; // m_vecLadderNormal (ladder anim facing)

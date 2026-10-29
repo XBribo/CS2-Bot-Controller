@@ -39,7 +39,6 @@ namespace cs2bc {
 namespace input_injector {
 
 namespace {
-constexpr float kUsercmdKeyboardMoveScale = 450.0F;
 constexpr uint64_t kInForward = 1ULL << 3;
 constexpr uint64_t kInBack = 1ULL << 4;
 constexpr uint64_t kInMoveLeft = 1ULL << 9;
@@ -110,14 +109,18 @@ struct UsercmdSuppression
     uint64_t buttonMask;
     int64_t expiresAtMs;
     bool persistent;
-    bool releasePending;
+};
+
+struct UsercmdControlState
+{
+    uint64_t mask = 0;
+    uint64_t held = 0;
 };
 
 std::array<std::vector<UsercmdInjection>, kMaxSlots> g_usercmdInjections{};
 std::array<std::vector<UsercmdSuppression>, kMaxSlots> g_usercmdSuppressions{};
 std::array<std::vector<UsercmdMovement>, kMaxSlots> g_usercmdMovements{};
-std::array<uint64_t, kMaxSlots> g_injectedHeldMasks{};
-std::array<uint64_t, kMaxSlots> g_movementHeldMasks{};
+std::array<uint64_t, kMaxSlots> g_controlledButtons{};
 std::mutex g_usercmdInjectionMutex;
 std::atomic<uint64_t> g_usercmdWorkSlots{ 0 };
 std::atomic<int64_t> g_nextUsercmdInjectionId{ 1 };
@@ -133,7 +136,8 @@ bool ValidSlotIndex(int slot) { return slot >= 0 && slot < kMaxSlots; }
 void RefreshUsercmdWorkSlot(int slot)
 {
     const uint64_t bit = uint64_t{ 1 } << slot;
-    if (!g_usercmdInjections[slot].empty() || !g_usercmdSuppressions[slot].empty() || !g_usercmdMovements[slot].empty())
+    if (!g_usercmdInjections[slot].empty() || !g_usercmdSuppressions[slot].empty() || !g_usercmdMovements[slot].empty() ||
+        g_controlledButtons[slot] != 0)
         g_usercmdWorkSlots.fetch_or(bit, std::memory_order_release);
     else
         g_usercmdWorkSlots.fetch_and(~bit, std::memory_order_release);
@@ -250,7 +254,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
     std::scoped_lock lock(g_usercmdInjectionMutex);
     if (motion_recorder::IsReplaying(slot)) return false;
     g_usercmdSuppressions[slot].push_back(
-        { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false, .releasePending = true });
+        { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false });
     RefreshUsercmdWorkSlot(slot);
     return true;
 }
@@ -265,7 +269,7 @@ int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
     std::scoped_lock lock(g_usercmdInjectionMutex);
     if (motion_recorder::IsReplaying(slot)) return -1;
     g_usercmdSuppressions[slot].push_back(
-        { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true, .releasePending = true });
+        { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true });
     RefreshUsercmdWorkSlot(slot);
     return id;
 }
@@ -296,189 +300,119 @@ void ClearUsercmdInjections(int slot)
     g_usercmdInjections[slot].clear();
     g_usercmdSuppressions[slot].clear();
     g_usercmdMovements[slot].clear();
+    g_controlledButtons[slot] = 0;
     RefreshUsercmdWorkSlot(slot);
-    g_injectedHeldMasks[slot] = 0;
-    g_movementHeldMasks[slot] = 0;
 }
 
 // Checks pending input controls.
 namespace {
 
-struct UsercmdWork
+// Composes command input under one state lock.
+void ApplyUsercmdControls(int slot, PlayerCommand& pc, CBaseUserCmdPB& base, uint64_t previousHeld)
 {
-    bool injection;
-    bool suppression;
-    bool movement;
-};
-
-// Snapshots pending input under one lock.
-UsercmdWork GetUsercmdWork(int slot)
-{
-    if (!ValidSlotIndex(slot)) return {};
-
-    std::scoped_lock lock(g_usercmdInjectionMutex);
-    return { !g_usercmdInjections[slot].empty(), !g_usercmdSuppressions[slot].empty(), !g_usercmdMovements[slot].empty() };
-}
-
-// Applies movement to the generated command.
-bool ApplyUsercmdMovement(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
-{
-    if (!ValidSlotIndex(slot) || pc == nullptr || base == nullptr) return false;
-
+    uint64_t states[3] = { pc.buttonstates.m_pButtonStates[0], pc.buttonstates.m_pButtonStates[1], pc.buttonstates.m_pButtonStates[2] };
+    UsercmdControlState forced{};
     UsercmdMovement movement{};
-    uint64_t previousMask = 0;
+    uint64_t suppressed = 0;
+    bool moving = false;
     {
         std::scoped_lock lock(g_usercmdInjectionMutex);
-        const auto& movements = g_usercmdMovements[slot];
-        if (movements.empty()) return false;
-        movement = movements.back();
-        previousMask = g_movementHeldMasks[slot];
-    }
-
-    uint64_t movementMask = 0;
-    if (movement.forwardMove > 0.0F) movementMask |= kInForward;
-    else if (movement.forwardMove < 0.0F)
-        movementMask |= kInBack;
-    if (movement.leftMove > 0.0F) movementMask |= kInMoveLeft;
-    else if (movement.leftMove < 0.0F)
-        movementMask |= kInMoveRight;
-
-    {
-        std::scoped_lock lock(g_usercmdInjectionMutex);
-        g_movementHeldMasks[slot] = movementMask;
-    }
-
-    uint64_t pressedMask = movementMask & ~previousMask;
-    uint64_t releasedMask = previousMask & ~movementMask;
-    uint64_t held = (pc->buttonstates.m_pButtonStates[0] & ~kMovementButtonMask) | movementMask;
-    uint64_t pressed = (pc->buttonstates.m_pButtonStates[1] & ~kMovementButtonMask) | pressedMask;
-    uint64_t released = (pc->buttonstates.m_pButtonStates[2] & ~movementMask) | releasedMask;
-
-    CInButtonStatePB* buttons = base->mutable_buttons_pb();
-    buttons->set_buttonstate1(held);
-    buttons->set_buttonstate2(pressed);
-    buttons->set_buttonstate3(released);
-    pc->buttonstates.m_pButtonStates[0] = held;
-    pc->buttonstates.m_pButtonStates[1] = pressed;
-    pc->buttonstates.m_pButtonStates[2] = released;
-
-    base->set_forwardmove(movement.forwardMove * kUsercmdKeyboardMoveScale);
-    base->set_leftmove(movement.leftMove * kUsercmdKeyboardMoveScale);
-    for (int index = 0; index < base->subtick_moves_size(); ++index)
-    {
-        CSubtickMoveStep* step = base->mutable_subtick_moves(index);
-        step->set_analog_forward_delta(0.0F);
-        step->set_analog_left_delta(0.0F);
-    }
-    return true;
-}
-
-// Merges injections into press/release edges.
-bool ApplyUsercmdInjections(int slot, PlayerCommand* pc, CBaseUserCmdPB* base)
-{
-    if (!ValidSlotIndex(slot) || !pc || !base) return false;
-
-    uint64_t activeMask = 0;
-    uint64_t previousMask = 0;
-    {
-        std::scoped_lock lock(g_usercmdInjectionMutex);
+        const int64_t nowMs = MonotonicMilliseconds();
         auto& injections = g_usercmdInjections[slot];
-        int64_t nowMs = MonotonicMilliseconds();
         for (auto it = injections.begin(); it != injections.end();)
         {
-            UsercmdInjectionPhase phase = it->phase;
-            if (phase == UsercmdInjectionPhase::PendingRelease || (phase == UsercmdInjectionPhase::Holding && nowMs >= it->expiresAtMs))
+            if (it->phase == UsercmdInjectionPhase::PendingRelease ||
+                (it->phase == UsercmdInjectionPhase::Holding && nowMs >= it->expiresAtMs))
             {
                 it = injections.erase(it);
                 continue;
             }
-
-            activeMask |= it->buttonMask;
-            if (phase == UsercmdInjectionPhase::PendingPress)
+            forced.mask |= it->buttonMask;
+            forced.held |= it->buttonMask;
+            if (it->phase == UsercmdInjectionPhase::PendingPress)
             {
-                if (it->durationMs > 0) it->expiresAtMs = nowMs + it->durationMs;
+                it->expiresAtMs = nowMs + it->durationMs;
                 it->phase = it->durationMs == 0 ? UsercmdInjectionPhase::PendingRelease : UsercmdInjectionPhase::Holding;
             }
             ++it;
         }
 
-        previousMask = g_injectedHeldMasks[slot];
-        g_injectedHeldMasks[slot] = activeMask;
-        RefreshUsercmdWorkSlot(slot);
-    }
-
-    uint64_t pressedMask = activeMask & ~previousMask;
-    uint64_t releasedMask = previousMask & ~activeMask;
-    uint64_t held = pc->buttonstates.m_pButtonStates[0];
-    uint64_t pressed = pc->buttonstates.m_pButtonStates[1];
-    uint64_t released = pc->buttonstates.m_pButtonStates[2];
-
-    held = (held & ~releasedMask) | activeMask;
-    pressed = (pressed & ~releasedMask) | pressedMask;
-    released = (released & ~pressedMask) | releasedMask;
-
-    CInButtonStatePB* buttons = base->mutable_buttons_pb();
-    buttons->set_buttonstate1(held);
-    buttons->set_buttonstate2(pressed);
-    buttons->set_buttonstate3(released);
-    pc->buttonstates.m_pButtonStates[0] = held;
-    pc->buttonstates.m_pButtonStates[1] = pressed;
-    pc->buttonstates.m_pButtonStates[2] = released;
-    return true;
-}
-
-// Applies suppression to the generated command.
-bool ApplyUsercmdSuppressions(int slot, PlayerCommand* pc, CBaseUserCmdPB* base) // NOLINT(readability-non-const-parameter)
-{
-    if (!ValidSlotIndex(slot) || !pc || !base) return false;
-
-    uint64_t suppressedMask = 0;
-    uint64_t releasedMask = 0;
-    {
-        std::scoped_lock lock(g_usercmdInjectionMutex);
-        auto& suppressions = g_usercmdSuppressions[slot];
-        int64_t nowMs = MonotonicMilliseconds();
-        for (auto it = suppressions.begin(); it != suppressions.end();)
+        const auto& movements = g_usercmdMovements[slot];
+        moving = !movements.empty();
+        if (moving)
         {
-            if (!it->persistent && nowMs >= it->expiresAtMs)
-            {
-                it = suppressions.erase(it);
-                continue;
-            }
-
-            suppressedMask |= it->buttonMask;
-            if (it->releasePending)
-            {
-                releasedMask |= it->buttonMask;
-                it->releasePending = false;
-            }
-            ++it;
+            movement = movements.back();
+            uint64_t held = 0;
+            if (movement.forwardMove > 0.0F) held |= kInForward;
+            else if (movement.forwardMove < 0.0F)
+                held |= kInBack;
+            if (movement.leftMove > 0.0F) held |= kInMoveLeft;
+            else if (movement.leftMove < 0.0F)
+                held |= kInMoveRight;
+            forced.mask |= kMovementButtonMask;
+            forced.held = (forced.held & ~kMovementButtonMask) | held;
         }
+
+        auto& suppressions = g_usercmdSuppressions[slot];
+        std::erase_if(suppressions, [nowMs](const auto& suppression) {
+            return !suppression.persistent && nowMs >= suppression.expiresAtMs;
+        });
+        for (const auto& suppression : suppressions)
+            suppressed |= suppression.buttonMask;
+        forced.mask |= suppressed;
+        forced.held &= ~suppressed;
+
+        auto& previousMask = g_controlledButtons[slot];
+        const uint64_t rawInitial = states[0] ^ states[1];
+        const uint64_t rejoin = (rawInitial ^ previousHeld) & previousMask & ~forced.mask;
+        // Button planes encode final hold and a two-bit transition count.
+        states[2] |= states[1] & rejoin;
+        states[1] ^= rejoin;
+        states[0] = (states[0] & ~forced.mask) | forced.held;
+        states[1] = (states[1] & ~forced.mask) | ((previousHeld ^ forced.held) & forced.mask);
+        states[2] &= ~forced.mask;
+        previousMask = forced.mask;
         RefreshUsercmdWorkSlot(slot);
     }
 
-    if (suppressedMask == 0) return false;
+    CInButtonStatePB* buttons = base.mutable_buttons_pb();
+    buttons->set_buttonstate1(states[0]);
+    buttons->set_buttonstate2(states[1]);
+    buttons->set_buttonstate3(states[2]);
+    std::copy_n(states, 3, pc.buttonstates.m_pButtonStates);
+    if ((suppressed & (1ULL << 0)) != 0) pc.set_attack1_start_history_index(-1);
+    if ((suppressed & (1ULL << 11)) != 0) pc.set_attack2_start_history_index(-1);
 
-    uint64_t held = pc->buttonstates.m_pButtonStates[0] & ~suppressedMask;
-    uint64_t pressed = pc->buttonstates.m_pButtonStates[1] & ~suppressedMask;
-    uint64_t released = pc->buttonstates.m_pButtonStates[2] | releasedMask;
-
-    CInButtonStatePB* buttons = base->mutable_buttons_pb();
-    buttons->set_buttonstate1(held);
-    buttons->set_buttonstate2(pressed);
-    buttons->set_buttonstate3(released);
-    pc->buttonstates.m_pButtonStates[0] = held;
-    pc->buttonstates.m_pButtonStates[1] = pressed;
-    pc->buttonstates.m_pButtonStates[2] = released;
-
-    for (int i = 0; i < base->subtick_moves_size(); ++i)
+    if (moving)
     {
-        CSubtickMoveStep* move = base->mutable_subtick_moves(i);
-        uint64_t buttonsMask = move->button() & ~suppressedMask;
-        move->set_button(buttonsMask);
-        if (buttonsMask == 0) move->set_pressed(false);
+        if ((movement.forwardMove > 0.0F && (suppressed & kInForward) != 0) || (movement.forwardMove < 0.0F && (suppressed & kInBack) != 0))
+            movement.forwardMove = 0.0F;
+        if ((movement.leftMove > 0.0F && (suppressed & kInMoveLeft) != 0) || (movement.leftMove < 0.0F && (suppressed & kInMoveRight) != 0))
+            movement.leftMove = 0.0F;
+        base.set_forwardmove(movement.forwardMove);
+        base.set_leftmove(movement.leftMove);
     }
-    return true;
+
+    for (auto& step : *base.mutable_subtick_moves())
+    {
+        const uint64_t button = step.button();
+        if ((button & forced.mask) != 0)
+        {
+            const uint64_t remaining = button & ~forced.mask;
+            step.set_button(remaining);
+            if (remaining == 0)
+            {
+                step.clear_pressed();
+                step.clear_analog_forward_delta();
+                step.clear_analog_left_delta();
+            }
+        }
+        if (moving)
+        {
+            step.clear_analog_forward_delta();
+            step.clear_analog_left_delta();
+        }
+    }
 }
 
 // Applies the recorded drop command.
@@ -506,7 +440,6 @@ KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
 // Inactive nested batches shadow outer contexts.
 CommandBatch* FindCommandBatch(int slot)
 {
-    if (slot < 0 || slot >= kMaxSlots) return nullptr;
     for (auto it = g_commandBatches.rbegin(); it != g_commandBatches.rend(); ++it)
         if (it->slot == slot) return &*it;
     return nullptr;
@@ -515,7 +448,6 @@ CommandBatch* FindCommandBatch(int slot)
 // Finds the active frame for reentrancy checks.
 CommandFrame* FindCommandFrame(int slot)
 {
-    if (slot < 0 || slot >= kMaxSlots) return nullptr;
     for (auto it = g_commandFrames.rbegin(); it != g_commandFrames.rend(); ++it)
         if (it->slot == slot) return &*it;
     return nullptr;
@@ -524,24 +456,28 @@ CommandFrame* FindCommandFrame(int slot)
 // ---- PlayerRunCommand: subtick record + re-inject ----
 
 // Captures command input and subticks.
-void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCmdPB* base)
+void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const CBaseUserCmdPB& base)
 {
+    const int n = base.subtick_moves_size();
+    if (n > motion_recorder::kMaxSubtickPerTick)
+    {
+        BC_LOG_WARN("slot %d: subtick limit exceeded; recording stopped", slot);
+        motion_recorder::StopRecord(slot);
+        return;
+    }
     std::string history;
     int simulationTick;
-    if (!pawn_binding::CommandSimulationTick(slot, services, *pc, simulationTick) ||
-        !command_history::Capture(*pc, simulationTick, history))
+    if (!pawn_binding::CommandSimulationTick(slot, services, pc, simulationTick) || !command_history::Capture(pc, simulationTick, history))
     {
         BC_LOG_WARN("slot %d: invalid command history; recording stopped", slot);
         motion_recorder::StopRecord(slot);
         return;
     }
     // Stash subticks until this PlayerRunCommand returns.
-    int n = base->subtick_moves_size();
-    n = std::min(n, motion_recorder::kMaxSubtickPerTick);
     SubtickMove moves[motion_recorder::kMaxSubtickPerTick];
     for (int i = 0; i < n; ++i)
     {
-        const CSubtickMoveStep& s = base->subtick_moves(i);
+        const CSubtickMoveStep& s = base.subtick_moves(i);
         moves[i].when = s.when();
         moves[i].button = static_cast<uint32_t>(s.button());
         moves[i].pressed = s.pressed() ? 1.0F : 0.0F;
@@ -554,50 +490,50 @@ void CaptureUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUserCm
 
     ReplayCommandFrameData command{};
     command.fields |= motion_recorder::kCommandFieldWeaponSelectDef;
-    command.buttons = pc->buttonstates.m_pButtonStates[0];
-    command.buttons1 = pc->buttonstates.m_pButtonStates[1];
-    command.buttons2 = pc->buttonstates.m_pButtonStates[2];
+    command.buttons = pc.buttonstates.m_pButtonStates[0];
+    command.buttons1 = pc.buttonstates.m_pButtonStates[1];
+    command.buttons2 = pc.buttonstates.m_pButtonStates[2];
     command.fields |= motion_recorder::kCommandFieldButtons;
-    if (base->has_forwardmove())
+    if (base.has_forwardmove())
     {
-        command.forwardMove = base->forwardmove();
+        command.forwardMove = base.forwardmove();
         command.fields |= motion_recorder::kCommandFieldForwardMove;
     }
-    if (base->has_leftmove())
+    if (base.has_leftmove())
     {
-        command.leftMove = base->leftmove();
+        command.leftMove = base.leftmove();
         command.fields |= motion_recorder::kCommandFieldLeftMove;
     }
-    if (base->has_upmove())
+    if (base.has_upmove())
     {
-        command.upMove = base->upmove();
+        command.upMove = base.upmove();
         command.fields |= motion_recorder::kCommandFieldUpMove;
     }
-    if (base->has_viewangles())
+    if (base.has_viewangles())
     {
-        const CMsgQAngle& view = base->viewangles();
+        const CMsgQAngle& view = base.viewangles();
         command.pitch = view.x();
         command.yaw = view.y();
         command.roll = view.z();
         command.fields |= motion_recorder::kCommandFieldViewAngles;
     }
-    if (base->has_mousedx() || base->has_mousedy())
+    if (base.has_mousedx() || base.has_mousedy())
     {
-        command.mouseDx = base->mousedx();
-        command.mouseDy = base->mousedy();
+        command.mouseDx = base.mousedx();
+        command.mouseDy = base.mousedy();
         command.fields |= motion_recorder::kCommandFieldMouse;
     }
-    if (base->has_weaponselect())
+    if (base.has_weaponselect())
     {
-        command.weaponSelect = base->weaponselect() > 0
-                                   ? weapon_locker_hooks::WeaponDefForEntityIndex(
-                                         pawn_binding::ServicesToWeaponServices(slot, services), base->weaponselect())
-                                   : 0;
+        command.weaponSelect =
+            base.weaponselect() > 0
+                ? weapon_locker_hooks::WeaponDefForEntityIndex(pawn_binding::ServicesToWeaponServices(slot, services), base.weaponselect())
+                : 0;
         command.fields |= motion_recorder::kCommandFieldWeaponSelect;
     }
-    if (pc->has_left_hand_desired())
+    if (pc.has_left_hand_desired())
     {
-        command.leftHandDesired = pc->left_hand_desired() ? 1 : 0;
+        command.leftHandDesired = pc.left_hand_desired() ? 1 : 0;
         command.fields |= motion_recorder::kCommandFieldLeftHand;
     }
     motion_recorder::OnCaptureCommand(slot, command, std::move(history));
@@ -718,39 +654,45 @@ KHook::Return<void> PlayerRunCommandPre(void* services, void* cmd) noexcept
     if (!motion_recorder::HasAnyRecording() && !motion_recorder::HasAnyReplay() && g_usercmdWorkSlots.load(std::memory_order_acquire) == 0)
         return { KHook::Action::Ignore };
     int slot = pawn_binding::ServicesToSlot(services);
-    if (!cmd || FindCommandFrame(slot) || !ResolveReplayPawn(slot, services)) return { KHook::Action::Ignore };
+    if (!ValidSlotIndex(slot) || !cmd || FindCommandFrame(slot) || !ResolveReplayPawn(slot, services)) return { KHook::Action::Ignore };
     const uint64_t generation = motion_recorder::PawnGeneration(slot);
     auto* batch = FindCommandBatch(slot);
-    if (batch && (batch->services != services || batch->generation != generation || batch->preparing))
-        return { KHook::Action::Ignore };
+    if (batch && (batch->services != services || batch->generation != generation || batch->preparing)) return { KHook::Action::Ignore };
     const bool recording = batch && motion_recorder::IsRecording(slot);
     const bool replaying = batch && motion_recorder::IsReplaying(slot);
     const bool capturePrepared = batch && batch->capturePrepared;
     if (batch) batch->capturePrepared = false;
-    const auto [hasUsercmdInjection, hasUsercmdSuppression, hasUsercmdMovement] = replaying ? UsercmdWork{} : GetUsercmdWork(slot);
+    const bool controls = !replaying && (g_usercmdWorkSlots.load(std::memory_order_acquire) & (uint64_t{ 1 } << slot)) != 0;
 
-    if (recording || replaying || hasUsercmdInjection || hasUsercmdSuppression || hasUsercmdMovement)
+    if (recording || replaying || controls)
     {
         g_commandFrames[index] = { slot, services, generation, recording, false };
         // Compiler computes the multiple-inheritance adjust here.
         auto* pc = reinterpret_cast<PlayerCommand*>(cmd);
         CBaseUserCmdPB* base = pc->mutable_base();
 
-        if (recording)
-        {
-            if (!capturePrepared) motion_recorder::OnRecordCommandPre(slot, services);
-            CaptureUserCommand(slot, services, pc, base);
-        }
+        if (recording && !capturePrepared) motion_recorder::OnRecordCommandPre(slot, services);
 
         if (replaying)
         {
             const bool applied = ApplyReplayUserCommand(slot, services, pc, base);
             g_commandFrames[index].replayApplied = applied;
         }
-
-        if (hasUsercmdSuppression && !replaying) ApplyUsercmdSuppressions(slot, pc, base);
-        if (hasUsercmdInjection && !replaying) ApplyUsercmdInjections(slot, pc, base);
-        if (hasUsercmdMovement && !replaying) ApplyUsercmdMovement(slot, pc, base);
+        else
+        {
+            if (controls)
+            {
+                uint64_t previousHeld = 0;
+                if (!SafeRead(services, tg::g_servicesButtons, previousHeld))
+                {
+                    BC_LOG_WARN("slot %d: button state unavailable; session stopped", slot);
+                    motion_recorder::InvalidateSlot(slot);
+                    return { KHook::Action::Ignore };
+                }
+                ApplyUsercmdControls(slot, *pc, *base, previousHeld);
+            }
+            if (recording) CaptureUserCommand(slot, services, *pc, *base);
+        }
     }
 
     return { KHook::Action::Ignore };
@@ -796,7 +738,7 @@ void EnsureControllerCommandHook(void* controller)
     if (!controller || g_controllerHookTried.exchange(true, std::memory_order_acq_rel)) return;
     void** vtable = nullptr;
     void* target = nullptr;
-    if (tg::g_vtIdxControllerCommandSetup >= 0 && GuardedRead(controller, 0, vtable) && vtable &&
+    if (GuardedRead(controller, 0, vtable) && vtable &&
         GuardedRead(static_cast<const void*>(vtable), tg::g_vtIdxControllerCommandSetup * static_cast<int>(sizeof(void*)), target) &&
         target && g_hookControllerCommandSetup.Install(target, nullptr, &ControllerCommandSetupPost))
         return;
@@ -815,6 +757,11 @@ KHook::Return<void> SimulateUserCommandsPre(void* controller) noexcept
         return { KHook::Action::Ignore };
     }
     int slot = ControllerToSlot(controller);
+    if (!ValidSlotIndex(slot))
+    {
+        g_commandBatches.push_back({ -1, nullptr });
+        return { KHook::Action::Ignore };
+    }
 
     void* services = pawn_binding::ServicesForSlot(slot);
 
@@ -938,8 +885,7 @@ void Remove()
             suppressions.clear();
         for (auto& movements : g_usercmdMovements)
             movements.clear();
-        g_injectedHeldMasks.fill(0);
-        g_movementHeldMasks.fill(0);
+        g_controlledButtons.fill(0);
         g_usercmdWorkSlots.store(0, std::memory_order_release);
     }
     g_installed = false;

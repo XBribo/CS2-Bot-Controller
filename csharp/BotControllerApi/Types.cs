@@ -32,9 +32,9 @@ namespace BotControllerApi
         public uint EntityFlags;
         public byte MoveType;
         public byte Pad0, Pad1, Pad2;
-        public ulong Buttons;        // states[0] (pressed)
-        public ulong Buttons1;       // states[1]
-        public ulong Buttons2;       // states[2]
+        public ulong Buttons;        // Final held state.
+        public ulong Buttons1;       // Transition count bit 0.
+        public ulong Buttons2;       // Transition count bit 1.
         public float DuckAmount;     // m_flDuckAmount (0=stand, 1=full crouch)
         public float DuckSpeed;      // m_flDuckSpeed
         public float LadderNormalX;  // m_vecLadderNormal
