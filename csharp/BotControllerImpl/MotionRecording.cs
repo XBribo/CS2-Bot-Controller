@@ -3,6 +3,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 using BotControllerApi;
 
@@ -33,7 +34,21 @@ public static class MotionStore
         WriteIndented = false,
         IncludeFields = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { RequireRecordingFields },
+        },
     };
+
+    // Requires complete frame payloads at the file boundary.
+    private static void RequireRecordingFields(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Type != typeof(ReplayTick) && typeInfo.Type != typeof(MovementSnapshot) &&
+            typeInfo.Type != typeof(SubtickMove) && typeInfo.Type != typeof(ReplayCommandFrame)) return;
+
+        foreach (JsonPropertyInfo property in typeInfo.Properties)
+            property.IsRequired = !property.Name.StartsWith("Pad", StringComparison.Ordinal);
+    }
 
     // Saves a stopped recording; returns its tick count or -1.
     public static int SaveToFile(int slot, string path, int tickrate = 64)
