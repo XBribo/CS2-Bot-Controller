@@ -129,7 +129,6 @@ constexpr uint32_t kCommandFieldButtons = 1U << 4;
 constexpr uint32_t kCommandFieldMouse = 1U << 5;
 constexpr uint32_t kCommandFieldWeaponSelect = 1U << 6;
 constexpr uint32_t kCommandFieldLeftHand = 1U << 7;
-constexpr uint32_t kCommandFieldWeaponSelectDef = 1U << 8;
 
 // Complete replay command input.
 struct ReplayCommandFrame

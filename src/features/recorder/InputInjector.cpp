@@ -489,7 +489,6 @@ void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const
     motion_recorder::OnCaptureSubticks(slot, moves, n);
 
     ReplayCommandFrameData command{};
-    command.fields |= motion_recorder::kCommandFieldWeaponSelectDef;
     command.buttons = pc.buttonstates.m_pButtonStates[0];
     command.buttons1 = pc.buttonstates.m_pButtonStates[1];
     command.buttons2 = pc.buttonstates.m_pButtonStates[2];

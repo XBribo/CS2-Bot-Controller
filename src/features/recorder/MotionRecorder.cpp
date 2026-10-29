@@ -165,9 +165,10 @@ bool ValidSnapshot(const MovementSnapshot& s)
 
 bool ValidCommand(const ReplayCommandFrameData& command)
 {
+    constexpr uint32_t legacyFields = 1U << 8;
     constexpr uint32_t fields = kCommandFieldForwardMove | kCommandFieldLeftMove | kCommandFieldUpMove | kCommandFieldViewAngles |
                                 kCommandFieldButtons | kCommandFieldMouse | kCommandFieldWeaponSelect | kCommandFieldLeftHand |
-                                kCommandFieldWeaponSelectDef;
+                                legacyFields;
     return (command.fields & ~fields) == 0 && ((command.fields & kCommandFieldForwardMove) == 0 || std::isfinite(command.forwardMove)) &&
            ((command.fields & kCommandFieldLeftMove) == 0 || std::isfinite(command.leftMove)) &&
            ((command.fields & kCommandFieldUpMove) == 0 || std::isfinite(command.upMove)) &&
