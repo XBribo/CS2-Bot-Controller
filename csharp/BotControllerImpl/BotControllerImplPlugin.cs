@@ -2,11 +2,13 @@
 
 using System.IO;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Utils;
 
 using BotControllerApi;
@@ -31,11 +33,13 @@ public partial class BotControllerPlugin : BasePlugin
     private readonly List<Task> _jobs = new();
     private bool _bridgeReady;
     private ulong _mapGeneration;
+    private CommandPermissionsConfig _commandPermissions = new(true);
 
     // Loads the provider and publishes the API.
     public override void Load(bool hotReload)
     {
         Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
+        LoadCommandPermissions();
         if (!BotController.IsCompatible())
         {
             Server.PrintToConsole("[BotController] BotController ABI mismatch; disabled.");
@@ -65,6 +69,32 @@ public partial class BotControllerPlugin : BasePlugin
         _jobs.Clear();
         _completedJobs.Clear();
         _savingSlots.Clear();
+    }
+
+    private void LoadCommandPermissions()
+    {
+        _commandPermissions = new(true);
+        try
+        {
+            _commandPermissions = CommandPermissionsConfig.Load(
+                Path.Combine(Server.GameDirectory, "addons", "BotController", "config.json"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Server.PrintToConsole("[BotController] command permission config invalid or unreadable: using restricted defaults");
+        }
+    }
+
+    private bool CanExecuteReplayCommand(CCSPlayerController player, CommandInfo cmd)
+    {
+        if (!_commandPermissions.RequirePermissions) return true;
+        if (player.AuthorizedSteamID != null &&
+            (AdminManager.PlayerHasPermissions(player, "@css/root") ||
+             AdminManager.PlayerHasPermissions(player, "@css/admin") ||
+             AdminManager.PlayerHasPermissions(player, _commandPermissions.Permission))) return true;
+
+        cmd.ReplyToCommand($"[BotController] permission required: {_commandPermissions.Permission}, @css/root or @css/admin");
+        return false;
     }
 
     // Invalidates sessions before slot reuse.
@@ -234,17 +264,18 @@ public partial class BotControllerPlugin : BasePlugin
     }
 
     // Loads a recording for the target slot.
-    [ConsoleCommand("css_replay", "Replay a recording: !replay <botSlot> [fileName]")]
-    [CommandHelper(minArgs: 1, usage: "<botSlot> [fileName]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    [ConsoleCommand("css_replay", "Replay a recording: !replay <slot> [fileName]")]
+    [CommandHelper(minArgs: 1, usage: "<slot> [fileName]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnReplay(CCSPlayerController? player, CommandInfo cmd)
     {
         if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(player, cmd)) return;
         string? fileName = cmd.ArgCount >= 3 ? cmd.GetArg(2) : null;
         if (cmd.ArgCount > 3 ||
             !int.TryParse(cmd.GetArg(1), out int botSlot) ||
             !TryGetRecordingFile(fileName, player.SteamID, out string file))
         {
-            cmd.ReplyToCommand("[BotController] Usage: !replay <botSlot> [fileName]");
+            cmd.ReplyToCommand("[BotController] Usage: !replay <slot> [fileName]");
             return;
         }
         if (!File.Exists(file))
@@ -293,7 +324,7 @@ public partial class BotControllerPlugin : BasePlugin
                     if (rec.Tickrate != Tickrate)
                         NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
                     if (loaded && BotController.StartReplay(botSlot))
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on slot {botSlot}.");
                     else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
                 });
             }
@@ -311,11 +342,12 @@ public partial class BotControllerPlugin : BasePlugin
     }
 
     // Stops the target slot's replay.
-    [ConsoleCommand("css_stopreplay", "Stop a bot's replay: !stopreplay <botSlot>")]
-    [CommandHelper(minArgs: 1, usage: "<botSlot>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    [ConsoleCommand("css_stopreplay", "Stop a replay: !stopreplay <slot>")]
+    [CommandHelper(minArgs: 1, usage: "<slot>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopReplay(CCSPlayerController? player, CommandInfo cmd)
     {
         if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(player, cmd)) return;
         if (!int.TryParse(cmd.GetArg(1), out int botSlot)) return;
         _loadingSlots.Remove(botSlot);
         BotController.StopReplay(botSlot);

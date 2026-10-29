@@ -2,6 +2,7 @@
 
 using System.IO;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
@@ -36,6 +37,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private ulong _mapGeneration;
     private bool _bridgeChecked;
     private bool _bridgeAvailable;
+    private CommandPermissionsConfig _commandPermissions = new(true);
 
     // ---- Lifecycle ----
 
@@ -53,6 +55,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     public override void Load(bool _)
     {
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
+        LoadCommandPermissions();
         if (!EnsureBridgeAvailable()) return;
 
         ResetSessions();
@@ -105,6 +108,29 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         _loadingSlots.Clear();
         _recordingFiles.Clear();
         BotController.ResetPawns();
+    }
+
+    private void LoadCommandPermissions()
+    {
+        _commandPermissions = new(true);
+        try
+        {
+            _commandPermissions = CommandPermissionsConfig.Load(
+                Path.Combine(Core.GameDirectory, "addons", "BotController", "config.json"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Logger.LogWarning("Command permission config invalid or unreadable: using restricted defaults");
+        }
+    }
+
+    private bool CanExecuteReplayCommand(ICommandContext context, IPlayer player)
+    {
+        if (!_commandPermissions.RequirePermissions ||
+            Core.Permission.PlayerHasPermission(player.SteamID, _commandPermissions.Permission)) return true;
+
+        context.Reply(Tag($"Permission required: {_commandPermissions.Permission}"));
+        return false;
     }
 
     // ---- Helpers ----
@@ -292,13 +318,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         var player = context.Sender;
         if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(context, player)) return;
 
         string? fileName = context.Args.Length >= 2 ? context.Args[1] : null;
         if (context.Args.Length is < 1 or > 2 ||
             !int.TryParse(context.Args[0], out int botSlot) ||
             !TryGetRecordingFile(fileName, player.SteamID, out string file))
         {
-            context.Reply(Tag("Usage: !replay <botSlot> [fileName]"));
+            context.Reply(Tag("Usage: !replay <slot> [fileName]"));
             return;
         }
         if (!File.Exists(file))
@@ -347,7 +374,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
                     if (rec.Tickrate != Tickrate)
                         NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
                     if (loaded && BotController.StartReplay(botSlot))
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
+                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on slot {botSlot}.");
                     else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
                 });
             }
@@ -370,6 +397,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     {
         var player = context.Sender;
         if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(context, player)) return;
 
         if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int botSlot)) return;
 

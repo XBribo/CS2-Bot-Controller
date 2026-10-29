@@ -1,0 +1,6 @@
+{
+  "commands": {
+    "require_permissions": false,
+    "permission": "@botcontroller/admin"
+  }
+}

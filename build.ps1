@@ -112,6 +112,7 @@ function Build-Dist([string]$packageRoot, [string]$destRoot) {
 
         Copy-Item -Recurse -Force "$packageRoot/addons/BotController/bin" $dstBot
         Copy-Item -Force "$packageRoot/addons/BotController/gamedata.json" $dstBot
+        Copy-Item -Force "$packageRoot/addons/BotController/config.json" $dstBot
         Copy-Item -Force "$packageRoot/addons/metamod/BotController.vdf" $dstMeta
     }
     Write-Ok "assembled $((Resolve-Path $destRoot).Path)"

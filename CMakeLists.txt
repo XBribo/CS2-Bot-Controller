@@ -144,7 +144,7 @@ set_target_properties(
     LIBRARY_OUTPUT_DIRECTORY_DEBUG   "${BC_PACKAGE_BIN_DIR}"
 )
 
-# Stage the Metamod entry and gamedata.
+# Stage the Metamod entry, gamedata, and command permissions.
 add_custom_command(
     TARGET BotController
     POST_BUILD
@@ -158,4 +158,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/configs/addons/BotController/gamedata.json"
         "${CMAKE_BINARY_DIR}/package/addons/BotController/gamedata.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/configs/addons/BotController/config.json"
+        "${CMAKE_BINARY_DIR}/package/addons/BotController/config.json"
 )
