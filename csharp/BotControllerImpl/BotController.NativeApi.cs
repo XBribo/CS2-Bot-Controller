@@ -289,15 +289,24 @@ namespace BotControllerApi
 
         // Copies a bounded recorded tick range.
         public static int CopyRecordedTicksRange(int slot, int start, ReplayTick[] ticks)
-            => BotController_CopyRecordedTicksRange(slot, start, ticks, ticks.Length);
+            => CopyRecordedTicksRange(slot, start, ticks, ticks.Length);
+
+        internal static int CopyRecordedTicksRange(int slot, int start, ReplayTick[] ticks, int count)
+            => BotController_CopyRecordedTicksRange(slot, start, ticks, count);
 
         // Copies a bounded recorded subtick range.
         public static int CopyRecordedSubticksRange(int slot, int start, SubtickMove[] subs)
-            => BotController_CopyRecordedSubticksRange(slot, start, subs, subs.Length);
+            => CopyRecordedSubticksRange(slot, start, subs, subs.Length);
+
+        internal static int CopyRecordedSubticksRange(int slot, int start, SubtickMove[] subs, int count)
+            => BotController_CopyRecordedSubticksRange(slot, start, subs, count);
 
         // Copies a bounded recorded command range.
         public static int CopyRecordedCommandsRange(int slot, int start, ReplayCommandFrame[] commands)
-            => BotController_CopyRecordedCommandsRange(slot, start, commands, commands.Length);
+            => CopyRecordedCommandsRange(slot, start, commands, commands.Length);
+
+        internal static int CopyRecordedCommandsRange(int slot, int start, ReplayCommandFrame[] commands, int count)
+            => BotController_CopyRecordedCommandsRange(slot, start, commands, count);
 
         // Recorded subtick count.
         public static int RecordedSubtickCount(int slot) => BotController_GetRecordedSubtickCount(slot);
@@ -326,22 +335,14 @@ namespace BotControllerApi
         // Copies recorded ticks and subticks.
         public static (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
         {
-            var (ticks, subs, _) = GetRecordedMotionExtended(slot);
-            return (ticks, subs);
-        }
-
-        // Copies aligned tick, subtick, and command buffers.
-        public static (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-        {
             int nt = BotController_GetRecordedTickCount(slot);
             if (nt <= 0)
-                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>(), Array.Empty<ReplayCommandFrame>());
+                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>());
 
             var ticks = new ReplayTick[nt];
             int gotT = BotController_CopyRecordedTicks(slot, ticks, nt);
             if (gotT <= 0)
-                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>(), Array.Empty<ReplayCommandFrame>());
+                return (Array.Empty<ReplayTick>(), Array.Empty<SubtickMove>());
             if (gotT != nt) Array.Resize(ref ticks, gotT);
 
             int ns = BotController_GetRecordedSubtickCount(slot);
@@ -355,6 +356,16 @@ namespace BotControllerApi
                 if (gotS <= 0) subs = Array.Empty<SubtickMove>();
                 else if (gotS != ns) Array.Resize(ref subs, gotS);
             }
+
+            return (ticks, subs);
+        }
+
+        // Copies aligned tick, subtick, and command buffers.
+        public static (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
+            GetRecordedMotionExtended(int slot)
+        {
+            var (ticks, subs) = GetRecordedMotion(slot);
+            if (ticks.Length == 0) return (ticks, subs, Array.Empty<ReplayCommandFrame>());
 
             int nc = BotController_GetRecordedCommandCount(slot);
             ReplayCommandFrame[] commands;

@@ -71,13 +71,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Ticks));
         writer.WriteStartArray();
+        var batch = new ReplayTick[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayTick[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedTicksRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedTicksRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording ticks changed during save.");
-            foreach (ReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -87,13 +88,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Subticks));
         writer.WriteStartArray();
+        var batch = new SubtickMove[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new SubtickMove[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedSubticksRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedSubticksRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording subticks changed during save.");
-            foreach (SubtickMove subtick in batch) JsonSerializer.Serialize(writer, subtick, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -103,13 +105,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Commands));
         writer.WriteStartArray();
+        var batch = new ReplayCommandFrame[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayCommandFrame[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedCommandsRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedCommandsRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording commands changed during save.");
-            foreach (ReplayCommandFrame command in batch) JsonSerializer.Serialize(writer, command, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -127,14 +130,6 @@ public static class MotionStore
         recording.InputHistory ??= Array.Empty<byte>();
         if (recording.Commands.Length != recording.Ticks.Length)
             throw new InvalidDataException("Recording commands must match the tick count.");
-
-        const uint eventDrop = 1U << 0;
-        const uint dropReleasePose = 1U << 3;
-        foreach (ReplayTick tick in recording.Ticks)
-        {
-            if ((tick.EventFlags & eventDrop) != 0 && (tick.EventDropVectorFlags & dropReleasePose) == 0)
-                throw new InvalidDataException("Recording lacks the required drop release pose.");
-        }
 
         const uint commandFieldWeaponSelectDef = 1U << 8;
         foreach (ReplayCommandFrame command in recording.Commands)

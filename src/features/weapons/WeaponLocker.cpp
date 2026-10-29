@@ -41,12 +41,7 @@ std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initi
 bool g_installed = false;
 
 // LockTarget -> engine weapon-slot index
-int LockTargetToEngineSlot(LockTarget t)
-{
-    int v = static_cast<int>(t);
-    if (v < 1 || v > 5) return -1;
-    return v - 1;
-}
+int LockTargetToEngineSlot(LockTarget t) { return static_cast<int>(t) - 1; }
 
 bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 
@@ -55,6 +50,7 @@ bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 // Blocks AI weapon selection during locks or replay.
 KHook::Return<void> HookedEquipBestWeapon(void* bot, char mustEquip) noexcept
 {
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     const auto sr = ResolveSlot(bot);
     if (sr.slot >= 0 && motion_recorder::IsReplaying(sr.slot)) return { KHook::Action::Supersede };
     LockTarget lt = (sr.slot >= 0) ? weapon_locker_state::Get(sr.slot) : LockTarget::None;
@@ -65,6 +61,7 @@ KHook::Return<void> HookedEquipBestWeapon(void* bot, char mustEquip) noexcept
 // Blocks AI pistol selection during locks or replay.
 KHook::Return<void> HookedEquipPistol(void* bot, char mustEquip) noexcept
 {
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     const auto sr = ResolveSlot(bot);
     if (sr.slot >= 0 && motion_recorder::IsReplaying(sr.slot)) return { KHook::Action::Supersede };
     LockTarget lt = (sr.slot >= 0) ? weapon_locker_state::Get(sr.slot) : LockTarget::None;
@@ -75,6 +72,7 @@ KHook::Return<void> HookedEquipPistol(void* bot, char mustEquip) noexcept
 // Records switches and enforces the locked slot.
 KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 {
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyRecording()) return { KHook::Action::Ignore };
     const int slot = input_injector::pawn_binding::ServicesToSlot(ws);
     if (slot < 0 || slot >= motion_recorder::kMaxSlots) return { KHook::Action::Ignore };
     if (weapon && motion_recorder::IsRecording(slot) && input_injector::pawn_binding::RegisteredWeaponServices(slot) == ws)
@@ -91,7 +89,6 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
     if (input_injector::pawn_binding::CurrentWeaponServices(slot) != ws) return { KHook::Action::Ignore };
 
     int engineSlot = LockTargetToEngineSlot(lt);
-    if (engineSlot < 0 || !g_getSlot) return { KHook::Action::Ignore };
 
     if (engineSlot == 3 && weapon && IsGrenadeDef(ReadDefIndex(weapon))) return { KHook::Action::Ignore };
 
@@ -292,7 +289,6 @@ int SwitchToLockTarget(int slot)
     LockTarget lt = weapon_locker_state::Get(slot);
     if (lt == LockTarget::None) return 3;
     int engineSlot = LockTargetToEngineSlot(lt);
-    if (engineSlot < 0) return 3;
 
     void* ws = input_injector::pawn_binding::CurrentWeaponServices(slot);
     if (!ws) return 1;
