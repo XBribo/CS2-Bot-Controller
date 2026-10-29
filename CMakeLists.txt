@@ -6,21 +6,16 @@ if(NOT DEFINED PLUGIN_VERSION)
     set(PLUGIN_VERSION "${PROJECT_VERSION}")
 endif()
 find_package(Git QUIET)
-set(PLUGIN_GIT_SHA "Local")
-if(GIT_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        OUTPUT_VARIABLE git_sha
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE git_result
-        ERROR_QUIET
-    )
-    if(git_result EQUAL 0)
-        set(PLUGIN_GIT_SHA "${git_sha}")
-    endif()
-endif()
-
+set(PLUGIN_BUILD_INFO "${CMAKE_BINARY_DIR}/generated/plugin_build_info.h")
+add_custom_target(BotController_build_info
+    COMMAND "${CMAKE_COMMAND}"
+        "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+        "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DOUTPUT_FILE=${PLUGIN_BUILD_INFO}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/UpdateBuildInfo.cmake"
+    BYPRODUCTS "${PLUGIN_BUILD_INFO}"
+    VERBATIM
+)
 find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format clang-format.exe)
 set(BOT_CONTROLLER_FORMAT_FILES "")
 # Format plugin sources only.
@@ -87,12 +82,14 @@ add_library(
 
 target_link_libraries(BotController PRIVATE cs2_sdk::sdk)
 cs2_sdk_configure_plugin(BotController)
+add_dependencies(BotController BotController_build_info)
 
 if(ENABLE_FORMAT_CHECK)
     add_dependencies(BotController format-check)
 endif()
 
 target_include_directories(BotController PRIVATE
+    "${CMAKE_BINARY_DIR}/generated"
     src
     src/core
     src/core/entity
@@ -110,7 +107,6 @@ target_compile_definitions(
     BotController
     PRIVATE
     SEMVER="${PLUGIN_VERSION}"
-    GITHUB_SHA="${PLUGIN_GIT_SHA}"
 )
 
 if(WIN32)
@@ -145,9 +141,7 @@ set_target_properties(
 )
 
 # Stage the Metamod entry, gamedata, and command permissions.
-add_custom_command(
-    TARGET BotController
-    POST_BUILD
+add_custom_target(BotController_resources
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "${CMAKE_BINARY_DIR}/package/addons/metamod"
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -161,4 +155,6 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/configs/addons/BotController/config.json"
         "${CMAKE_BINARY_DIR}/package/addons/BotController/config.json"
+    VERBATIM
 )
+add_dependencies(BotController BotController_resources)
