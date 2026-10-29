@@ -4,8 +4,6 @@ namespace BotControllerApi
 {
     public interface IBotControllerApi
     {
-        int AbiVersion { get; }
-
         // ---- locks ----
 
         // All / Aim
@@ -39,7 +37,7 @@ namespace BotControllerApi
         (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot);
 
-        // Optional input history, separate from the ABI 24 command layout.
+        // Optional input history.
         byte[] GetRecordedInputHistory(int slot) => System.Array.Empty<byte>();
 
         // ---- replay ----

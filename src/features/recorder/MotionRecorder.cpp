@@ -671,7 +671,7 @@ void OnRecordCommandPost(int slot, void* services)
             r.subs.push_back(sm);
         r.ticks.push_back(t);
         r.commands.push_back(r.pendingCommand);
-        // Keep history separate from the ABI 24 command layout.
+        // Stores input history separately.
         const auto historySize = static_cast<uint32_t>(r.pendingHistory.size());
         for (unsigned shift = 0; shift < 32; shift += 8)
             r.inputHistory.push_back(static_cast<uint8_t>(historySize >> shift));

@@ -58,7 +58,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         LoadCommandPermissions();
         if (!EnsureBridgeAvailable()) return;
 
-        ResetSessions();
         Directory.CreateDirectory(RecordingsDir);
 
         Core.Event.OnTick += OnTick;
@@ -198,32 +197,22 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             : $"Slot {slot}: native pawn registration failed.";
     }
 
-    // Caches the bridge availability check.
+    // Initializes the bridge once.
     private bool EnsureBridgeAvailable()
     {
         if (_bridgeChecked) return _bridgeAvailable;
 
         _bridgeChecked = true;
-        _bridgeAvailable = ProbeBridge();
-        return _bridgeAvailable;
-    }
-
-    // Checks the bridge and ABI.
-    private bool ProbeBridge()
-    {
         try
         {
-            if (BotController.IsCompatible())
-                return true;
-
-            Logger.LogWarning("ABI mismatch: {AbiVersion}", BotController.AbiVersion);
-            return false;
+            ResetSessions();
+            _bridgeAvailable = true;
         }
         catch (Exception ex)
         {
             Logger.LogWarning("Bridge unavailable: {Reason}", ex.Message);
-            return false;
         }
+        return _bridgeAvailable;
     }
 
     // ---- Chat Commands ----

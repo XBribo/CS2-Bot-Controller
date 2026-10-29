@@ -1,4 +1,4 @@
-// BotController native API, ABI 24. Check IsCompatible() before use.
+// Native bridge for managed providers.
 // Engine calls: main thread. Stopped-buffer copies and loads: worker-safe.
 
 using System.Runtime.InteropServices;
@@ -8,8 +8,6 @@ namespace BotControllerApi
     // Native export bindings.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 24;
-
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
 
@@ -24,9 +22,6 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_IsLocked(int slot, int kind);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_GetVersion();
 
         // Button injection export.
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
@@ -209,12 +204,6 @@ namespace BotControllerApi
             int tick,
             int audibleMask);
 
-        // Checks native ABI compatibility.
-        public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
-
-        // Loaded native ABI version.
-        public static int AbiVersion => BotController_GetVersion();
-
         // Starts button injection; returns a token.
         public static long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
             => BotController_InjectUsercmd(slot, buttonMask, durationMs);
@@ -383,7 +372,7 @@ namespace BotControllerApi
 
         // ---- replay ----
 
-        // Preserves the ABI 24 managed load signature.
+        // Loads command buffers.
         public static bool LoadReplay(
             int slot,
             ReplayTick[] ticks,

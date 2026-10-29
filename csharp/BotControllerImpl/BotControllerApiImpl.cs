@@ -4,8 +4,6 @@ namespace BotControllerApi
 {
     public sealed class BotControllerApiImpl : IBotControllerApi
     {
-        public int AbiVersion => BotController.AbiVersion;
-
         // ---- locks ----
         public bool Lock(int slot, LockKind kind) => BotController.Lock(slot, kind);
         public bool Lock(int slot, LockTarget target) => BotController.Lock(slot, target);

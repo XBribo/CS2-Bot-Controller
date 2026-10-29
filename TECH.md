@@ -74,7 +74,7 @@ Native output: `<build-directory>/package/addons/`. Use `build.ps1` for complete
 
 ### Contract and Compatibility
 
-- Native plugin and provider: **ABI 24**; Metamod requires KHook support.
+- Deploy the native plugin, shared API, and provider together; Metamod requires KHook support.
 - Shared API: `IBotControllerApi`, key `botcontroller:api`.
 - Reference `BotControllerApi.dll`; preserve its struct layouts.
 - Slots: engine player slots `0–63`.
@@ -202,7 +202,6 @@ Contract: [IBotControllerApi.cs](csharp/BotControllerApi/IBotControllerApi.cs). 
 
 | Area | Members |
 | --- | --- |
-| Compatibility | `AbiVersion` |
 | Locks | `Lock`, `Unlock`, `UnlockAll`, `IsLocked`, `GetWeaponLock` |
 | Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended`, `GetRecordedInputHistory` |
 | Replay data | `SetReplayPawn`, `LoadReplay`, `TransferRecordingToReplay` |

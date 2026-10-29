@@ -40,18 +40,13 @@ public partial class BotControllerPlugin : BasePlugin
     {
         Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
         LoadCommandPermissions();
-        if (!BotController.IsCompatible())
-        {
-            Server.PrintToConsole("[BotController] BotController ABI mismatch; disabled.");
-            return;
-        }
+        ResetSessions();
 
         // Publish the botcontroller:api capability.
         Capabilities.RegisterPluginCapability(
             BotControllerCapability.Cap, () => new BotControllerApiImpl());
 
         _bridgeReady = true;
-        ResetSessions();
         Directory.CreateDirectory(RecordingsDir);
         RegisterListener<Listeners.OnTick>(OnTick);
         RegisterListener<Listeners.OnMapStart>(_ => ResetSessions());
