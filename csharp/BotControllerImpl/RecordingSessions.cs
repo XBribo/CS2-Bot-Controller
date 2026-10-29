@@ -150,8 +150,9 @@ internal sealed class RecordingSessions(
     internal string StopReplay(int slot)
     {
         _loadingSlots.Remove(slot);
-        BotController.StopReplay(slot);
-        return $"Stopped replay on slot {slot}.";
+        return BotController.StopReplay(slot)
+            ? $"Stopped replay on slot {slot}."
+            : $"Failed to stop replay on slot {slot}.";
     }
 
     // Resolves a plugin-local recording path.
