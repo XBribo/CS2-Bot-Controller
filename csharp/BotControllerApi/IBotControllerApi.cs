@@ -4,6 +4,9 @@ namespace BotControllerApi
 {
     public interface IBotControllerApi
     {
+        // Supported API contract version.
+        int ApiVersion { get; }
+
         // ---- locks ----
 
         // All / Aim
