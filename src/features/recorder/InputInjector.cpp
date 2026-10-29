@@ -479,7 +479,7 @@ void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const
     {
         const CSubtickMoveStep& s = base.subtick_moves(i);
         moves[i].when = s.when();
-        moves[i].button = static_cast<uint32_t>(s.button());
+        moves[i].button = s.button();
         moves[i].pressed = s.pressed() ? 1.0F : 0.0F;
         moves[i].analogForward = s.analog_forward_delta();
         moves[i].analogLeft = s.analog_left_delta();
@@ -622,11 +622,11 @@ bool ApplyReplayUserCommand(int slot, void* services, PlayerCommand* pc, CBaseUs
         base->clear_subtick_moves();
         for (int i = 0; i < frame.subtickCount; ++i)
         {
-            uint32_t button = frame.subticks[i].button;
+            uint64_t button = frame.subticks[i].button;
             float pressed = frame.subticks[i].pressed;
-            if (suppressUnsafeUtilityAttack && (button & static_cast<uint32_t>(kGrenadeAttackMask)) != 0)
+            if (suppressUnsafeUtilityAttack && (button & kGrenadeAttackMask) != 0)
             {
-                button &= ~static_cast<uint32_t>(kGrenadeAttackMask);
+                button &= ~kGrenadeAttackMask;
                 if (button == 0) pressed = 0.0F;
             }
 

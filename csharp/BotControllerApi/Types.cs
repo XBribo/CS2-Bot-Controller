@@ -75,7 +75,7 @@ namespace BotControllerApi
     public struct SubtickMove
     {
         public float When;
-        public uint Button;
+        public ulong Button;
         public float Pressed;
         public float AnalogForward;
         public float AnalogLeft;

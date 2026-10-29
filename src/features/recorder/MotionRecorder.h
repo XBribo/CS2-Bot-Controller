@@ -85,7 +85,7 @@ struct ReplayDropEvent
 struct SubtickMove
 {
     float when; // [0,1) time within the tick
-    uint32_t button; // 0 = analog, else engine button bit
+    uint64_t button; // 0 = analog, else engine button bit
     float pressed; // digital: 1=down 0=up (stored as float)
     float analogForward; // analog_forward_delta
     float analogLeft; // analog_left_delta
@@ -116,6 +116,7 @@ struct ReplayCommandFrameData
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
 static_assert(sizeof(ReplayTick) == 256);
+static_assert(sizeof(SubtickMove) == 32);
 
 namespace motion_recorder {
 constexpr int kMaxSlots = 64;
