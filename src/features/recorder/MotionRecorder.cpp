@@ -628,7 +628,7 @@ void OnRecordCommandPost(int slot, void* services)
     });
 
     {
-        std::scoped_lock lk(r.mu);
+        std::unique_lock lk(r.mu);
         if (!r.recording.load(std::memory_order_acquire) || generation != PawnGeneration(slot) || !r.havePre || !r.havePendingCommand)
             return;
         if (def >= 0) r.currentDef.store(def, std::memory_order_relaxed);
@@ -637,6 +637,14 @@ void OnRecordCommandPost(int slot, void* services)
             r.pendingEventFlags |= ReplayEventDrop;
             r.pendingDropEvent = candidate.event;
             std::erase_if(r.pendingDropCandidates, [&](const auto& pending) { return pending.weapon == candidate.weapon; });
+        }
+
+        if ((r.pendingEventFlags & ReplayEventDrop) != 0 && (r.pendingDropEvent.vectorFlags & ReplayDropReleasePose) == 0)
+        {
+            lk.unlock();
+            BC_LOG_WARN("slot %d: drop release pose unavailable; recording stopped", slot);
+            StopRecord(slot);
+            return;
         }
 
         ReplayTick t{};
