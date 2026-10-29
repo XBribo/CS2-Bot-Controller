@@ -417,7 +417,6 @@ KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexce
 // Reads a snapshot from the registered Pawn.
 bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 {
-    if (!services) return false;
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
     if (!pawn) return false;
 
@@ -553,20 +552,15 @@ int RecordedInputHistorySize(int slot)
 
 void SetLiveWs(int slot, void* ws)
 {
-    if (!ValidSlot(slot)) return;
     g_rec[slot].liveWs.store(ws, std::memory_order_relaxed);
     EnsureDropWeaponHook(ws);
 }
 
-void SetCurrentDef(int slot, int defIndex)
-{
-    if (ValidSlot(slot)) g_rec[slot].currentDef.store(defIndex, std::memory_order_relaxed);
-}
+void SetCurrentDef(int slot, int defIndex) { g_rec[slot].currentDef.store(defIndex, std::memory_order_relaxed); }
 
 // Captures state before queued drops and movement.
 bool OnRecordCommandPre(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return false;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return false;
     const uint64_t generation = PawnGeneration(slot);
@@ -609,7 +603,6 @@ void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::stri
 // Commits one command; engine calls run unlocked.
 void OnRecordCommandPost(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return;
     const uint64_t generation = PawnGeneration(slot);
@@ -929,7 +922,6 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
     out = {};
     out.weaponSelect = -1;
     out.rawWeaponSelect = -1;
-    if (!ValidSlot(slot) || !services) return false;
 
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
@@ -1016,7 +1008,6 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
 
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
 {
-    if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
@@ -1083,7 +1074,6 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 {
     event = {};
     event.weaponDefIndex = -1;
-    if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
 
@@ -1247,7 +1237,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
 // Restores Pawn state before simulation.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
 {
-    if (!ValidSlot(slot) || !services || !g_rep[slot].playing.load(std::memory_order_acquire)) return false;
+    if (!g_rep[slot].playing.load(std::memory_order_acquire)) return false;
     const uint64_t generation = PawnGeneration(slot);
 
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
@@ -1289,7 +1279,6 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
 // Restores end state and advances the replay cursor.
 void OnReplayCommandPost(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return;
     const uint64_t generation = PawnGeneration(slot);

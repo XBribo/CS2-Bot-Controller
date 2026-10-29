@@ -283,7 +283,6 @@ bool SelectWeaponRaw(void* ws, void* weapon)
 int SwitchToLockTarget(int slot)
 {
     if (!g_installed || !g_hookSelectItem.Active() || !g_getSlot) return 3;
-    if (slot < 0 || slot >= 64) return 3;
     if (motion_recorder::IsReplaying(slot)) return 4;
 
     LockTarget lt = weapon_locker_state::Get(slot);

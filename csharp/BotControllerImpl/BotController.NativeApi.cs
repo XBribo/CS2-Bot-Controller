@@ -306,19 +306,12 @@ namespace BotControllerApi
         // Copies recorded input history.
         public static byte[] GetRecordedInputHistory(int slot)
         {
-            try
-            {
-                int size = BotController_GetRecordedInputHistorySize(slot);
-                if (size < 0) throw new InvalidOperationException("Recording history is unavailable.");
-                var history = new byte[size];
-                if (size > 0 && BotController_CopyRecordedInputHistoryRange(slot, 0, history, size) != size)
-                    throw new InvalidOperationException("Recording history changed during copy.");
-                return history;
-            }
-            catch (EntryPointNotFoundException)
-            {
-                return Array.Empty<byte>();
-            }
+            int size = BotController_GetRecordedInputHistorySize(slot);
+            if (size < 0) throw new InvalidOperationException("Recording history is unavailable.");
+            var history = new byte[size];
+            if (size > 0 && BotController_CopyRecordedInputHistoryRange(slot, 0, history, size) != size)
+                throw new InvalidOperationException("Recording history changed during copy.");
+            return history;
         }
 
         // Copies recorded ticks and subticks.
@@ -403,16 +396,9 @@ namespace BotControllerApi
             commands ??= Array.Empty<ReplayCommandFrame>();
             if (inputHistory is not { Length: > 0 })
                 return BotController_LoadReplay(slot, ticks, ticks.Length, subs, subs.Length, commands, commands.Length, pawnGeneration) == 0;
-            try
-            {
-                return BotController_LoadReplayWithInputHistory(
-                    slot, ticks, ticks.Length, subs, subs.Length, commands, commands.Length,
-                    inputHistory, inputHistory.Length, pawnGeneration) == 0;
-            }
-            catch (EntryPointNotFoundException)
-            {
-                return false;
-            }
+            return BotController_LoadReplayWithInputHistory(
+                slot, ticks, ticks.Length, subs, subs.Length, commands, commands.Length,
+                inputHistory, inputHistory.Length, pawnGeneration) == 0;
         }
 
         // Transfers recorded buffers directly between native slots.
