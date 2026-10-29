@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BotController VERSION 0.8.0 LANGUAGES CXX)
+project(BotController VERSION 0.9.0 LANGUAGES CXX)
 
 # Override the base version with -DPLUGIN_VERSION.
 if(NOT DEFINED PLUGIN_VERSION)
