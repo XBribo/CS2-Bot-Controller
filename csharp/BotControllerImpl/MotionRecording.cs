@@ -15,6 +15,7 @@ namespace BotControllerImpl;
 // Recorded motion and capture tickrate.
 public sealed class MotionRecording
 {
+    public int FormatVersion { get; set; }
     public required int Tickrate { get; set; }
     public required ReplayTick[] Ticks { get; set; }
     public required SubtickMove[] Subticks { get; set; }
@@ -25,6 +26,8 @@ public sealed class MotionRecording
 // Recording file storage.
 public static class MotionStore
 {
+    private const int CurrentFormatVersion = 1;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = false,
@@ -50,6 +53,7 @@ public static class MotionStore
             using (var writer = new Utf8JsonWriter(brotli))
             {
                 writer.WriteStartObject();
+                writer.WriteNumber(nameof(MotionRecording.FormatVersion), CurrentFormatVersion);
                 writer.WriteNumber(nameof(MotionRecording.Tickrate), tickrate);
                 WriteTicks(writer, slot, ticks);
                 WriteSubticks(writer, slot, subticks);
@@ -130,13 +134,6 @@ public static class MotionStore
         recording.InputHistory ??= Array.Empty<byte>();
         if (recording.Commands.Length != recording.Ticks.Length)
             throw new InvalidDataException("Recording commands must match the tick count.");
-
-        const uint commandFieldWeaponSelectDef = 1U << 8;
-        foreach (ReplayCommandFrame command in recording.Commands)
-        {
-            if ((command.Fields & commandFieldWeaponSelectDef) == 0)
-                throw new InvalidDataException("Recording uses an unsupported command JSON format.");
-        }
 
         return recording;
     }
