@@ -26,7 +26,7 @@ public partial class BotControllerPlugin : BasePlugin
     private RecordingSessions Sessions => _sessions ??= new(
         RecordingsDir, RegisterPawnForSlot, NotifyPlayer,
         message => Server.PrintToConsole($"[BotController] {message}"));
-    private bool _bridgeReady;
+    private BotControllerApiImpl? _api;
     private CommandPermissionsConfig _commandPermissions = new(true);
 
     // Loads the provider and publishes the API.
@@ -36,24 +36,33 @@ public partial class BotControllerPlugin : BasePlugin
         LoadCommandPermissions();
         ResetSessions();
 
-        // Publish the botcontroller:api capability.
-        Capabilities.RegisterPluginCapability(
-            BotControllerCapability.Cap, () => new BotControllerApiImpl());
-
-        _bridgeReady = true;
         Directory.CreateDirectory(RecordingsDir);
         RegisterListener<Listeners.OnTick>(OnTick);
         RegisterListener<Listeners.OnMapStart>(_ => ResetSessions());
         RegisterListener<Listeners.OnMapEnd>(ResetSessions);
         RegisterListener<Listeners.OnClientDisconnect>(OnDisconnect);
+        _api = new BotControllerApiImpl();
+        try
+        {
+            BotControllerProvider.Attach(_api,
+                supplier => Capabilities.RegisterPluginCapability(BotControllerCapability.Cap, supplier));
+        }
+        catch
+        {
+            _api.Dispose();
+            _api = null;
+            throw;
+        }
     }
 
     // Drains native buffer readers before unload.
     public override void Unload(bool hotReload)
     {
-        if (!_bridgeReady) return;
-        _bridgeReady = false;
-        Sessions.Drain();
+        BotControllerProvider.Detach(_api);
+        _api?.Dispose();
+        _api = null;
+        _sessions?.Drain();
+        _sessions = null;
     }
 
     private void LoadCommandPermissions()
@@ -85,7 +94,7 @@ public partial class BotControllerPlugin : BasePlugin
     // Invalidates sessions before slot reuse.
     private void OnDisconnect(int slot)
     {
-        if (!_bridgeReady) return;
+        if (_api == null) return;
         Sessions.Disconnect(slot);
     }
 
@@ -131,7 +140,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnRecord(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (_api == null || player == null || !player.IsValid) return;
         if (cmd.ArgCount > 2)
         {
             cmd.ReplyToCommand("[BotController] Usage: !record [fileName]");
@@ -146,7 +155,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopRecord(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (_api == null || player == null || !player.IsValid) return;
         cmd.ReplyToCommand($"[BotController] {Sessions.StopRecord(player.Slot, player.SteamID)}");
     }
 
@@ -155,7 +164,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(minArgs: 1, usage: "<slot> [fileName]", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnReplay(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (_api == null || player == null || !player.IsValid) return;
         if (!CanExecuteReplayCommand(player, cmd)) return;
         if (cmd.ArgCount > 3 || !int.TryParse(cmd.GetArg(1), out int slot))
         {
@@ -171,7 +180,7 @@ public partial class BotControllerPlugin : BasePlugin
     [CommandHelper(minArgs: 1, usage: "<slot>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnStopReplay(CCSPlayerController? player, CommandInfo cmd)
     {
-        if (!_bridgeReady || player == null || !player.IsValid) return;
+        if (_api == null || player == null || !player.IsValid) return;
         if (!CanExecuteReplayCommand(player, cmd)) return;
         if (!int.TryParse(cmd.GetArg(1), out int slot)) return;
         cmd.ReplyToCommand($"[BotController] {Sessions.StopReplay(slot)}");

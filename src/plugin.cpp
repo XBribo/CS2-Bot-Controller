@@ -99,6 +99,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         Unload(nullptr, 0);
         return false;
     }
+    m_loaded = true;
     BC_LOG_INFO("Loaded %s", GetVersion());
     BC_LOG_DEBUG("Built %s", GetDate());
     return true;
@@ -119,8 +120,13 @@ const char* BotControllerPlugin::GetVersion() { return VERSION_STRING; }
 const char* BotControllerPlugin::GetDate() { return BUILD_TIMESTAMP; }
 const char* BotControllerPlugin::GetLogTag() { return "BC"; }
 
-bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
+bool BotControllerPlugin::Unload(char* error, size_t maxlen)
 {
+    if (m_loaded)
+    {
+        std::snprintf(error, maxlen, "Restart required");
+        return false;
+    }
     // Drain movement callbacks before releasing sessions.
     cs2bc::input_injector::Remove();
     cs2bc::motion_recorder::ClearAll();

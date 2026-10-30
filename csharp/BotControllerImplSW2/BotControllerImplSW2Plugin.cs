@@ -31,6 +31,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         message => Logger.LogError("{Message}", message));
     private bool _bridgeChecked;
     private bool _bridgeAvailable;
+    private BotControllerApiImpl? _api;
     private CommandPermissionsConfig _commandPermissions = new(true);
 
     // ---- Lifecycle ----
@@ -42,7 +43,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
         // Publish the botcontroller:api shared interface.
         interfaceManager.AddSharedInterface<IBotControllerApi, BotControllerApiImpl>(
-            InterfaceKey, new BotControllerApiImpl());
+            InterfaceKey, _api ??= new BotControllerApiImpl());
     }
 
     // Registers file-job callbacks.
@@ -63,6 +64,8 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Removes file-job callbacks on unload.
     public override void Unload()
     {
+        _api?.Dispose();
+        _api = null;
         if (_bridgeAvailable)
         {
             Core.Event.OnTick -= OnTick;
@@ -72,6 +75,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             Sessions.Drain();
             _bridgeAvailable = false;
         }
+        _bridgeChecked = false;
     }
 
     // Resets Pawn registrations on map start.
