@@ -10,21 +10,20 @@ bool Load(nlohmann::json& gamedata, cs2_sdk::modules::ModuleInfo& serverModule, 
     const std::string gamedataPath = cs2_sdk::gameconfig::ComputePath();
     if (gamedataPath.empty())
     {
-        std::snprintf(error, maxlen, "Failed to compute gamedata.json path");
+        std::snprintf(error, maxlen, "gamedata path unresolved");
         return false;
     }
 
     if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
     {
-        std::snprintf(error, maxlen, "Failed to load gamedata: %s", gamedataPath.c_str());
+        std::snprintf(error, maxlen, "gamedata load failed: %s", gamedataPath.c_str());
         return false;
     }
 
     cs2_sdk::modules::Initialize();
     if (!cs2_sdk::modules::server || !cs2_sdk::modules::server->Code())
     {
-        std::snprintf(error, maxlen, "Could not open CS2 server module at '%s'",
-                      cs2_sdk::modules::server ? cs2_sdk::modules::server->Path() : "");
+        std::snprintf(error, maxlen, "server module unavailable: %s", cs2_sdk::modules::server ? cs2_sdk::modules::server->Path() : "");
         return false;
     }
     serverModule = cs2_sdk::modules::server->Code();

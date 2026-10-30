@@ -75,7 +75,7 @@ public partial class BotControllerPlugin : BasePlugin
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            Server.PrintToConsole("[BotController] command permission config invalid or unreadable: using restricted defaults");
+            Server.PrintToConsole("[BotController] Permission config failed; using restricted defaults");
         }
     }
 

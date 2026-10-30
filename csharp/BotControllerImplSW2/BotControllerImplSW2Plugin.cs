@@ -105,7 +105,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            Logger.LogWarning("Command permission config invalid or unreadable: using restricted defaults");
+            Logger.LogWarning("Permission config failed; using restricted defaults");
         }
     }
 
