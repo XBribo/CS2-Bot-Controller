@@ -1,5 +1,6 @@
 #include "core/log.h"
 #include "plugin.h"
+#include "plugin_build_info.h"
 
 #include <cstdio>
 
@@ -42,7 +43,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     const bool loaded = [&]() -> bool {
         if (!KHook::__exported__khook)
         {
-            std::snprintf(error, maxlen, "Metamod with KHook support is required");
+            std::snprintf(error, maxlen, "KHook support required");
             return false;
         }
 
@@ -51,13 +52,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         char schemaError[256] = { 0 };
         if (!cs2_sdk::schema::Init(g_schemaSystem, schemaError, sizeof(schemaError)))
         {
-            std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
+            std::snprintf(error, maxlen, "Schema init failed: %s", schemaError);
             return false;
         }
         if (!cs2bc::offsets::LoadFromSchema(schemaError, sizeof(schemaError)))
         {
             cs2_sdk::schema::Reset();
-            std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
+            std::snprintf(error, maxlen, "Schema offsets failed: %s", schemaError);
             return false;
         }
         ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL);
@@ -98,6 +99,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         Unload(nullptr, 0);
         return false;
     }
+    m_loaded = true;
     BC_LOG_INFO("Loaded %s", GetVersion());
     BC_LOG_DEBUG("Built %s", GetDate());
     return true;
@@ -118,8 +120,13 @@ const char* BotControllerPlugin::GetVersion() { return VERSION_STRING; }
 const char* BotControllerPlugin::GetDate() { return BUILD_TIMESTAMP; }
 const char* BotControllerPlugin::GetLogTag() { return "BC"; }
 
-bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
+bool BotControllerPlugin::Unload(char* error, size_t maxlen)
 {
+    if (m_loaded)
+    {
+        std::snprintf(error, maxlen, "Restart required");
+        return false;
+    }
     // Drain movement callbacks before releasing sessions.
     cs2bc::input_injector::Remove();
     cs2bc::motion_recorder::ClearAll();

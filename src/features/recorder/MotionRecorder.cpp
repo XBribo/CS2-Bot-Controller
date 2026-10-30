@@ -18,10 +18,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstddef>
+#include <initializer_list>
 #include <mutex>
 #include <vector> // NOLINT(misc-include-cleaner)
 
 #include <convar.h>
+#include <const.h>
 #include <engine2/isource2server.h>
 #include <playerslot.h>
 
@@ -144,6 +146,37 @@ constexpr int kMolotovDef = 46;
 constexpr int kIncendiaryDef = 48;
 
 bool ValidSlot(int s) { return s >= 0 && s < kMaxSlots; }
+
+bool Finite(std::initializer_list<float> values)
+{
+    return std::all_of(values.begin(), values.end(), [](float value) {
+        return std::isfinite(value);
+    });
+}
+
+// Validates replay snapshots.
+bool ValidSnapshot(const MovementSnapshot& s)
+{
+    return Finite({ s.originX, s.originY, s.originZ, s.velX, s.velY, s.velZ, s.pitch, s.yaw, s.roll, s.duckAmount, s.duckSpeed,
+                    s.ladderNormalX, s.ladderNormalY, s.ladderNormalZ }) &&
+           s.duckAmount >= 0.0F && s.duckAmount <= 1.0F && s.moveType < MOVETYPE_LAST && s.actualMoveType < MOVETYPE_LAST &&
+           s.ducked <= 1 && s.ducking <= 1 && s.desiresDuck <= 1;
+}
+
+bool ValidCommand(const ReplayCommandFrameData& command)
+{
+    constexpr uint32_t legacyFields = 1U << 8;
+    constexpr uint32_t fields = kCommandFieldForwardMove | kCommandFieldLeftMove | kCommandFieldUpMove | kCommandFieldViewAngles |
+                                kCommandFieldButtons | kCommandFieldMouse | kCommandFieldWeaponSelect | kCommandFieldLeftHand |
+                                legacyFields;
+    return (command.fields & ~fields) == 0 && ((command.fields & kCommandFieldForwardMove) == 0 || std::isfinite(command.forwardMove)) &&
+           ((command.fields & kCommandFieldLeftMove) == 0 || std::isfinite(command.leftMove)) &&
+           ((command.fields & kCommandFieldUpMove) == 0 || std::isfinite(command.upMove)) &&
+           ((command.fields & kCommandFieldViewAngles) == 0 || Finite({ command.pitch, command.yaw, command.roll })) &&
+           ((command.fields & kCommandFieldLeftHand) == 0 || command.leftHandDesired <= 1) &&
+           ((command.fields & kCommandFieldWeaponSelect) == 0 || (command.weaponSelect >= -1 && command.weaponSelect <= UINT16_MAX));
+}
+
 // Validates the drop release transform.
 bool ValidReleasePose(const float* position, const float* quaternion)
 {
@@ -385,7 +418,6 @@ KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexce
 // Reads a snapshot from the registered Pawn.
 bool ReadSnapshot(int slot, void* services, MovementSnapshot& out)
 {
-    if (!services) return false;
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
     if (!pawn) return false;
 
@@ -521,20 +553,15 @@ int RecordedInputHistorySize(int slot)
 
 void SetLiveWs(int slot, void* ws)
 {
-    if (!ValidSlot(slot)) return;
     g_rec[slot].liveWs.store(ws, std::memory_order_relaxed);
     EnsureDropWeaponHook(ws);
 }
 
-void SetCurrentDef(int slot, int defIndex)
-{
-    if (ValidSlot(slot)) g_rec[slot].currentDef.store(defIndex, std::memory_order_relaxed);
-}
+void SetCurrentDef(int slot, int defIndex) { g_rec[slot].currentDef.store(defIndex, std::memory_order_relaxed); }
 
 // Captures state before queued drops and movement.
 bool OnRecordCommandPre(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return false;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return false;
     const uint64_t generation = PawnGeneration(slot);
@@ -555,11 +582,9 @@ bool OnRecordCommandPre(int slot, void* services)
 
 void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
 {
-    if (!ValidSlot(slot) || count < 0) return;
     RecordState& r = g_rec[slot];
-    if (!r.recording.load(std::memory_order_acquire)) return;
-    count = std::min(count, kMaxSubtickPerTick);
     std::scoped_lock lk(r.mu);
+    if (!r.recording.load(std::memory_order_acquire)) return;
     r.pendingSubs.clear();
     for (int i = 0; i < count; ++i)
         r.pendingSubs.push_back(moves[i]);
@@ -568,9 +593,7 @@ void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
 // Holds input until command completion.
 void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history)
 {
-    if (!ValidSlot(slot)) return;
     RecordState& r = g_rec[slot];
-    if (!r.recording.load(std::memory_order_acquire)) return;
     std::scoped_lock lk(r.mu);
     if (!r.recording.load(std::memory_order_acquire)) return;
     r.pendingCommand = command;
@@ -581,7 +604,6 @@ void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::stri
 // Commits one command; engine calls run unlocked.
 void OnRecordCommandPost(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return;
     RecordState& r = g_rec[slot];
     if (!r.recording.load(std::memory_order_acquire)) return;
     const uint64_t generation = PawnGeneration(slot);
@@ -607,7 +629,7 @@ void OnRecordCommandPost(int slot, void* services)
     });
 
     {
-        std::scoped_lock lk(r.mu);
+        std::unique_lock lk(r.mu);
         if (!r.recording.load(std::memory_order_acquire) || generation != PawnGeneration(slot) || !r.havePre || !r.havePendingCommand)
             return;
         if (def >= 0) r.currentDef.store(def, std::memory_order_relaxed);
@@ -616,6 +638,14 @@ void OnRecordCommandPost(int slot, void* services)
             r.pendingEventFlags |= ReplayEventDrop;
             r.pendingDropEvent = candidate.event;
             std::erase_if(r.pendingDropCandidates, [&](const auto& pending) { return pending.weapon == candidate.weapon; });
+        }
+
+        if ((r.pendingEventFlags & ReplayEventDrop) != 0 && (r.pendingDropEvent.vectorFlags & ReplayDropReleasePose) == 0)
+        {
+            lk.unlock();
+            BC_LOG_WARN("slot %d: drop release pose unavailable; recording stopped", slot);
+            StopRecord(slot);
+            return;
         }
 
         ReplayTick t{};
@@ -643,7 +673,7 @@ void OnRecordCommandPost(int slot, void* services)
             r.subs.push_back(sm);
         r.ticks.push_back(t);
         r.commands.push_back(r.pendingCommand);
-        // Keep history separate from the ABI 24 command layout.
+        // Stores input history separately.
         const auto historySize = static_cast<uint32_t>(r.pendingHistory.size());
         for (unsigned shift = 0; shift < 32; shift += 8)
             r.inputHistory.push_back(static_cast<uint8_t>(historySize >> shift));
@@ -748,9 +778,24 @@ bool LoadReplay(int slot,
         uint64_t totalSubticks = 0;
         for (int i = 0; i < tickCount; ++i)
         {
-            if (ticks[i].numSubtick > kMaxSubtickPerTick) return false;
+            if (!ValidSnapshot(ticks[i].pre) || !ValidSnapshot(ticks[i].post) || ticks[i].weaponDefIndex < -1 ||
+                ticks[i].weaponDefIndex > UINT16_MAX || ticks[i].numSubtick > kMaxSubtickPerTick ||
+                (ticks[i].eventFlags & ~static_cast<uint32_t>(ReplayEventDrop)) != 0)
+                return false;
             if ((ticks[i].eventFlags & ReplayEventDrop) != 0)
             {
+                constexpr uint32_t vectorFlags =
+                    ReplayDropVectorTarget | ReplayDropVectorVelocity | ReplayDropBodyYaw | ReplayDropReleasePose;
+                const uint32_t flags = ticks[i].eventDropVectorFlags;
+                if (ticks[i].eventWeaponDefIndex < 0 || ticks[i].eventWeaponDefIndex > UINT16_MAX || (flags & ~vectorFlags) != 0)
+                    return false;
+                if ((flags & ReplayDropVectorTarget) != 0 &&
+                    !Finite({ ticks[i].eventDropTargetX, ticks[i].eventDropTargetY, ticks[i].eventDropTargetZ }))
+                    return false;
+                if ((flags & ReplayDropBodyYaw) != 0 && !std::isfinite(ticks[i].eventDropTargetX)) return false;
+                if ((flags & ReplayDropVectorVelocity) != 0 &&
+                    !Finite({ ticks[i].eventDropVelocityX, ticks[i].eventDropVelocityY, ticks[i].eventDropVelocityZ }))
+                    return false;
                 const float position[3] = { ticks[i].eventDropReleaseX, ticks[i].eventDropReleaseY, ticks[i].eventDropReleaseZ };
                 const float quaternion[4] = { ticks[i].eventDropReleaseQuatX, ticks[i].eventDropReleaseQuatY,
                                               ticks[i].eventDropReleaseQuatZ, ticks[i].eventDropReleaseQuatW };
@@ -762,6 +807,16 @@ bool LoadReplay(int slot,
         }
         if (totalSubticks != subCountValue) return false;
         stagedOffsets[static_cast<size_t>(tickCount)] = static_cast<uint32_t>(totalSubticks);
+
+        for (int i = 0; i < subCount; ++i)
+        {
+            const SubtickMove& s = subs[i];
+            if (!Finite({ s.when, s.analogForward, s.analogLeft, s.pitchDelta, s.yawDelta }) || s.when < 0.0F || s.when >= 1.0F ||
+                (s.button != 0 && s.pressed != 0.0F && s.pressed != 1.0F))
+                return false;
+        }
+        for (int i = 0; i < commandCount; ++i)
+            if (!ValidCommand(commands[i])) return false;
 
         if (tickCount > 0) stagedTicks.assign(ticks, ticks + tickCount);
         if (subCount > 0) stagedSubs.assign(subs, subs + subCount);
@@ -809,11 +864,6 @@ bool StartReplay(int slot, bool loop)
     if (!bot_controller_hooks::ReplayViewReady())
     {
         BC_LOG_WARN("replay: view unavailable");
-        return false;
-    }
-    if (tg::g_vtIdxTeleport < 0)
-    {
-        BC_LOG_WARN("replay: Teleport unavailable");
         return false;
     }
     ReplayState& p = g_rep[slot];
@@ -881,7 +931,6 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
     out = {};
     out.weaponSelect = -1;
     out.rawWeaponSelect = -1;
-    if (!ValidSlot(slot) || !services) return false;
 
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
@@ -893,7 +942,7 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
         std::scoped_lock lk(p.mu);
         const int total = static_cast<int>(p.ticks.size());
         const int cur = p.cursor.load(std::memory_order_relaxed);
-        if (cur < 0 || cur >= total || p.subOffset.size() != p.ticks.size() + 1) return false;
+        if (cur < 0 || cur >= total) return false;
 
         out.tick = p.ticks[static_cast<size_t>(cur)];
         recordedDef = out.tick.weaponDefIndex;
@@ -903,8 +952,7 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
         out.buttons1 = out.tick.pre.buttons1;
         out.buttons2 = out.tick.pre.buttons2;
 
-        const ReplayCommandFrameData* command =
-            static_cast<size_t>(cur) < p.commands.size() ? &p.commands[static_cast<size_t>(cur)] : nullptr;
+        const ReplayCommandFrameData* command = p.commands.empty() ? nullptr : &p.commands[static_cast<size_t>(cur)];
         const bool hasCommandButtons = command && (command->fields & kCommandFieldButtons) != 0;
         if (hasCommandButtons)
         {
@@ -915,8 +963,8 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
         else if (out.buttons1 == 0 && out.buttons2 == 0)
         {
             const uint64_t heldPrev = cur > 0 ? p.ticks[static_cast<size_t>(cur - 1)].pre.buttons : 0;
-            out.buttons1 = out.buttons0 & ~heldPrev;
-            out.buttons2 = heldPrev & ~out.buttons0;
+            out.buttons1 = out.buttons0 ^ heldPrev;
+            out.buttons2 = 0;
         }
 
         if (!p.inputHistory.empty()) out.inputHistory.CopyFrom(p.inputHistory[static_cast<size_t>(cur)]);
@@ -943,7 +991,6 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
 
         const uint32_t begin = p.subOffset[static_cast<size_t>(cur)];
         const uint32_t end = p.subOffset[static_cast<size_t>(cur) + 1];
-        if (begin > end || end > p.subs.size()) return false;
         out.subtickCount = static_cast<int32_t>(end - begin);
         for (int i = 0; i < out.subtickCount; ++i)
             out.subticks[i] = p.subs[static_cast<size_t>(begin) + static_cast<size_t>(i)];
@@ -951,7 +998,7 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
 
     void* ws = input_injector::pawn_binding::ServicesToWeaponServices(slot, services);
     const WeaponSession session{ slot, generation, services, ws };
-    if (!WeaponSessionCurrent(session)) return false;
+    if (!ws || generation != PawnGeneration(slot)) return false;
 
     // Resolve the registered replay inventory.
     if (out.rawWeaponSelect > 0)
@@ -970,7 +1017,6 @@ bool ReplayCommandFrameForSimulation(int slot, void* services, ReplayCommandFram
 
 bool ReplayCommandViewSnapshot(int slot, MovementSnapshot& out)
 {
-    if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
     std::scoped_lock lk(p.mu);
@@ -1037,7 +1083,6 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 {
     event = {};
     event.weaponDefIndex = -1;
-    if (!ValidSlot(slot)) return false;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return false;
 
@@ -1065,14 +1110,12 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event)
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event)
 {
     const int weaponDefIndex = event.weaponDefIndex;
-    if (!ValidSlot(slot) || !services || weaponDefIndex < 0 || !IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady() ||
-        !g_hookDropReleaseBuilder.Active() || (event.vectorFlags & ReplayDropReleasePose) == 0)
-        return false;
+    if (!IsReplaying(slot) || !weapon_locker_hooks::WeaponHooksReady() || !g_hookDropReleaseBuilder.Active()) return false;
 
     const uint64_t generation = PawnGeneration(slot);
     void* ws = input_injector::pawn_binding::ServicesToWeaponServices(slot, services);
     const WeaponSession session{ slot, generation, services, ws };
-    if (!WeaponSessionCurrent(session)) return false;
+    if (!ws || generation != PawnGeneration(slot)) return false;
     void* weapon = weapon_locker_hooks::FindWeaponByDef(ws, weaponDefIndex);
     if (!weapon || !WeaponSessionCurrent(session)) return false;
     const int replayDef = weapon_locker_hooks::WeaponDefForEntityIndex(ws, weapon_locker_hooks::WeaponEntIndex(weapon));
@@ -1164,7 +1207,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
     if (generation != PawnGeneration(slot)) return false;
     void** vtable = nullptr;
     void* target = nullptr;
-    if (!pawn || tg::g_vtIdxTeleport < 0 || !SafeRead(pawn, 0, vtable) || !vtable ||
+    if (!pawn || !SafeRead(pawn, 0, vtable) || !vtable ||
         !SafeRead(vtable, tg::g_vtIdxTeleport * static_cast<int>(sizeof(void*)), target) || !target)
         return false;
 
@@ -1173,7 +1216,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
     const float velocity[3] = { pre.velX, pre.velY, pre.velZ };
     // Align idle body facing before the native bone read.
     const bool alignStationaryBody = (pre.entityFlags & tg::kFlOnGround) != 0 && std::fabs(pre.velX) < 0.01F && std::fabs(pre.velY) < 0.01F;
-    const bool hasRecordedBodyYaw = (event.vectorFlags & ReplayDropBodyYaw) != 0 && std::isfinite(event.target[0]);
+    const bool hasRecordedBodyYaw = (event.vectorFlags & ReplayDropBodyYaw) != 0;
     const float bodyYaw = hasRecordedBodyYaw ? event.target[0] : pre.yaw;
     const float angles[3] = { 0.0F, NormalizeReplayYaw(bodyYaw), 0.0F };
     const float* teleportAngles = alignStationaryBody ? angles : nullptr;
@@ -1203,7 +1246,7 @@ bool PrepareReplayDropPawn(int slot, void* services, const ReplayDropEvent& even
 // Restores Pawn state before simulation.
 bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
 {
-    if (!ValidSlot(slot) || !services || !g_rep[slot].playing.load(std::memory_order_acquire)) return false;
+    if (!g_rep[slot].playing.load(std::memory_order_acquire)) return false;
     const uint64_t generation = PawnGeneration(slot);
 
     void* pawn = input_injector::ResolveReplayPawn(slot, services);
@@ -1213,8 +1256,8 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
         // Publish the initial origin through Teleport.
         void** vtable = nullptr;
         void* target = nullptr;
-        if (tg::g_vtIdxTeleport < 0 || !SafeRead(pawn, 0, vtable) || !vtable ||
-            !SafeRead(vtable, tg::g_vtIdxTeleport * static_cast<int>(sizeof(void*)), target) || !target)
+        if (!SafeRead(pawn, 0, vtable) || !vtable || !SafeRead(vtable, tg::g_vtIdxTeleport * static_cast<int>(sizeof(void*)), target) ||
+            !target)
         {
             BC_LOG_WARN("slot %d: Teleport unavailable", slot);
             StopReplay(slot);
@@ -1245,7 +1288,6 @@ bool OnReplayCommandPre(int slot, void* services, const ReplayTick& tick)
 // Restores end state and advances the replay cursor.
 void OnReplayCommandPost(int slot, void* services)
 {
-    if (!ValidSlot(slot) || !services) return;
     ReplayState& p = g_rep[slot];
     if (!p.playing.load(std::memory_order_acquire)) return;
     const uint64_t generation = PawnGeneration(slot);

@@ -17,25 +17,23 @@ ISource2GameClients* g_gameClients = nullptr;
 // Sets a lock; weapon locks also switch once.
 int Lock(int slot, LockKind kind, int arg)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
     if (motion_recorder::IsReplaying(slot)) return -3;
 
     switch (kind)
     {
         case LockKind::All:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAll(slot, true);
             return 0;
 
         case LockKind::Aim:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAim(slot, true);
             return 0;
 
         case LockKind::Weapon:
         {
-            if (slot < 0 || slot >= weapon_locker_state::kMaxSlots) return -2;
+            if (arg < static_cast<int>(LockTarget::Slot1) || arg > static_cast<int>(LockTarget::Slot5)) return -2;
             const auto tgt = static_cast<LockTarget>(arg);
-            if (tgt == LockTarget::None) return -2;
             weapon_locker_state::Set(slot, tgt);
             (void)weapon_locker_hooks::SwitchToLockTarget(slot);
             return 0;
@@ -47,20 +45,18 @@ int Lock(int slot, LockKind kind, int arg)
 // Clears the slot's lock.
 int Unlock(int slot, LockKind kind)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
     switch (kind)
     {
         case LockKind::All:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAll(slot, false);
             return 0;
 
         case LockKind::Aim:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAim(slot, false);
             return 0;
 
         case LockKind::Weapon:
-            if (slot < 0 || slot >= weapon_locker_state::kMaxSlots) return -2;
             weapon_locker_state::Clear(slot);
             return 0;
     }
@@ -88,6 +84,7 @@ int UnlockAll(LockKind kind)
 // Queries the slot's lock.
 int IsLocked(int slot, LockKind kind)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return 0;
     switch (kind)
     {
         case LockKind::All:
