@@ -62,7 +62,7 @@ public partial class BotControllerPlugin : BasePlugin
         try
         {
             _commandPermissions = CommandPermissionsConfig.Load(
-                Path.Combine(Server.GameDirectory, "addons", "BotController", "config.json"));
+                Path.Combine(Server.GameDirectory, "csgo", "addons", "BotController", "config.json"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
