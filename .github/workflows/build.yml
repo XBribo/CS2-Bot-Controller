@@ -1,6 +1,9 @@
 name: Build
 
 on:
+  pull_request:
+    branches: [main]
+    paths: [src/core/cs2_sdk]
   workflow_dispatch:
     inputs:
       target:
@@ -65,7 +68,7 @@ jobs:
 
   # ----------------------------------------------------------------- MM win64
   mm-windows:
-    if: inputs.target == 'all' || inputs.target == 'mm-windows'
+    if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'mm-windows'
     needs: guard
     runs-on: windows-latest
     timeout-minutes: 60
@@ -84,6 +87,7 @@ jobs:
         run: test -f build/package/addons/BotController/bin/win64/BotController.dll
 
       - name: Upload package
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: BotController-MM-windows-${{ needs.guard.outputs.mm_version }}
@@ -92,7 +96,7 @@ jobs:
 
   # ---------------------------------------------------------------- MM linux
   mm-linux:
-    if: inputs.target == 'all' || inputs.target == 'mm-linux'
+    if: github.event_name == 'pull_request' || inputs.target == 'all' || inputs.target == 'mm-linux'
     needs: guard
     runs-on: ubuntu-24.04
     container:
@@ -124,6 +128,7 @@ jobs:
           echo "$binary requires at most $max_glibc"
 
       - name: Upload package
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: BotController-MM-linux-${{ needs.guard.outputs.mm_version }}
