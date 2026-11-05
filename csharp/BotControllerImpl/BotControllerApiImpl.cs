@@ -67,13 +67,13 @@ namespace BotControllerApi
         public int BotActiveWeaponDef(int slot) => _active ? BotController.BotActiveWeaponDef(slot) : -1;
         // Starts button injection; returns a token.
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
-            => _active ? BotController.InjectUsercmd(slot, buttonMask, durationMs) : 0;
+            => _active ? BotController.InjectUsercmd(slot, buttonMask, durationMs) : -1;
         // Cancels a button-injection token.
         public bool CancelUsercmdInjection(int slot, long injectionId)
             => _active && BotController.CancelUsercmdInjection(slot, injectionId);
         // Starts persistent movement; returns a token.
         public long StartUsercmdMovement(int slot, float forwardMove, float leftMove)
-            => _active ? BotController.StartUsercmdMovement(slot, forwardMove, leftMove) : 0;
+            => _active ? BotController.StartUsercmdMovement(slot, forwardMove, leftMove) : -1;
         // Updates a movement token.
         public bool UpdateUsercmdMovement(
             int slot,
@@ -90,7 +90,7 @@ namespace BotControllerApi
             => _active && BotController.SuppressUsercmd(slot, buttonMask, durationMs);
         // Starts persistent suppression; returns a token.
         public long StartUsercmdSuppression(int slot, ulong buttonMask)
-            => _active ? BotController.StartUsercmdSuppression(slot, buttonMask) : 0;
+            => _active ? BotController.StartUsercmdSuppression(slot, buttonMask) : -1;
         // Cancels a suppression token.
         public bool CancelUsercmdSuppression(int slot, long suppressionId)
             => _active && BotController.CancelUsercmdSuppression(slot, suppressionId);
