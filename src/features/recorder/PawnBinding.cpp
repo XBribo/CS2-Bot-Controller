@@ -167,7 +167,7 @@ bool Init()
     g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CCSPlayerController", "m_hPlayerPawn");
     g_lifeState = cs2_sdk::schema::GetFieldOffset("CBaseEntity", "m_lifeState");
     g_controllerTickBase = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
-    return g_server && g_controllerPawn >= 0 && g_lifeState >= 0;
+    return g_server && g_controllerPawn >= 0 && g_lifeState >= 0 && g_controllerTickBase >= 0;
 }
 
 // Returns only the registered, live services.

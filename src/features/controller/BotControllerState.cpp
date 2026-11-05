@@ -17,15 +17,10 @@ std::atomic<uint64_t> g_aimLocks{ 0 };
 
 bool HasAnyLock() { return g_allLocks.load(std::memory_order_relaxed) != 0 || g_aimLocks.load(std::memory_order_relaxed) != 0; }
 
-bool GetAll(int slot)
-{
-    if (slot < 0 || slot >= kMaxSlots) return false;
-    return (g_allLocks.load(std::memory_order_relaxed) & (uint64_t{ 1 } << slot)) != 0;
-}
+bool GetAll(int slot) { return (g_allLocks.load(std::memory_order_relaxed) & (uint64_t{ 1 } << slot)) != 0; }
 
 void SetAll(int slot, bool locked)
 {
-    if (slot < 0 || slot >= kMaxSlots) return;
     const uint64_t bit = uint64_t{ 1 } << slot;
     if (locked) g_allLocks.fetch_or(bit, std::memory_order_relaxed);
     else
@@ -36,15 +31,10 @@ void ClearAllAll() { g_allLocks.store(0, std::memory_order_relaxed); }
 
 int CountAll() { return std::popcount(g_allLocks.load(std::memory_order_relaxed)); }
 
-bool GetAim(int slot)
-{
-    if (slot < 0 || slot >= kMaxSlots) return false;
-    return (g_aimLocks.load(std::memory_order_relaxed) & (uint64_t{ 1 } << slot)) != 0;
-}
+bool GetAim(int slot) { return (g_aimLocks.load(std::memory_order_relaxed) & (uint64_t{ 1 } << slot)) != 0; }
 
 void SetAim(int slot, bool locked)
 {
-    if (slot < 0 || slot >= kMaxSlots) return;
     const uint64_t bit = uint64_t{ 1 } << slot;
     if (locked) g_aimLocks.fetch_or(bit, std::memory_order_relaxed);
     else

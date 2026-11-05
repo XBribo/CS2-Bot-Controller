@@ -18,9 +18,9 @@ struct MovementSnapshot
     uint32_t entityFlags; // m_fFlags (bit0 = FL_ONGROUND, bit1 = FL_DUCKING)
     uint8_t moveType; // m_MoveType (MoveType_t)
     uint8_t pad[3]; // keep 4-byte alignment explicit
-    uint64_t buttons; // services button states[0] (pressed)
-    uint64_t buttons1; // states[1]
-    uint64_t buttons2; // states[2]
+    uint64_t buttons; // final held state
+    uint64_t buttons1; // transition count bit 0
+    uint64_t buttons2; // transition count bit 1
     float duckAmount; // m_flDuckAmount (0=stand, 1=full crouch)
     float duckSpeed; // m_flDuckSpeed
     float ladderNormalX; // m_vecLadderNormal (ladder anim facing)
@@ -85,7 +85,7 @@ struct ReplayDropEvent
 struct SubtickMove
 {
     float when; // [0,1) time within the tick
-    uint32_t button; // 0 = analog, else engine button bit
+    uint64_t button; // 0 = analog, else engine button bit
     float pressed; // digital: 1=down 0=up (stored as float)
     float analogForward; // analog_forward_delta
     float analogLeft; // analog_left_delta
@@ -116,6 +116,7 @@ struct ReplayCommandFrameData
 
 static_assert(sizeof(ReplayCommandFrameData) == 68);
 static_assert(sizeof(ReplayTick) == 256);
+static_assert(sizeof(SubtickMove) == 32);
 
 namespace motion_recorder {
 constexpr int kMaxSlots = 64;
@@ -128,7 +129,6 @@ constexpr uint32_t kCommandFieldButtons = 1U << 4;
 constexpr uint32_t kCommandFieldMouse = 1U << 5;
 constexpr uint32_t kCommandFieldWeaponSelect = 1U << 6;
 constexpr uint32_t kCommandFieldLeftHand = 1U << 7;
-constexpr uint32_t kCommandFieldWeaponSelectDef = 1U << 8;
 
 // Complete replay command input.
 struct ReplayCommandFrame

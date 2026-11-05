@@ -4,7 +4,8 @@ namespace BotControllerApi
 {
     public interface IBotControllerApi
     {
-        int AbiVersion { get; }
+        // Supported API contract version.
+        int ApiVersion { get; }
 
         // ---- locks ----
 
@@ -39,8 +40,8 @@ namespace BotControllerApi
         (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot);
 
-        // Optional input history, separate from the ABI 24 command layout.
-        byte[] GetRecordedInputHistory(int slot) => System.Array.Empty<byte>();
+        // Optional input history.
+        byte[] GetRecordedInputHistory(int slot);
 
         // ---- replay ----
 
@@ -51,14 +52,13 @@ namespace BotControllerApi
             SubtickMove[] subs,
             ReplayCommandFrame[] commands);
 
-        // Input history is optional; unsupported providers reject nonempty data.
+        // Loads buffers with optional input history.
         bool LoadReplay(
             int slot,
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands,
-            byte[]? inputHistory = null)
-            => inputHistory is not { Length: > 0 } && LoadReplay(slot, ticks, subs, commands);
+            byte[]? inputHistory = null);
 
         // Transfers recorded buffers to a replay slot.
         bool TransferRecordingToReplay(int srcSlot, int dstSlot);

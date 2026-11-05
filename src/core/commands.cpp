@@ -19,10 +19,11 @@
 
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
+#include <charconv>
 #include <cstring>
 #include <vector> // NOLINT(misc-include-cleaner)
 #include <string> // NOLINT(misc-include-cleaner)
+#include <string_view>
 
 namespace cs2bc {
 namespace commands {
@@ -44,6 +45,14 @@ void PrintToCaller(const CCommandContext& context, const char* fmt, ...) // NOLI
 }
 
 namespace {
+
+// Parses a complete player slot.
+bool ParseSlot(const char* text, int& slot)
+{
+    const std::string_view value(text);
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), slot);
+    return error == std::errc{} && end == value.data() + value.size() && slot >= 0 && slot < motion_recorder::kMaxSlots;
+}
 
 // Parse kind string into LockKind.
 bool ParseKind(const char* s, LockKind& out)
@@ -150,7 +159,12 @@ CON_COMMAND_F(bc_lock, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(2)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(2), slot))
+    {
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
+        return;
+    }
     int arg = 0;
 
     if (kind == LockKind::Weapon) // NOLINT(bugprone-branch-clone)
@@ -201,7 +215,12 @@ CON_COMMAND_F(bc_unlock, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(2)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(2), slot))
+    {
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
+        return;
+    }
     int rc = dispatch::Unlock(slot, kind);
     if (rc == 0) commands::PrintToCaller(context, "[BC] unlocked slot %d (%s)\n", slot, commands::KindName(kind));
     else
@@ -270,10 +289,10 @@ CON_COMMAND_F(bc_buy, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    if (slot < 0 || slot >= buy_controller_state::kMaxSlots)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(1), slot))
     {
-        commands::PrintToCaller(context, "[BC] error: slot out of range\n");
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
         return;
     }
 
@@ -295,10 +314,10 @@ CON_COMMAND_F(bc_buy_skip, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    if (slot < 0 || slot >= buy_controller_state::kMaxSlots)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(1), slot))
     {
-        commands::PrintToCaller(context, "[BC] error: slot out of range\n");
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
         return;
     }
 
@@ -316,10 +335,10 @@ CON_COMMAND_F(bc_unbuy, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
-    if (slot < 0 || slot >= buy_controller_state::kMaxSlots)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(1), slot))
     {
-        commands::PrintToCaller(context, "[BC] error: slot out of range\n");
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
         return;
     }
 
@@ -345,7 +364,12 @@ CON_COMMAND_F(bc_profile, // NOLINT(bugprone-throwing-static-initialization)
         return;
     }
 
-    const int slot = std::atoi(args.Arg(1)); // NOLINT(bugprone-unchecked-string-to-number-conversion)
+    int slot;
+    if (!commands::ParseSlot(args.Arg(1), slot))
+    {
+        commands::PrintToCaller(context, "[BC] error: slot must be an integer in 0..63\n");
+        return;
+    }
     BotProfileData d;
     if (!bot_profile::ReadProfile(slot, d))
     {

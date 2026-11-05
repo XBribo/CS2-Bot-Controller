@@ -4,9 +4,10 @@
 #include "core/cs2_sdk/src/core/schema.h"
 
 #include <cstdint>
+#include <cstdio>
 
 namespace cs2bc::offsets {
-void LoadFromGamedata(const nlohmann::json& gamedata)
+bool LoadFromGamedata(const nlohmann::json& gamedata, char* error, size_t maxlen)
 {
     const cs2_sdk::gameconfig::OffsetBinding offsets[] = {
         { &g_vtIdxTeleport, "CBaseEntity_Teleport" },
@@ -31,7 +32,17 @@ void LoadFromGamedata(const nlohmann::json& gamedata)
         { &g_vtIdxControllerCommandSetup, "vtidx::ControllerCommandSetup" },
         { &g_vtIdxDropWeapon, "vtidx::DropWeapon" },
     };
-    cs2_sdk::gameconfig::LoadOffsets(gamedata, offsets);
+    for (const auto& offset : offsets)
+    {
+        *offset.target = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, offset.name, -1);
+        if (*offset.target < 0)
+        {
+            std::snprintf(error, maxlen, "Invalid gamedata offset '%s.offsets.%s': expected a nonnegative int", offset.name,
+                          cs2_sdk::gameconfig::PlatformName());
+            return false;
+        }
+    }
+    return true;
 }
 
 bool LoadFromSchema(char* error, size_t maxlen)

@@ -36,9 +36,6 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 24: separate optional input-history exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 24; }
-
 // Starts button injection; returns a token.
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
@@ -261,7 +258,7 @@ extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                ? 0 : -1;
 }
 
-// Loads optional input history under ABI 24.
+// Loads optional input history.
 extern "C" BC_EXPORT int BotController_LoadReplayWithInputHistory(int slot,
                                                   const cs2bc::ReplayTick* ticks,
                                                   int tickCount,
@@ -344,11 +341,11 @@ extern "C" BC_EXPORT int BotController_GetReplayTick(int slot, cs2bc::ReplayTick
     return cs2bc::motion_recorder::CurrentReplayTick(slot, *out) ? 0 : -1;
 }
 
-// Switches a Bot/player weapon; ABI name retained.
+// Switches a Bot/player weapon.
 extern "C" BC_EXPORT int BotController_SwitchBotWeapon(int slot, int defIndex)
 {
     return cs2bc::motion_recorder::SwitchWeaponByDef(slot, defIndex) ? 0 : -1;
 }
 
-// Queries a Bot/player weapon; ABI name retained.
+// Queries a Bot/player weapon.
 extern "C" BC_EXPORT int BotController_GetBotActiveWeaponDef(int slot) { return cs2bc::motion_recorder::ActiveWeaponDefForSlot(slot); }

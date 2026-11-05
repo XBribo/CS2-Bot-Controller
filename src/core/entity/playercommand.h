@@ -5,10 +5,10 @@
 #include <cstdint>
 #include "cs_usercmd.pb.h"
 
-// Engine button state block
+// Eight-state button bit planes.
 class CInButtonState
 {
-    virtual void Schema_DynamicBinding_Unused() {} // keep vtable slot, do not call
+    virtual void Schema_DynamicBinding_Unused() {} // Schema vtable slot.
 
   public:
     uint64_t m_pButtonStates[3];

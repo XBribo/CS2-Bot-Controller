@@ -3,6 +3,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 using BotControllerApi;
 
@@ -15,6 +16,7 @@ namespace BotControllerImpl;
 // Recorded motion and capture tickrate.
 public sealed class MotionRecording
 {
+    public int FormatVersion { get; set; }
     public required int Tickrate { get; set; }
     public required ReplayTick[] Ticks { get; set; }
     public required SubtickMove[] Subticks { get; set; }
@@ -25,12 +27,28 @@ public sealed class MotionRecording
 // Recording file storage.
 public static class MotionStore
 {
+    private const int CurrentFormatVersion = 1;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = false,
         IncludeFields = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { RequireRecordingFields },
+        },
     };
+
+    // Requires complete frame payloads at the file boundary.
+    private static void RequireRecordingFields(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Type != typeof(ReplayTick) && typeInfo.Type != typeof(MovementSnapshot) &&
+            typeInfo.Type != typeof(SubtickMove) && typeInfo.Type != typeof(ReplayCommandFrame)) return;
+
+        foreach (JsonPropertyInfo property in typeInfo.Properties)
+            property.IsRequired = !property.Name.StartsWith("Pad", StringComparison.Ordinal);
+    }
 
     // Saves a stopped recording; returns its tick count or -1.
     public static int SaveToFile(int slot, string path, int tickrate = 64)
@@ -50,6 +68,7 @@ public static class MotionStore
             using (var writer = new Utf8JsonWriter(brotli))
             {
                 writer.WriteStartObject();
+                writer.WriteNumber(nameof(MotionRecording.FormatVersion), CurrentFormatVersion);
                 writer.WriteNumber(nameof(MotionRecording.Tickrate), tickrate);
                 WriteTicks(writer, slot, ticks);
                 WriteSubticks(writer, slot, subticks);
@@ -71,13 +90,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Ticks));
         writer.WriteStartArray();
+        var batch = new ReplayTick[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayTick[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedTicksRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedTicksRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording ticks changed during save.");
-            foreach (ReplayTick tick in batch) JsonSerializer.Serialize(writer, tick, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -87,13 +107,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Subticks));
         writer.WriteStartArray();
+        var batch = new SubtickMove[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new SubtickMove[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedSubticksRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedSubticksRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording subticks changed during save.");
-            foreach (SubtickMove subtick in batch) JsonSerializer.Serialize(writer, subtick, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -103,13 +124,14 @@ public static class MotionStore
     {
         writer.WritePropertyName(nameof(MotionRecording.Commands));
         writer.WriteStartArray();
+        var batch = new ReplayCommandFrame[Math.Min(512, total)];
         for (int start = 0; start < total;)
         {
-            var batch = new ReplayCommandFrame[Math.Min(512, total - start)];
-            if (BotController.CopyRecordedCommandsRange(slot, start, batch) != batch.Length)
+            int count = Math.Min(batch.Length, total - start);
+            if (BotController.CopyRecordedCommandsRange(slot, start, batch, count) != count)
                 throw new InvalidDataException("Recording commands changed during save.");
-            foreach (ReplayCommandFrame command in batch) JsonSerializer.Serialize(writer, command, JsonOpts);
-            start += batch.Length;
+            for (int i = 0; i < count; ++i) JsonSerializer.Serialize(writer, batch[i], JsonOpts);
+            start += count;
         }
         writer.WriteEndArray();
     }
@@ -127,21 +149,6 @@ public static class MotionStore
         recording.InputHistory ??= Array.Empty<byte>();
         if (recording.Commands.Length != recording.Ticks.Length)
             throw new InvalidDataException("Recording commands must match the tick count.");
-
-        const uint eventDrop = 1U << 0;
-        const uint dropReleasePose = 1U << 3;
-        foreach (ReplayTick tick in recording.Ticks)
-        {
-            if ((tick.EventFlags & eventDrop) != 0 && (tick.EventDropVectorFlags & dropReleasePose) == 0)
-                throw new InvalidDataException("Recording lacks the required drop release pose.");
-        }
-
-        const uint commandFieldWeaponSelectDef = 1U << 8;
-        foreach (ReplayCommandFrame command in recording.Commands)
-        {
-            if ((command.Fields & commandFieldWeaponSelectDef) == 0)
-                throw new InvalidDataException("Recording uses an unsupported command JSON format.");
-        }
 
         return recording;
     }

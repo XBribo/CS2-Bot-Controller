@@ -27,6 +27,8 @@
     <Compile Include="../BotControllerImpl/BotController.NativeApi.cs" Link="BotController.NativeApi.cs" />
     <Compile Include="../BotControllerImpl/BotControllerApiImpl.cs" Link="BotControllerApiImpl.cs" />
     <Compile Include="../BotControllerImpl/MotionRecording.cs" Link="MotionRecording.cs" />
+    <Compile Include="../BotControllerImpl/CommandPermissionsConfig.cs" Link="CommandPermissionsConfig.cs" />
+    <Compile Include="../BotControllerImpl/RecordingSessions.cs" Link="RecordingSessions.cs" />
   </ItemGroup>
 
 

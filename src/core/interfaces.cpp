@@ -24,7 +24,7 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
     if (!g_pCVar)
     {
-        std::snprintf(error, maxlen, "Failed to get ICvar (%s) via engine factory", CVAR_INTERFACE_VERSION);
+        std::snprintf(error, maxlen, "ICvar unavailable (%s)", CVAR_INTERFACE_VERSION);
         return false;
     }
 
@@ -32,7 +32,7 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     cs2bc::dispatch::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bc::dispatch::g_engine)
     {
-        std::snprintf(error, maxlen, "Failed to get IVEngineServer2 (%s)", INTERFACEVERSION_VENGINESERVER);
+        std::snprintf(error, maxlen, "IVEngineServer2 unavailable (%s)", INTERFACEVERSION_VENGINESERVER);
         return false;
     }
 
@@ -40,7 +40,7 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     g_serverInterface = ismm->GetServerFactory()(INTERFACEVERSION_SERVERGAMECLIENTS, nullptr);
     if (!g_serverInterface)
     {
-        std::snprintf(error, maxlen, "Failed to get ISource2GameClients (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
+        std::snprintf(error, maxlen, "ISource2GameClients unavailable (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
         return false;
     }
 

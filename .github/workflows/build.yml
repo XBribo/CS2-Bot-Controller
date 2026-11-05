@@ -180,7 +180,7 @@ jobs:
         run: |
           sw2=dist/SwiftlyS2/addons/swiftlys2/plugins/BotControllerImplSW2
           mkdir -p "$sw2"
-          cp -r csharp/BotControllerImplSW2/build/. "$sw2/"
+          find csharp/BotControllerImplSW2/build -mindepth 1 -maxdepth 1 ! -name publish -exec cp -r {} "$sw2/" \;
 
       - name: Upload package
         uses: actions/upload-artifact@v7

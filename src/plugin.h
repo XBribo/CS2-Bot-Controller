@@ -10,7 +10,7 @@ class BotControllerPlugin : public ISmmPlugin
   public:
     // Loads features with rollback on failure.
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
-    // Drains hooks, then releases plugin state.
+    // Roll back partial initialization.
     bool Unload(char* error, size_t maxlen) override;
     // Handles pause requests.
     bool Pause(char* error, size_t maxlen) override;
@@ -37,6 +37,7 @@ class BotControllerPlugin : public ISmmPlugin
     const char* GetLogTag() override;
 
   private:
+    bool m_loaded = false;
     bool m_convarsRegistered = false;
 };
 
