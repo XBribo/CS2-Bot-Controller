@@ -6,7 +6,7 @@ updates:
       default-days: 0
     schedule:
       interval: "cron"
-      cronjob: "0 9 * * *"
+      cronjob: "30 * * * *"
       timezone: "Asia/Singapore"
   - package-ecosystem: "nuget"
     directory: "/csharp/BotControllerImpl"
@@ -16,5 +16,5 @@ updates:
       default-days: 0
     schedule:
       interval: "cron"
-      cronjob: "0 9 * * *"
+      cronjob: "30 * * * *"
       timezone: "Asia/Singapore"
