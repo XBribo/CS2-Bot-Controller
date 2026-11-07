@@ -3,6 +3,8 @@
 #include "plugin_build_info.h"
 
 #include <cstdio>
+#include <memory>
+#include <mutex>
 
 #include <icvar.h>
 #include <convar.h>
@@ -25,6 +27,9 @@
 #include "core/cs2_sdk/src/core/memory_module.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "offsets.h"
+#include "dispatch.h"
+#include <engine2/isource2server.h>
+#include <playerslot.h>
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
 #define BUILD_TIMESTAMP __DATE__ " " __TIME__
@@ -32,6 +37,35 @@
 PLUGIN_EXPOSE(cs2bc::BotControllerPlugin, cs2bc::g_plugin);
 
 namespace cs2bc {
+
+namespace {
+using DisconnectHookBase =
+    KHook::Virtual<ISource2GameClients, void, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*>;
+
+class DisconnectHook : public DisconnectHookBase
+{
+  public:
+    using DisconnectHookBase::DisconnectHookBase;
+
+    bool AddChecked(ISource2GameClients* clients)
+    {
+        if (!clients || !KHook::__exported__khook || this->_vtbl_index < 0) return false;
+        void** address = *reinterpret_cast<void***>(clients) + this->_vtbl_index;
+        Add(clients);
+        std::lock_guard guard(this->_hooks_stored);
+        return this->_addr_hook_ids.contains(address);
+    }
+};
+
+std::unique_ptr<DisconnectHook> g_disconnectHook;
+
+KHook::Return<void>
+OnClientDisconnect(ISource2GameClients*, CPlayerSlot slot, ENetworkDisconnectionReason, const char*, uint64, const char*)
+{
+    dispatch::ResetSlot(slot.Get());
+    return { KHook::Action::Ignore };
+}
+} // namespace
 
 BotControllerPlugin g_plugin;
 
@@ -91,6 +125,14 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
             BC_LOG_WARN("record/replay disabled: %s", injErr);
         }
 
+        // Native-only installations also need cleanup before a slot is reused.
+        g_disconnectHook = std::make_unique<DisconnectHook>(&ISource2GameClients::ClientDisconnect, &OnClientDisconnect, nullptr);
+        if (!g_disconnectHook->AddChecked(dispatch::g_gameClients))
+        {
+            std::snprintf(error, maxlen, "ClientDisconnect hook failed");
+            return false;
+        }
+
         return true;
     }();
     if (!loaded)
@@ -100,6 +142,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         return false;
     }
     m_loaded = true;
+    g_SMAPI->AddListener(this, this);
     BC_LOG_INFO("Loaded %s", GetVersion());
     BC_LOG_DEBUG("Built %s", GetDate());
     return true;
@@ -110,6 +153,8 @@ bool BotControllerPlugin::Pause(char*, size_t) { return true; }
 bool BotControllerPlugin::Unpause(char*, size_t) { return true; }
 
 void BotControllerPlugin::AllPluginsLoaded() {}
+
+void BotControllerPlugin::OnLevelShutdown() { dispatch::ResetAll(); }
 
 const char* BotControllerPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
 const char* BotControllerPlugin::GetName() { return "BotController"; }
@@ -128,6 +173,7 @@ bool BotControllerPlugin::Unload(char* error, size_t maxlen)
         return false;
     }
     // Drain movement callbacks before releasing sessions.
+    g_disconnectHook.reset();
     cs2bc::input_injector::Remove();
     cs2bc::motion_recorder::ClearAll();
     cs2bc::buy_controller_hooks::Remove();

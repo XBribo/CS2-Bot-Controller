@@ -253,8 +253,7 @@ bool SuppressUsercmd(int slot, uint64_t buttonMask, int durationMs)
     int64_t expiresAtMs = MonotonicMilliseconds() + durationMs;
     std::scoped_lock lock(g_usercmdInjectionMutex);
     if (motion_recorder::IsReplaying(slot)) return false;
-    g_usercmdSuppressions[slot].push_back(
-        { .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false });
+    g_usercmdSuppressions[slot].push_back({ .id = 0, .buttonMask = buttonMask, .expiresAtMs = expiresAtMs, .persistent = false });
     RefreshUsercmdWorkSlot(slot);
     return true;
 }
@@ -268,8 +267,7 @@ int64_t StartUsercmdSuppression(int slot, uint64_t buttonMask)
     int64_t id = g_nextUsercmdSuppressionId.fetch_add(1, std::memory_order_relaxed);
     std::scoped_lock lock(g_usercmdInjectionMutex);
     if (motion_recorder::IsReplaying(slot)) return -1;
-    g_usercmdSuppressions[slot].push_back(
-        { .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true });
+    g_usercmdSuppressions[slot].push_back({ .id = id, .buttonMask = buttonMask, .expiresAtMs = 0, .persistent = true });
     RefreshUsercmdWorkSlot(slot);
     return id;
 }
@@ -432,8 +430,7 @@ KHook::Return<void> HookedProcessMovement(void* services, void*) noexcept
     EnsureVtableHooks(services);
     if (!motion_recorder::HasAnyRecording()) return { KHook::Action::Ignore };
     int slot = pawn_binding::ServicesToSlot(services);
-    if (motion_recorder::IsRecording(slot))
-        motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services));
+    if (motion_recorder::IsRecording(slot)) motion_recorder::SetLiveWs(slot, pawn_binding::ServicesToWeaponServices(slot, services));
     return { KHook::Action::Ignore };
 }
 
@@ -723,8 +720,7 @@ KHook::Return<void> ControllerCommandSetupPost(void* controller) noexcept
         !ResolveReplayPawn(batch.slot, batch.services) || batch.generation != motion_recorder::PawnGeneration(batch.slot))
         return { KHook::Action::Ignore };
     g_commandBatches[index].preparing = true;
-    const bool prepared = motion_recorder::IsRecording(batch.slot) &&
-                          motion_recorder::OnRecordCommandPre(batch.slot, batch.services);
+    const bool prepared = motion_recorder::IsRecording(batch.slot) && motion_recorder::OnRecordCommandPre(batch.slot, batch.services);
     if (motion_recorder::IsReplaying(batch.slot)) ApplyReplayDrop(batch.slot, batch.services);
     g_commandBatches[index].capturePrepared = prepared;
     g_commandBatches[index].preparing = false;
@@ -834,7 +830,8 @@ bool Install( // NOLINT(misc-use-internal-linkage)
     char batchError[256] = { 0 };
     g_addrSimulateUserCommands =
         cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CBasePlayerController::OnSimulateUserCommands", batchError, sizeof(batchError));
-    if (g_addrSimulateUserCommands && g_hookSimulateUserCommands.Install(g_addrSimulateUserCommands, &SimulateUserCommandsPre, &SimulateUserCommandsPost))
+    if (g_addrSimulateUserCommands &&
+        g_hookSimulateUserCommands.Install(g_addrSimulateUserCommands, &SimulateUserCommandsPre, &SimulateUserCommandsPost))
     {
         g_batchActive = true;
     }
@@ -895,8 +892,8 @@ void Remove()
 bool RecorderReady()
 {
     if (g_batchActive && g_usercmdActive && g_hookControllerCommandSetup.Active()) return true;
-    BC_LOG_WARN("record/replay unavailable: batch=%d command=%d setup=%d", g_batchActive,
-                g_usercmdActive, g_hookControllerCommandSetup.Active());
+    BC_LOG_WARN("record/replay unavailable: batch=%d command=%d setup=%d", g_batchActive, g_usercmdActive,
+                g_hookControllerCommandSetup.Active());
     return false;
 }
 

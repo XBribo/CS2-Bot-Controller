@@ -54,8 +54,7 @@ Binding CurrentBinding(int slot, const char** failure = nullptr)
     };
     if (!ValidSlot(slot) || !g_server) return fail("binding unavailable");
     Entity2Networkable_t controller{};
-    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
-        !controller.m_pEntityInstance)
+    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity || !controller.m_pEntityInstance)
         return fail("controller missing");
     uint32_t pawnHandle = 0;
     if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) || pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU)
@@ -65,8 +64,7 @@ Binding CurrentBinding(int slot, const char** failure = nullptr)
         !pawn.m_pEntityInstance)
         return fail("pawn entity missing");
     if (pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle) return fail("pawn handle mismatch");
-    if (!pawn.m_pszCPPClassname || std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
-        return fail("pawn class mismatch");
+    if (!pawn.m_pszCPPClassname || std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0) return fail("pawn class mismatch");
     const uint32_t controllerHandle = controller.m_pEntity->GetRefEHandle().ToInt();
     const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
     const uint32_t owner = handles.controllerSlot >= 0 ? handles.controllerHandle : handles.originalControllerHandle;
@@ -105,8 +103,8 @@ void* ReadWeaponServices(const Binding& binding)
     void* weapons = nullptr;
     void* owner = nullptr;
     if (!binding.pawn || !GuardedRead(binding.pawn, g_lifeState, lifeState) || lifeState != 0 ||
-        !GuardedRead(binding.pawn, tg::g_pawnWeaponServices, weapons) || !weapons ||
-        !GuardedRead(weapons, tg::g_servicesPawn, owner) || owner != binding.pawn)
+        !GuardedRead(binding.pawn, tg::g_pawnWeaponServices, weapons) || !weapons || !GuardedRead(weapons, tg::g_servicesPawn, owner) ||
+        owner != binding.pawn)
         return nullptr;
     return weapons;
 }
@@ -206,8 +204,7 @@ bool CommandSimulationTick(int slot, void* services, const PlayerCommand& comman
 {
     const Binding binding = RegisteredBinding(slot);
     auto* globals = dispatch::g_engine ? dispatch::g_engine->GetServerGlobals() : nullptr;
-    if (!services || binding.services != services || !globals ||
-        !GuardedRead(binding.controller, g_controllerTickBase, tick) || tick < 0)
+    if (!services || binding.services != services || !globals || !GuardedRead(binding.controller, g_controllerTickBase, tick) || tick < 0)
         return false;
     if (!command.parentcmd && globals->frametime != 0.0F)
     {

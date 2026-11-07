@@ -17,31 +17,29 @@ bool ValidFraction(float value) { return std::isfinite(value) && value >= 0.0F &
 bool ValidInterpolation(const CSGOInterpolationInfoPB& value)
 {
     return value.src_tick() >= -1 && value.dst_tick() >= -1 &&
-           (value.src_tick() < 0 || value.dst_tick() < 0 || value.src_tick() <= value.dst_tick()) &&
-           ValidFraction(value.frac());
+           (value.src_tick() < 0 || value.dst_tick() < 0 || value.src_tick() <= value.dst_tick()) && ValidFraction(value.frac());
 }
 
 // Validates history entries and attack indices.
 bool ValidHistory(const CSGOUserCmdPB& history)
 {
     const int count = history.input_history_size();
-    const auto validIndex = [count](int index) { return index == -1 || (index >= 0 && index < count); };
-    if (!history.has_base() || !history.base().has_client_tick() || history.base().client_tick() < 0 ||
-        count > kMaxHistoryEntries || !validIndex(history.attack1_start_history_index()) ||
-        !validIndex(history.attack2_start_history_index()))
+    const auto validIndex = [count](int index) {
+        return index == -1 || (index >= 0 && index < count);
+    };
+    if (!history.has_base() || !history.base().has_client_tick() || history.base().client_tick() < 0 || count > kMaxHistoryEntries ||
+        !validIndex(history.attack1_start_history_index()) || !validIndex(history.attack2_start_history_index()))
         return false;
     for (const auto& entry : history.input_history())
     {
-        if (!std::isfinite(entry.view_angles().x()) || !std::isfinite(entry.view_angles().y()) ||
-            !std::isfinite(entry.view_angles().z()) || !entry.has_player_tick_count() || entry.player_tick_count() < 0 ||
-            !entry.has_render_tick_count() || entry.render_tick_count() < 0 || !ValidFraction(entry.player_tick_fraction()) ||
-            !ValidFraction(entry.render_tick_fraction()) ||
+        if (!std::isfinite(entry.view_angles().x()) || !std::isfinite(entry.view_angles().y()) || !std::isfinite(entry.view_angles().z()) ||
+            !entry.has_player_tick_count() || entry.player_tick_count() < 0 || !entry.has_render_tick_count() ||
+            entry.render_tick_count() < 0 || !ValidFraction(entry.player_tick_fraction()) || !ValidFraction(entry.render_tick_fraction()) ||
             !ValidInterpolation(entry.sv_interp0()) || !ValidInterpolation(entry.sv_interp1()) ||
             !ValidInterpolation(entry.player_interp()) || !ValidFraction(entry.cl_interp().frac()))
             return false;
-        if (entry.has_shoot_position() &&
-            (!std::isfinite(entry.shoot_position().x()) || !std::isfinite(entry.shoot_position().y()) ||
-             !std::isfinite(entry.shoot_position().z())))
+        if (entry.has_shoot_position() && (!std::isfinite(entry.shoot_position().x()) || !std::isfinite(entry.shoot_position().y()) ||
+                                           !std::isfinite(entry.shoot_position().z())))
             return false;
     }
     return true;
@@ -148,8 +146,7 @@ bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick)
     for (const auto& entry : history.input_history())
         sourceEnd = std::max(sourceEnd, entry.player_tick_count() + static_cast<double>(entry.player_tick_fraction()));
     // Older captures use the latest history time as the anchor.
-    if (history.base().has_legacy_command_number())
-        sourceEnd = std::max(sourceEnd, static_cast<double>(history.base().client_tick()));
+    if (history.base().has_legacy_command_number()) sourceEnd = std::max(sourceEnd, static_cast<double>(history.base().client_tick()));
     // A shared offset preserves relative times.
     const double delta = simulationTick - sourceEnd;
     for (auto& entry : *history.mutable_input_history())
@@ -178,7 +175,8 @@ bool Apply(CSGOUserCmdPB& history, CSGOUserCmdPB& command, int simulationTick)
     command.set_attack1_start_history_index(history.attack1_start_history_index());
     command.set_attack2_start_history_index(history.attack2_start_history_index());
     if (history.base().has_random_seed()) command.mutable_base()->set_random_seed(history.base().random_seed());
-    else command.mutable_base()->clear_random_seed();
+    else
+        command.mutable_base()->clear_random_seed();
     return true;
 }
 } // namespace cs2bc::command_history

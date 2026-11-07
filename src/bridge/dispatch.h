@@ -30,5 +30,9 @@ int UnlockAll(LockKind kind);
 
 // 1 if All/Aim locked; Weapon returns LockTarget int.
 int IsLocked(int slot, LockKind kind);
+
+// End a player/map lifetime; ordinary replay stops retain independent locks.
+void ResetSlot(int slot);
+void ResetAll();
 } // namespace dispatch
 } // namespace cs2bc

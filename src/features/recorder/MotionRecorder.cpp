@@ -260,8 +260,8 @@ KHook::Return<void> HookedDropWeapon(void* weaponServices, void* weapon, void*, 
         if (!g_dropReleaseFrames.empty())
         {
             const DropReleaseFrame& frame = g_dropReleaseFrames.back();
-            if (frame.session.slot == session.slot && frame.session.generation == session.generation &&
-                frame.droppedWeapon == weapon && frame.haveReleasePose)
+            if (frame.session.slot == session.slot && frame.session.generation == session.generation && frame.droppedWeapon == weapon &&
+                frame.haveReleasePose)
             {
                 recordedEvent.vectorFlags |= ReplayDropReleasePose;
                 std::copy_n(frame.releasePosition, 3, recordedEvent.releasePosition);
@@ -278,8 +278,7 @@ KHook::Return<void> DropWeaponPost(void*, void*, void*, const float*) noexcept
 {
     const auto [session, weapon, weaponDefIndex, recordedEvent] = g_dropFrames.back();
     g_dropFrames.pop_back();
-    if (recordedEvent.weaponDefIndex < 0 || !IsRecording(session.slot) || !WeaponSessionCurrent(session))
-        return { KHook::Action::Ignore };
+    if (recordedEvent.weaponDefIndex < 0 || !IsRecording(session.slot) || !WeaponSessionCurrent(session)) return { KHook::Action::Ignore };
     const bool detached =
         weapon && weaponDefIndex >= 0 && weapon_locker_hooks::FindWeaponByDef(session.weaponServices, weaponDefIndex) != weapon;
     if (!WeaponSessionCurrent(session)) return { KHook::Action::Ignore };
@@ -380,7 +379,8 @@ KHook::Return<char> DropReleaseBuilderPre(void* weapon, void*) noexcept
     if (!g_dropReleaseFrames.empty())
     {
         DropReleaseFrame& frame = g_dropReleaseFrames.back();
-        if (WeaponSessionCurrent(frame.session) && weapon_locker_hooks::ReadDefIndex(weapon) == frame.defIndex) frame.droppedWeapon = weapon;
+        if (WeaponSessionCurrent(frame.session) && weapon_locker_hooks::ReadDefIndex(weapon) == frame.defIndex)
+            frame.droppedWeapon = weapon;
     }
     return { KHook::Action::Ignore };
 }
@@ -408,8 +408,7 @@ KHook::Return<char> DropReleaseBuilderPost(void* weapon, void* transform) noexce
         {
             std::copy_n(event.releasePosition, 3, output);
             std::copy_n(event.releaseQuaternion, 4, output + 4);
-            if (!TryWriteMemoryGuarded(transform, 0, output, sizeof(output)))
-                BC_LOG_WARN("slot %d: drop pose failed", frame.session.slot);
+            if (!TryWriteMemoryGuarded(transform, 0, output, sizeof(output))) BC_LOG_WARN("slot %d: drop pose failed", frame.session.slot);
         }
     }
     return { KHook::Action::Ignore };
@@ -454,8 +453,7 @@ bool InstallDropReleasePose(void* outerDrop, void* buildTransform)
 
 bool StartRecord(int slot)
 {
-    if (!ValidSlot(slot) || IsReplaying(slot) || !input_injector::RecorderReady() ||
-        !input_injector::pawn_binding::ServicesForSlot(slot))
+    if (!ValidSlot(slot) || IsReplaying(slot) || !input_injector::RecorderReady() || !input_injector::pawn_binding::ServicesForSlot(slot))
         return false;
     RecordState& r = g_rec[slot];
     {
@@ -507,10 +505,7 @@ void InvalidateSlot(int slot)
 }
 
 // Session generation 0 is invalid.
-uint64_t PawnGeneration(int slot)
-{
-    return ValidSlot(slot) ? g_rep[slot].generation.load(std::memory_order_acquire) : 0;
-}
+uint64_t PawnGeneration(int slot) { return ValidSlot(slot) ? g_rep[slot].generation.load(std::memory_order_acquire) : 0; }
 
 bool IsRecording(int slot) { return ValidSlot(slot) && g_rec[slot].recording.load(std::memory_order_acquire); }
 
@@ -637,7 +632,9 @@ void OnRecordCommandPost(int slot, void* services)
         {
             r.pendingEventFlags |= ReplayEventDrop;
             r.pendingDropEvent = candidate.event;
-            std::erase_if(r.pendingDropCandidates, [&](const auto& pending) { return pending.weapon == candidate.weapon; });
+            std::erase_if(r.pendingDropCandidates, [&](const auto& pending) {
+                return pending.weapon == candidate.weapon;
+            });
         }
 
         if ((r.pendingEventFlags & ReplayEventDrop) != 0 && (r.pendingDropEvent.vectorFlags & ReplayDropReleasePose) == 0)
@@ -753,15 +750,14 @@ bool LoadReplay(int slot,
     try
     {
         if (!ValidSlot(slot) || !ticks || tickCount < 0 || subCount < 0 || (subCount > 0 && !subs) ||
-            (commandCount != 0 && commandCount != tickCount) || (commandCount > 0 && !commands) ||
-            inputHistorySize < 0 || (inputHistorySize > 0 && !inputHistory))
+            (commandCount != 0 && commandCount != tickCount) || (commandCount > 0 && !commands) || inputHistorySize < 0 ||
+            (inputHistorySize > 0 && !inputHistory))
         {
             return false;
         }
 
         // Each frame has a length prefix, even when empty.
-        if (inputHistorySize > 0 && static_cast<size_t>(tickCount) > static_cast<size_t>(inputHistorySize) / sizeof(uint32_t))
-            return false;
+        if (inputHistorySize > 0 && static_cast<size_t>(tickCount) > static_cast<size_t>(inputHistorySize) / sizeof(uint32_t)) return false;
 
         ReplayState& p = g_rep[slot];
         const uint64_t expectedGeneration = pawnGeneration ? pawnGeneration : PawnGeneration(slot);
@@ -830,8 +826,7 @@ bool LoadReplay(int slot,
             for (unsigned shift = 0; shift < 32; shift += 8)
                 size |= static_cast<uint32_t>(inputHistory[historyOffset++]) << shift;
             if (size > static_cast<size_t>(inputHistorySize) - historyOffset) return false;
-            if (size > 0 && !command_history::Parse(
-                    { reinterpret_cast<const char*>(inputHistory + historyOffset), size }, history))
+            if (size > 0 && !command_history::Parse({ reinterpret_cast<const char*>(inputHistory + historyOffset), size }, history))
                 return false;
             historyOffset += size;
         }
@@ -858,8 +853,7 @@ bool LoadReplay(int slot,
 
 bool StartReplay(int slot, bool loop)
 {
-    if (!ValidSlot(slot) || IsRecording(slot) || !input_injector::RecorderReady() ||
-        !input_injector::pawn_binding::ServicesForSlot(slot))
+    if (!ValidSlot(slot) || IsRecording(slot) || !input_injector::RecorderReady() || !input_injector::pawn_binding::ServicesForSlot(slot))
         return false;
     if (!bot_controller_hooks::ReplayViewReady())
     {
@@ -1046,7 +1040,7 @@ int ActiveWeaponDefForSlot(int slot)
     if (!ValidSlot(slot) || !weapon_locker_hooks::WeaponHooksReady()) return -1;
     const bool activeSession = IsRecording(slot) || IsReplaying(slot);
     void* ws = activeSession ? input_injector::pawn_binding::RegisteredWeaponServices(slot)
-                            : input_injector::pawn_binding::CurrentWeaponServices(slot);
+                             : input_injector::pawn_binding::CurrentWeaponServices(slot);
     if (!ws) return -1;
     return weapon_locker_hooks::ActiveWeaponDef(ws);
 }

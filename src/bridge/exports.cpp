@@ -253,26 +253,27 @@ extern "C" BC_EXPORT int BotController_LoadReplay(int slot,
                                                   int commandCount,
                                                   uint64_t pawnGeneration) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(
-               slot, ticks, tickCount, subs, subCount, commands, commandCount, nullptr, 0, pawnGeneration)
-               ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, nullptr, 0, pawnGeneration)
+               ? 0
+               : -1;
 }
 
 // Loads optional input history.
 extern "C" BC_EXPORT int BotController_LoadReplayWithInputHistory(int slot,
-                                                  const cs2bc::ReplayTick* ticks,
-                                                  int tickCount,
-                                                  const cs2bc::SubtickMove* subs,
-                                                  int subCount,
-                                                  const cs2bc::ReplayCommandFrameData* commands,
-                                                  int commandCount,
-                                                  const uint8_t* inputHistory,
-                                                  int inputHistorySize,
-                                                  uint64_t pawnGeneration) noexcept
+                                                                  const cs2bc::ReplayTick* ticks,
+                                                                  int tickCount,
+                                                                  const cs2bc::SubtickMove* subs,
+                                                                  int subCount,
+                                                                  const cs2bc::ReplayCommandFrameData* commands,
+                                                                  int commandCount,
+                                                                  const uint8_t* inputHistory,
+                                                                  int inputHistorySize,
+                                                                  uint64_t pawnGeneration) noexcept
 {
-    return cs2bc::motion_recorder::LoadReplay(
-               slot, ticks, tickCount, subs, subCount, commands, commandCount, inputHistory, inputHistorySize, pawnGeneration)
-               ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(slot, ticks, tickCount, subs, subCount, commands, commandCount, inputHistory,
+                                              inputHistorySize, pawnGeneration)
+               ? 0
+               : -1;
 }
 
 // Transfers recorded buffers to a replay slot.
@@ -294,9 +295,9 @@ extern "C" BC_EXPORT int BotController_TransferRecordingToReplay(int srcSlot, in
     int gotC = cs2bc::motion_recorder::CopyCommands(srcSlot, commands.data(), nc);
     int gotH = nh > 0 ? cs2bc::motion_recorder::CopyInputHistoryRange(srcSlot, 0, history.data(), nh) : 0;
     if (gotT <= 0 || gotC != gotT || gotH != nh) return -1;
-    return cs2bc::motion_recorder::LoadReplay(
-               dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, history.data(), gotH)
-               ? 0 : -1;
+    return cs2bc::motion_recorder::LoadReplay(dstSlot, ticks.data(), gotT, subs.data(), gotS, commands.data(), gotC, history.data(), gotH)
+               ? 0
+               : -1;
 }
 
 extern "C" BC_EXPORT int BotController_StartReplay(int slot, int loop)
@@ -321,10 +322,10 @@ extern "C" BC_EXPORT uint64_t BotController_GetPawnGeneration(int slot)
 extern "C" BC_EXPORT void BotController_RefreshPawns() { cs2bc::input_injector::pawn_binding::Refresh(); }
 
 // Ends sessions and retains recordings.
-extern "C" BC_EXPORT void BotController_ResetPawns() { cs2bc::input_injector::pawn_binding::Reset(); }
+extern "C" BC_EXPORT void BotController_ResetPawns() { cs2bc::dispatch::ResetAll(); }
 
 // Ends a disconnected player's session.
-extern "C" BC_EXPORT void BotController_ResetPawn(int slot) { cs2bc::motion_recorder::InvalidateSlot(slot); }
+extern "C" BC_EXPORT void BotController_ResetPawn(int slot) { cs2bc::dispatch::ResetSlot(slot); }
 
 extern "C" BC_EXPORT int BotController_StopReplay(int slot) { return cs2bc::motion_recorder::StopReplay(slot) ? 0 : -1; }
 

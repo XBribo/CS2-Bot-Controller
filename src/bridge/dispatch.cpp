@@ -5,6 +5,8 @@
 #include "WeaponLocker.h"
 #include "BotControllerState.h"
 #include "MotionRecorder.h"
+#include "PawnBinding.h"
+#include "BuyControllerState.h"
 
 #include <engine2/isource2server.h>
 #include <engine2/ivengineserver2.h>
@@ -13,6 +15,25 @@ namespace cs2bc {
 namespace dispatch {
 IVEngineServer2* g_engine = nullptr;
 ISource2GameClients* g_gameClients = nullptr;
+
+void ResetSlot(int slot)
+{
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return;
+    motion_recorder::InvalidateSlot(slot);
+    bot_controller_state::SetAll(slot, false);
+    bot_controller_state::SetAim(slot, false);
+    weapon_locker_state::Clear(slot);
+    buy_controller_state::Clear(slot);
+}
+
+void ResetAll()
+{
+    input_injector::pawn_binding::Reset();
+    bot_controller_state::ClearAllAll();
+    bot_controller_state::ClearAllAim();
+    weapon_locker_state::ClearAll();
+    buy_controller_state::ClearAll();
+}
 
 // Sets a lock; weapon locks also switch once.
 int Lock(int slot, LockKind kind, int arg)

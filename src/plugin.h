@@ -5,7 +5,7 @@
 
 namespace cs2bc {
 
-class BotControllerPlugin : public ISmmPlugin
+class BotControllerPlugin : public ISmmPlugin, public IMetamodListener
 {
   public:
     // Loads features with rollback on failure.
@@ -18,6 +18,8 @@ class BotControllerPlugin : public ISmmPlugin
     bool Unpause(char* error, size_t maxlen) override;
     // Handles plugin-load completion.
     void AllPluginsLoaded() override;
+
+    void OnLevelShutdown() override;
 
     // Plugin author.
     const char* GetAuthor() override;
