@@ -17,7 +17,7 @@ namespace {
 
 IVEngineServer2* g_engine = nullptr;
 INetworkMessages* g_networkMessages = nullptr;
-INetworkMessageInternal* g_voiceMessage = nullptr;
+NetMessageInfo_t* g_voiceMessage = nullptr;
 
 } // namespace
 
@@ -32,7 +32,7 @@ void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages)
 namespace {
 
 // Resolves the voice message type on demand.
-INetworkMessageInternal* FindVoiceMessage()
+NetMessageInfo_t* FindVoiceMessage()
 {
     if (g_voiceMessage) return g_voiceMessage;
     if (!g_networkMessages) return nullptr;
@@ -109,7 +109,7 @@ int SendVoiceFrame(int recipientSlot,
     if (tick >= 0) msg->set_tick(static_cast<uint32_t>(tick));
 
     const bool ok = channel->SendNetMessage(base, BUF_VOICE);
-    g_networkMessages->DeallocateNetMessageAbstract(messageType, base);
+    delete base; // Dispatches to the engine's deleting destructor.
     return ok ? 0 : -6;
 }
 } // namespace voice_sender
