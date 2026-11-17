@@ -4,8 +4,6 @@ namespace BotControllerApi
 {
     public interface IBotControllerApi
     {
-        int AbiVersion { get; }
-
         // ---- locks ----
 
         // All / Aim
@@ -105,9 +103,13 @@ namespace BotControllerApi
 
         // ---- profile ----
 
-        // Read the BotProfile of the bot on this slot. False if the slot has no
-        // live bot or a null profile.
         bool GetBotProfile(int slot, out BotProfileData profile);
+
+        // The profile name can differ from the displayed player name.
+        bool GetBotProfileName(int slot, out string name);
+
+        // Requires the game thread.
+        bool SetBotProfile(int slot, in BotProfilePatch patch);
 
         // ---- buy plans ----
 

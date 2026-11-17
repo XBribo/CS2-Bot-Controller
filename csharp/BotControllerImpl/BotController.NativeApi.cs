@@ -1,15 +1,14 @@
-// P/Invoke wrapper for BotController.dll (ABI 22), check IsCompatible() before use
+// P/Invoke wrapper for the native BotController plugin.
 // Main-thread only.
 
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace BotControllerApi
 {
     // Thin static binding over the native exports. No orchestration here.
     public static class BotController
     {
-        private const int ExpectedAbiVersion = 22;
-
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
 
@@ -24,9 +23,6 @@ namespace BotControllerApi
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_IsLocked(int slot, int kind);
-
-        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_GetVersion();
 
         // Imports the native usercmd injection export
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
@@ -145,6 +141,12 @@ namespace BotControllerApi
         private static extern int BotController_GetProfile(int slot, out BotProfileData profile);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_GetProfileName(int slot, [Out] byte[] buffer, int capacity);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SetBotProfile(int slot, in BotProfilePatch patch);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetBuyPlan(int slot,
             [MarshalAs(UnmanagedType.LPStr)] string aliases);
 
@@ -184,11 +186,18 @@ namespace BotControllerApi
             int tick,
             int audibleMask);
 
-        // Native ABI must match what this wrapper expects.
-        public static bool IsCompatible() => BotController_GetVersion() == ExpectedAbiVersion;
-
-        // Native C-ABI version the loaded DLL reports.
-        public static int AbiVersion => BotController_GetVersion();
+        internal static bool IsNativeBridgeAvailable()
+        {
+            try
+            {
+                BotController_IsLocked(-1, (int)LockKind.All);
+                return true;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                return false;
+            }
+        }
 
         // Creates an independently cancellable native usercmd injection
         public static long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
@@ -385,10 +394,37 @@ namespace BotControllerApi
 
         // ---- profile ----
 
-        // Read the BotProfile of the bot on this slot. Returns false if the slot
-        // has no live bot (it must have ticked at least once) or null profile.
         public static bool GetBotProfile(int slot, out BotProfileData profile)
             => BotController_GetProfile(slot, out profile) == 0;
+
+        public static bool GetBotProfileName(int slot, out string name)
+        {
+            name = string.Empty;
+            try
+            {
+                byte[] buffer = new byte[256];
+                int length = BotController_GetProfileName(slot, buffer, buffer.Length);
+                if (length <= 0) return false;
+                name = Encoding.UTF8.GetString(buffer, 0, length);
+                return true;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+        }
+
+        public static bool SetBotProfile(int slot, in BotProfilePatch patch)
+        {
+            try
+            {
+                return BotController_SetBotProfile(slot, in patch) == 0;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+        }
 
         // ---- buy plans ----
 

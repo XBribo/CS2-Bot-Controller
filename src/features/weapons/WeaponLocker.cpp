@@ -13,12 +13,10 @@
 #include "plugin.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include <engine2/isource2server.h>
-#include <game/entitynetworkable.h>
 #include <entityhandle.h>
 
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <string>
 #include <mutex>
 #include <unordered_map>
@@ -57,32 +55,17 @@ struct LiveWeaponServices
     uint32_t pawnHandle = 0;
 };
 
-// Resolve both ends from the current entity table before using a native service.
 LiveWeaponServices ResolveLiveWs(int slot)
 {
-    if (!g_server || slot < 0 || slot >= 64) return {};
-    Entity2Networkable_t controller{};
-    if (!g_server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity || !controller.m_pEntityInstance)
-        return {};
-    uint32_t pawnHandle = 0;
-    if (!GuardedRead(controller.m_pEntityInstance, g_controllerPawn, pawnHandle) || pawnHandle == 0 || pawnHandle == 0xFFFFFFFFU) return {};
-    Entity2Networkable_t pawn{};
-    if (!g_server->GetEntity2Networkable(CEntityIndex(CEntityHandle(pawnHandle).GetEntryIndex()), &pawn) || !pawn.m_pEntity ||
-        !pawn.m_pEntityInstance || pawn.m_pEntity->GetRefEHandle().ToInt() != pawnHandle || !pawn.m_pszCPPClassname ||
-        std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
-        return {};
-    const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
-    if (handles.controllerHandle != controller.m_pEntity->GetRefEHandle().ToInt() ||
-        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != handles.controllerHandle))
-        return {};
+    const auto live = ResolvePawnForSlot(g_server, slot, g_controllerPawn);
     uint8_t lifeState = 0xFF;
     void* bot = nullptr;
     void* ws = nullptr;
-    if (!GuardedRead(pawn.m_pEntityInstance, g_lifeState, lifeState) || lifeState != 0 ||
-        !GuardedRead(pawn.m_pEntityInstance, g_pawnBot, bot) || !bot ||
-        !GuardedRead(pawn.m_pEntityInstance, tg::g_pawnWeaponServices, ws) || !ws)
+    if (!GuardedRead(live.pawn, g_lifeState, lifeState) || lifeState != 0 ||
+        !GuardedRead(live.pawn, g_pawnBot, bot) || !bot ||
+        !GuardedRead(live.pawn, tg::g_pawnWeaponServices, ws) || !ws)
         return {};
-    return { .pawn = pawn.m_pEntityInstance, .ws = ws, .pawnHandle = pawnHandle };
+    return { .pawn = live.pawn, .ws = ws, .pawnHandle = live.handle };
 }
 
 // Cache only enough identity to find a slot; native calls revalidate it.
@@ -99,7 +82,6 @@ std::mutex g_wsToSlotMu;
 // Reuses the pawn already validated by the enclosing equipment hook.
 void RememberWsForPawn(void* pawn, int slot)
 {
-    if (!pawn || slot < 0 || slot >= 64) return;
     const auto live = ResolveLiveWs(slot);
     if (live.pawn != pawn || !live.ws) return;
     std::scoped_lock lk(g_wsToSlotMu);

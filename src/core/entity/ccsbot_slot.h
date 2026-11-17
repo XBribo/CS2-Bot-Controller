@@ -5,7 +5,17 @@
 #include <cstring>
 #include <type_traits>
 
+class ISource2Server;
+
 namespace cs2bc {
+struct SlotPawn
+{
+    void* pawn;
+    uint32_t handle;
+};
+
+SlotPawn ResolvePawnForSlot(ISource2Server* server, int slot, int controllerPawnOffset);
+
 struct PawnControllerHandles
 {
     uint32_t controllerHandle;

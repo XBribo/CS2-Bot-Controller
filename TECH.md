@@ -70,7 +70,7 @@ CMake output is under `<build-directory>/package/addons/`. Use the script to ass
 
 ## C# Integration
 
-The Metamod plugin and C# provider must use the same ABI, currently **22**. Both providers expose `IBotControllerApi` under `botcontroller:api`.
+Deploy the native and managed components from the same build. Both providers expose `IBotControllerApi` under `botcontroller:api`.
 
 Reference the matching `BotControllerApi.dll` in your consumer project. Adjust `HintPath` to its local location; `Private=false` avoids deploying a second contract with the consumer.
 
@@ -108,7 +108,7 @@ public class BotControllerConsumer : BasePlugin
         var api = BotController.Get();
         if (api == null) return;
 
-        Server.PrintToConsole($"BotController ABI: {api.AbiVersion}");
+        Server.PrintToConsole("BotController API available.");
     }
 }
 ```
@@ -132,7 +132,7 @@ public override void UseSharedInterface(IInterfaceManager interfaceManager)
 }
 ```
 
-Check for an unavailable API before calling it. SwiftlyS2 only registers the interface when the Metamod plugin is available and ABI-compatible.
+Both providers check the native bridge before registering the interface.
 
 ## API Reference
 
@@ -140,7 +140,6 @@ Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotContr
 
 | Area | Members |
 | --- | --- |
-| Compatibility | `AbiVersion` |
 | Locks | `Lock`, `Unlock`, `UnlockAll`, `IsLocked`, `GetWeaponLock` |
 | Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended` |
 | Replay data | `LoadReplay`, `TransferRecordingToReplay`, `SetReplayPawn` |
@@ -149,7 +148,7 @@ Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotContr
 | Button injection | `InjectUsercmd`, `CancelUsercmdInjection` |
 | Analog movement | `StartUsercmdMovement`, `UpdateUsercmdMovement`, `CancelUsercmdMovement` |
 | Button suppression | `SuppressUsercmd`, `StartUsercmdSuppression`, `CancelUsercmdSuppression` |
-| Bot profile | `GetBotProfile` |
+| Bot profile | `GetBotProfile`, `GetBotProfileName`, `SetBotProfile` |
 | Buy plans | `SetBuyPlan`, `SetBuySkip`, `ClearBuyPlan`, `ClearAllBuyPlans`, `BuyPlanItemCount` |
 | Voice | `CanSendVoice`, `GetVoiceStatus`, `SendVoiceFrame` |
 

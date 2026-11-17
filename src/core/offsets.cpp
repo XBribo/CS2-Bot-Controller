@@ -11,6 +11,7 @@ void LoadFromGamedata(const nlohmann::json& gamedata)
     const cs2_sdk::gameconfig::OffsetBinding offsets[] = {
         { &g_vtIdxTeleport, "CBaseEntity_Teleport" },
         { &g_botProfile, "CCSBot::Profile" },
+        { &g_botLocalProfile, "CCSBot::LocalProfile" },
         { &g_profAggression, "BotProfile::Aggression" },
         { &g_profSkill, "BotProfile::Skill" },
         { &g_profTeamwork, "BotProfile::Teamwork" },
@@ -20,6 +21,9 @@ void LoadFromGamedata(const nlohmann::json& gamedata)
         { &g_profDifficulty, "BotProfile::Difficulty" },
         { &g_profReactionTime, "BotProfile::ReactionTime" },
         { &g_profAttackDelay, "BotProfile::AttackDelay" },
+        { &g_profLookAccelNormal, "BotProfile::LookAngleMaxAccelNormal" },
+        { &g_profLookStiffNormal, "BotProfile::LookAngleStiffnessNormal" },
+        { &g_profLookDampNormal, "BotProfile::LookAngleDampingNormal" },
         { &g_profLookAccelAtk, "BotProfile::LookAngleMaxAccelAttacking" },
         { &g_profLookStiffAtk, "BotProfile::LookAngleStiffnessAttacking" },
         { &g_profLookDampAtk, "BotProfile::LookAngleDampingAttacking" },

@@ -35,9 +35,6 @@ extern "C" BC_EXPORT int BotController_IsLocked(int slot, int kind)
     return cs2bc::dispatch::IsLocked(slot, static_cast<cs2bc::LockKind>(kind));
 }
 
-// ABI 22 keeps the native command-based projectile replay path without birth alignment exports.
-extern "C" BC_EXPORT int BotController_GetVersion() { return 22; }
-
 // Create an independently cancellable usercmd injection
 extern "C" BC_EXPORT int64_t BotController_InjectUsercmd(int slot, uint64_t buttonMask, int durationMs)
 {
@@ -119,6 +116,16 @@ extern "C" BC_EXPORT int BotController_GetProfile(int slot, cs2bc::BotProfileDat
 {
     if (!out) return -1;
     return cs2bc::bot_profile::ReadProfile(slot, *out) ? 0 : -1;
+}
+
+extern "C" BC_EXPORT int BotController_GetProfileName(int slot, char* buffer, int capacity)
+{
+    return cs2bc::bot_profile::ReadProfileName(slot, buffer, capacity);
+}
+
+extern "C" BC_EXPORT int BotController_SetBotProfile(int slot, const cs2bc::BotProfilePatch* patch)
+{
+    return patch && cs2bc::bot_profile::SetProfile(slot, *patch) ? 0 : -1;
 }
 
 // ---- Bot buy plans ----

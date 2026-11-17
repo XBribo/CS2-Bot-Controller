@@ -1,7 +1,9 @@
 #include "ccsbot_slot.h"
 #include "core/cs2_sdk/src/utils/memory.h"
 #include "offsets.h"
+#include <engine2/isource2server.h>
 #include <entityhandle.h>
+#include <game/entitynetworkable.h>
 
 #include <cstdint>
 #include <cstring>
@@ -72,6 +74,35 @@ bool TryWriteMemoryGuarded(void* base, int offset, const void* value, size_t siz
 {
     const auto address = FieldAddress(base, offset, size);
     return address && value && cs2_sdk::memory::WriteBytes(reinterpret_cast<void*>(address), value, size);
+}
+
+SlotPawn ResolvePawnForSlot(ISource2Server* server, int slot, int controllerPawnOffset)
+{
+    if (!server || slot < 0 || slot >= 64) return {};
+    Entity2Networkable_t controller{};
+    if (!server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
+        !controller.m_pEntityInstance || !controller.m_pszCPPClassname ||
+        std::strcmp(controller.m_pszCPPClassname, "CCSPlayerController") != 0)
+        return {};
+
+    uint32_t handle = 0;
+    if (!GuardedRead(controller.m_pEntityInstance, controllerPawnOffset, handle) || handle == 0xFFFFFFFEU) return {};
+    const int index = EntIndexFromHandle(handle);
+    if (index <= 0) return {};
+
+    Entity2Networkable_t pawn{};
+    if (!server->GetEntity2Networkable(CEntityIndex(index), &pawn) || !pawn.m_pEntity || !pawn.m_pEntityInstance ||
+        !pawn.m_pszCPPClassname || pawn.m_pEntity->GetRefEHandle().ToInt() != handle ||
+        std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
+        return {};
+
+    const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
+    const uint32_t controllerHandle = controller.m_pEntity->GetRefEHandle().ToInt();
+    if (handles.controllerHandle != controllerHandle ||
+        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != controllerHandle))
+        return {};
+
+    return { .pawn = pawn.m_pEntityInstance, .handle = handle };
 }
 
 PawnControllerHandles ReadPawnControllerHandles(void* pawn)

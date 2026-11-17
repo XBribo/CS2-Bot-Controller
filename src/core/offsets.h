@@ -19,6 +19,7 @@ inline int g_botAiTickedFlag = -1;
 inline int g_botPawn = -1;
 // CCSBot -> m_profile (BotProfile*)
 inline int g_botProfile = 0x08;
+inline int g_botLocalProfile = -1;
 
 // ---- BotProfile (CCSBot+kBot_Profile) ----
 
@@ -31,6 +32,9 @@ inline int g_profCost = 0x48; // int
 inline int g_profDifficulty = 0x50; // u8 bitflags EASY/NORMAL/HARD/EXPERT
 inline int g_profReactionTime = 0x58; // float
 inline int g_profAttackDelay = 0x5C; // float
+inline int g_profLookAccelNormal = -1;
+inline int g_profLookStiffNormal = -1;
+inline int g_profLookDampNormal = -1;
 inline int g_profLookAccelAtk = 0x78; // float m_lookAngleMaxAccelAttacking
 inline int g_profLookStiffAtk = 0x7C; // float m_lookAngleStiffnessAttacking
 inline int g_profLookDampAtk = 0x80; // float m_lookAngleDampingAttacking

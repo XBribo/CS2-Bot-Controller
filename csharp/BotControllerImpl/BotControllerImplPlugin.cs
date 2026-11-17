@@ -39,9 +39,9 @@ public partial class BotControllerPlugin : BasePlugin
     public override void Load(bool hotReload)
     {
         Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
-        if (!BotController.IsCompatible())
+        if (!BotController.IsNativeBridgeAvailable())
         {
-            Server.PrintToConsole("[BotController] BotController ABI mismatch; disabled.");
+            Server.PrintToConsole("[BotController] Native BotController is unavailable; disabled.");
             return;
         }
 

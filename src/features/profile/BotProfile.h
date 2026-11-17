@@ -1,4 +1,4 @@
-// Read a bot's BotProfile (personality / aim / weapon preference) by slot.
+// Access a bot's BotProfile by slot on the game thread.
 
 #pragma once
 
@@ -22,11 +22,39 @@ struct BotProfileData
     int32_t weaponPrefCount; // valid entries in weaponPref
     uint16_t weaponPref[16]; // item def index, [0..weaponPrefCount)
 };
+
+enum BotProfileFields : uint32_t
+{
+    Skill = 1U << 0,
+    ReactionTime = 1U << 1,
+    AttackDelay = 1U << 2,
+    LookAccelNormal = 1U << 3,
+    LookStiffNormal = 1U << 4,
+    LookDampNormal = 1U << 5,
+    LookAccelAtk = 1U << 6,
+    LookStiffAtk = 1U << 7,
+    LookDampAtk = 1U << 8,
+};
+
+struct BotProfilePatch
+{
+    uint32_t fields;
+    float skill;
+    float reactionTime;
+    float attackDelay;
+    float lookAccelNormal;
+    float lookStiffNormal;
+    float lookDampNormal;
+    float lookAccelAtk;
+    float lookStiffAtk;
+    float lookDampAtk;
+};
+static_assert(sizeof(BotProfilePatch) == 40);
 #pragma pack(pop)
 
 namespace bot_profile {
-// Read the profile of the bot currently on this slot. Returns false if
-// the slot has no live bot or the profile pointer is null.
 bool ReadProfile(int slot, BotProfileData& out);
+int ReadProfileName(int slot, char* buffer, int capacity);
+bool SetProfile(int slot, const BotProfilePatch& patch);
 } // namespace bot_profile
 } // namespace cs2bc

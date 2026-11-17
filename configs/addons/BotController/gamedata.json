@@ -130,6 +130,13 @@
     },
     "comment": "CCSBot -> m_profile"
   },
+  "CCSBot::LocalProfile": {
+    "offsets": {
+      "windows": 256,
+      "linux": 248
+    },
+    "comment": "CCSBot-owned BotProfile copy"
+  },
   "BotProfile::Aggression": {
     "offsets": {
       "windows": 8,
@@ -192,6 +199,27 @@
       "linux": 92
     },
     "comment": "m_attackDelay"
+  },
+  "BotProfile::LookAngleMaxAccelNormal": {
+    "offsets": {
+      "windows": 108,
+      "linux": 108
+    },
+    "comment": "m_lookAngleMaxAccelNormal"
+  },
+  "BotProfile::LookAngleStiffnessNormal": {
+    "offsets": {
+      "windows": 112,
+      "linux": 112
+    },
+    "comment": "m_lookAngleStiffnessNormal"
+  },
+  "BotProfile::LookAngleDampingNormal": {
+    "offsets": {
+      "windows": 116,
+      "linux": 116
+    },
+    "comment": "m_lookAngleDampingNormal"
   },
   "BotProfile::LookAngleMaxAccelAttacking": {
     "offsets": {

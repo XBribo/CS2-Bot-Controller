@@ -142,4 +142,35 @@ namespace BotControllerApi
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
         public ushort[] WeaponPref; // item def index, [0..WeaponPrefCount)
     }
+
+    [Flags]
+    public enum BotProfileFields : uint
+    {
+        None = 0,
+        Skill = 1U << 0,
+        ReactionTime = 1U << 1,
+        AttackDelay = 1U << 2,
+        LookAccelNormal = 1U << 3,
+        LookStiffNormal = 1U << 4,
+        LookDampNormal = 1U << 5,
+        LookAccelAtk = 1U << 6,
+        LookStiffAtk = 1U << 7,
+        LookDampAtk = 1U << 8,
+    }
+
+    // Positive infinity is a valid acceleration cap.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct BotProfilePatch
+    {
+        public BotProfileFields Fields;
+        public float Skill;         // 0..1
+        public float ReactionTime;  // seconds
+        public float AttackDelay;   // seconds
+        public float LookAccelNormal;
+        public float LookStiffNormal;
+        public float LookDampNormal;
+        public float LookAccelAtk;
+        public float LookStiffAtk;
+        public float LookDampAtk;
+    }
 }

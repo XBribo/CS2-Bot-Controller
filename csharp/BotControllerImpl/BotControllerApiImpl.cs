@@ -4,8 +4,6 @@ namespace BotControllerApi
 {
     public sealed class BotControllerApiImpl : IBotControllerApi
     {
-        public int AbiVersion => BotController.AbiVersion;
-
         // ---- locks ----
         public bool Lock(int slot, LockKind kind) => BotController.Lock(slot, kind);
         public bool Lock(int slot, LockTarget target) => BotController.Lock(slot, target);
@@ -82,6 +80,12 @@ namespace BotControllerApi
         // ---- profile ----
         public bool GetBotProfile(int slot, out BotProfileData profile)
             => BotController.GetBotProfile(slot, out profile);
+
+        public bool GetBotProfileName(int slot, out string name)
+            => BotController.GetBotProfileName(slot, out name);
+
+        public bool SetBotProfile(int slot, in BotProfilePatch patch)
+            => BotController.SetBotProfile(slot, in patch);
 
         // ---- buy plans ----
         public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);

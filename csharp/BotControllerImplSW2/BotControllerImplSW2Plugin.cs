@@ -39,16 +39,12 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     private readonly Dictionary<int, object> _loadingSlots = new();
     private readonly HashSet<int> _cancelledLoads = new();
     private readonly ConcurrentQueue<Action> _completedJobs = new();
-    private bool _bridgeChecked;
-    private bool _bridgeAvailable;
+    private bool? _bridgeAvailable;
 
     // ---- API implementation (cross-plugin via IInterfaceManager) ----
 
     private sealed class BotControllerApiImpl : IBotControllerApi
     {
-        // Returns the bridge ABI version.
-        public int AbiVersion => BotController.AbiVersion;
-
         // Applies a generic lock to a bot slot.
         public bool Lock(int slot, LockKind kind) => BotController.Lock(slot, kind);
         // Applies a weapon-slot lock to a bot slot.
@@ -138,9 +134,14 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         public bool CancelUsercmdSuppression(int slot, long suppressionId)
             => BotController.CancelUsercmdSuppression(slot, suppressionId);
 
-        // Returns the live profile data for a bot slot.
         public bool GetBotProfile(int slot, out BotProfileData profile)
             => BotController.GetBotProfile(slot, out profile);
+
+        public bool GetBotProfileName(int slot, out string name)
+            => BotController.GetBotProfileName(slot, out name);
+
+        public bool SetBotProfile(int slot, in BotProfilePatch patch)
+            => BotController.SetBotProfile(slot, in patch);
 
         // Sets the round buy plan for a bot slot.
         public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);
@@ -219,7 +220,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Unhooks replay ticking during plugin unload.
     public override void Unload()
     {
-        if (_bridgeAvailable)
+        if (_bridgeAvailable == true)
         {
             Core.Event.OnTick -= OnTick;
         }
@@ -287,34 +288,15 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
                    ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address);
     }
 
-    // Returns the cached bridge state, probing once on first use.
     private bool EnsureBridgeAvailable()
     {
-        if (_bridgeChecked) return _bridgeAvailable;
+        if (_bridgeAvailable is bool available) return available;
 
-        _bridgeChecked = true;
-        _bridgeAvailable = ProbeBridge();
-        return _bridgeAvailable;
-    }
-
-    // Checks bridge availability and ABI compatibility.
-    private bool ProbeBridge()
-    {
-        try
-        {
-            if (BotController.IsCompatible())
-                return true;
-
-            Logger.LogWarning(
-                "[BotController] BotController ABI mismatch; got ABI {AbiVersion}.",
-                BotController.AbiVersion);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "[BotController] Failed to initialize BotController API.");
-            return false;
-        }
+        available = BotController.IsNativeBridgeAvailable();
+        _bridgeAvailable = available;
+        if (!available)
+            Logger.LogWarning("[BotController] Native BotController is unavailable.");
+        return available;
     }
 
     // ---- Chat Commands ----
