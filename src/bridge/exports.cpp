@@ -7,6 +7,7 @@
 #include "BuyControllerState.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
+#include "plugin.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +19,8 @@
 #else
 #define BC_EXPORT __attribute__((visibility("default")))
 #endif
+
+extern "C" BC_EXPORT int BotController_IsLoaded() { return cs2bc::g_plugin.IsLoaded() ? 1 : 0; }
 
 extern "C" BC_EXPORT int BotController_Lock(int slot, int kind, int arg)
 {

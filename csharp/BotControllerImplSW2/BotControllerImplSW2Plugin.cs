@@ -26,34 +26,29 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 
     private const string InterfaceKey = "botcontroller:api";
     private RecordingSessions? _sessions;
-    private RecordingSessions Sessions => _sessions ??= new(
-        RecordingsDir, RegisterPawnForSlot, NotifyPlayer,
-        message => Logger.LogError("{Message}", message));
-    private bool _bridgeChecked;
-    private bool _bridgeAvailable;
+    private RecordingSessions Sessions => _sessions!;
     private BotControllerApiImpl? _api;
     private CommandPermissionsConfig _commandPermissions = new(true);
 
     // ---- Lifecycle ----
 
-    // Registers the API when the bridge is ready.
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
-        if (!EnsureBridgeAvailable()) return;
-
-        // Publish the botcontroller:api shared interface.
         interfaceManager.AddSharedInterface<IBotControllerApi, BotControllerApiImpl>(
             InterfaceKey, _api ??= new BotControllerApiImpl());
     }
 
-    // Registers file-job callbacks.
     public override void Load(bool _)
     {
+        NativeBridge.Initialize(Core.GameFilesDirectory);
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
         LoadCommandPermissions();
-        if (!EnsureBridgeAvailable()) return;
 
         Directory.CreateDirectory(RecordingsDir);
+        var sessions = new RecordingSessions(RecordingsDir, RegisterPawnForSlot, NotifyPlayer,
+            message => Logger.LogError("{Message}", message));
+        sessions.Reset();
+        _sessions = sessions;
 
         Core.Event.OnTick += OnTick;
         Core.Event.OnMapLoad += OnMapLoad;
@@ -61,39 +56,23 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
         Core.Event.OnClientDisconnected += OnDisconnect;
     }
 
-    // Removes file-job callbacks on unload.
     public override void Unload()
     {
         _api?.Dispose();
         _api = null;
-        if (_bridgeAvailable)
-        {
-            Core.Event.OnTick -= OnTick;
-            Core.Event.OnMapLoad -= OnMapLoad;
-            Core.Event.OnMapUnload -= OnMapUnload;
-            Core.Event.OnClientDisconnected -= OnDisconnect;
-            Sessions.Drain();
-            _bridgeAvailable = false;
-        }
-        _bridgeChecked = false;
+        if (_sessions is not { } sessions) return;
+
+        Core.Event.OnTick -= OnTick;
+        Core.Event.OnMapLoad -= OnMapLoad;
+        Core.Event.OnMapUnload -= OnMapUnload;
+        Core.Event.OnClientDisconnected -= OnDisconnect;
+        sessions.Drain();
+        _sessions = null;
     }
 
-    // Resets Pawn registrations on map start.
-    private void OnMapLoad(IOnMapLoadEvent _) => ResetSessions();
-
-    // Invalidates jobs before entity reuse.
-    private void OnMapUnload(IOnMapUnloadEvent _) => ResetSessions();
-
-    // Invalidates sessions before slot reuse.
-    private void OnDisconnect(IOnClientDisconnectedEvent @event)
-    {
-        if (!_bridgeAvailable) return;
-        int slot = @event.PlayerId;
-        Sessions.Disconnect(slot);
-    }
-
-    // Pins pending saves to stopped buffers.
-    private void ResetSessions() => Sessions.Reset();
+    private void OnMapLoad(IOnMapLoadEvent _) => Sessions.Reset();
+    private void OnMapUnload(IOnMapUnloadEvent _) => Sessions.Reset();
+    private void OnDisconnect(IOnClientDisconnectedEvent @event) => Sessions.Disconnect(@event.PlayerId);
 
     private void LoadCommandPermissions()
     {
@@ -151,24 +130,6 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
             : $"Slot {slot}: native pawn registration failed.";
     }
 
-    // Initializes the bridge once.
-    private bool EnsureBridgeAvailable()
-    {
-        if (_bridgeChecked) return _bridgeAvailable;
-
-        _bridgeChecked = true;
-        try
-        {
-            ResetSessions();
-            _bridgeAvailable = true;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning("Bridge unavailable: {Reason}", ex.Message);
-        }
-        return _bridgeAvailable;
-    }
-
     // ---- Chat Commands ----
 
     // Starts recording the requesting player.
@@ -176,7 +137,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     public void OnRecord(ICommandContext context)
     {
         var player = context.Sender;
-        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (player is not { IsValid: true }) return;
         if (context.Args.Length > 1)
         {
             context.Reply(Tag("Usage: !record [fileName]"));
@@ -191,7 +152,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     public void OnStopRecord(ICommandContext context)
     {
         var player = context.Sender;
-        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (player is not { IsValid: true }) return;
         context.Reply(Tag(Sessions.StopRecord(player.Slot, player.SteamID)));
     }
 
@@ -200,7 +161,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     public void OnReplay(ICommandContext context)
     {
         var player = context.Sender;
-        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (player is not { IsValid: true }) return;
         if (!CanExecuteReplayCommand(context, player)) return;
         if (context.Args.Length is < 1 or > 2 || !int.TryParse(context.Args[0], out int slot))
         {
@@ -216,7 +177,7 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     public void OnStopReplay(ICommandContext context)
     {
         var player = context.Sender;
-        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (player is not { IsValid: true }) return;
         if (!CanExecuteReplayCommand(context, player)) return;
         if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int slot)) return;
         context.Reply(Tag(Sessions.StopReplay(slot)));

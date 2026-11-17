@@ -32,6 +32,7 @@ public partial class BotControllerPlugin : BasePlugin
     // Loads the provider and publishes the API.
     public override void Load(bool hotReload)
     {
+        NativeBridge.Initialize(Path.Combine(Server.GameDirectory, "csgo"));
         Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
         LoadCommandPermissions();
         ResetSessions();

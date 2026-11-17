@@ -38,6 +38,8 @@ class BotControllerPlugin : public ISmmPlugin, public IMetamodListener
     // Log tag.
     const char* GetLogTag() override;
 
+    bool IsLoaded() const { return m_loaded; }
+
   private:
     bool m_loaded = false;
     bool m_convarsRegistered = false;
