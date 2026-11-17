@@ -5,10 +5,10 @@
 #include <cstdint>
 #include "cs_usercmd.pb.h"
 
-// Engine button state block
+// Eight-state button bit planes.
 class CInButtonState
 {
-    virtual void Schema_DynamicBinding_Unused() {} // keep vtable slot, do not call
+    virtual void Schema_DynamicBinding_Unused() {} // Schema vtable slot.
 
   public:
     uint64_t m_pButtonStates[3];
@@ -33,7 +33,7 @@ class CUserCmdBase
     virtual void unk6();
 };
 
-// Brings the protobuf message in as a base, not a member.
+// Protobuf base subobject.
 template <typename T> class CUserCmdBaseHost : public CUserCmdBase, public T
 {
 };

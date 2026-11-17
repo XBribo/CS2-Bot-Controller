@@ -5,6 +5,8 @@
 #include "WeaponLocker.h"
 #include "BotControllerState.h"
 #include "MotionRecorder.h"
+#include "PawnBinding.h"
+#include "BuyControllerState.h"
 
 #include <engine2/isource2server.h>
 #include <engine2/ivengineserver2.h>
@@ -14,28 +16,45 @@ namespace dispatch {
 IVEngineServer2* g_engine = nullptr;
 ISource2GameClients* g_gameClients = nullptr;
 
-// Set lock; Weapon also triggers a one-shot switch.
+void ResetSlot(int slot)
+{
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return;
+    motion_recorder::InvalidateSlot(slot);
+    bot_controller_state::SetAll(slot, false);
+    bot_controller_state::SetAim(slot, false);
+    weapon_locker_state::Clear(slot);
+    buy_controller_state::Clear(slot);
+}
+
+void ResetAll()
+{
+    input_injector::pawn_binding::Reset();
+    bot_controller_state::ClearAllAll();
+    bot_controller_state::ClearAllAim();
+    weapon_locker_state::ClearAll();
+    buy_controller_state::ClearAll();
+}
+
+// Sets a lock; weapon locks also switch once.
 int Lock(int slot, LockKind kind, int arg)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
     if (motion_recorder::IsReplaying(slot)) return -3;
 
     switch (kind)
     {
         case LockKind::All:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAll(slot, true);
             return 0;
 
         case LockKind::Aim:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAim(slot, true);
             return 0;
 
         case LockKind::Weapon:
         {
-            if (slot < 0 || slot >= weapon_locker_state::kMaxSlots) return -2;
+            if (arg < static_cast<int>(LockTarget::Slot1) || arg > static_cast<int>(LockTarget::Slot5)) return -2;
             const auto tgt = static_cast<LockTarget>(arg);
-            if (tgt == LockTarget::None) return -2;
             weapon_locker_state::Set(slot, tgt);
             (void)weapon_locker_hooks::SwitchToLockTarget(slot);
             return 0;
@@ -44,30 +63,28 @@ int Lock(int slot, LockKind kind, int arg)
     return -2;
 }
 
-// Clear the per-kind lock for this slot.
+// Clears the slot's lock.
 int Unlock(int slot, LockKind kind)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
     switch (kind)
     {
         case LockKind::All:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAll(slot, false);
             return 0;
 
         case LockKind::Aim:
-            if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return -2;
             bot_controller_state::SetAim(slot, false);
             return 0;
 
         case LockKind::Weapon:
-            if (slot < 0 || slot >= weapon_locker_state::kMaxSlots) return -2;
             weapon_locker_state::Clear(slot);
             return 0;
     }
     return -2;
 }
 
-// Clear every slot under kind.
+// Clears this lock kind on all slots.
 int UnlockAll(LockKind kind)
 {
     switch (kind)
@@ -85,9 +102,10 @@ int UnlockAll(LockKind kind)
     return -2;
 }
 
-// Return lock state for this slot under kind.
+// Queries the slot's lock.
 int IsLocked(int slot, LockKind kind)
 {
+    if (slot < 0 || slot >= bot_controller_state::kMaxSlots) return 0;
     switch (kind)
     {
         case LockKind::All:

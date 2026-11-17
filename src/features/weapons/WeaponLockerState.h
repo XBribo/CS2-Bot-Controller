@@ -20,8 +20,10 @@ enum class LockTarget : int // NOLINT(performance-enum-size)
 };
 
 namespace weapon_locker_state {
+// Slots are validated by dispatch or entity resolution.
 constexpr int kMaxSlots = 64;
 
+bool HasAnyLock();
 LockTarget Get(int slot);
 void Set(int slot, LockTarget tgt);
 void Clear(int slot);

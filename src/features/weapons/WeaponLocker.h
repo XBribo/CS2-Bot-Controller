@@ -1,4 +1,4 @@
-// MinHook for CCSBot EquipBestWeapon/EquipPistol + WeaponServices::SelectItem.
+// Bot AI selection hooks and shared player weapon helpers.
 
 #pragma once
 
@@ -24,37 +24,35 @@ void* EquipPistolAddress();
 void* SelectItemAddress();
 void* GetSlotAddress();
 
-// Force bot at `slot` to its locked weapon
-// Returns: 0 ok / 1 no ws / 2 no target / 3 hooks not installed
+// Selects the Bot/player's locked weapon.
+// Returns: 0 ok / 1 no ws / 2 no target / 3 unavailable / 4 replay active.
 int SwitchToLockTarget(int slot);
 
-// ---- helpers for MotionRecorder ----
+// ---- shared inventory operations ----
 
-// True once GetSlot + SelectItem are resolved and hooks installed
+// Checks GetSlot and SelectItem hooks.
 bool WeaponHooksReady();
 
-// Read a weapon's item-definition index (weapon+0x9E0). -1 if null
+// Weapon definition; -1 if unresolved.
 int ReadDefIndex(void* weapon);
 
-// Entity index of a weapon (identity ehandle low bits). -1 if null
+// Weapon entity index; -1 if unavailable.
 int WeaponEntIndex(void* weapon);
 
-// Resolves a command's entity index only within the owner's inventory; normalizes knives.
+// Resolves an owned weapon index; normalizes knives.
 int WeaponDefForEntityIndex(void* ws, int entityIndex);
 
-// Active weapon's def index for a WeaponServices*. -1 if none/unresolved
+// Active weapon definition; -1 if unavailable.
 int ActiveWeaponDef(void* ws);
 
-// First weapon in slots 0..4 whose def index == def
+// Finds the definition in slots 0..4.
 void* FindWeaponByDef(void* ws, int def);
 
-// Request a switch through SelectItem, respecting all registered hooks.
+// Switches through SelectItem hooks.
 bool SelectWeapon(void* ws, void* weapon);
 
-// Bypass SelectItem hooks only for internal replay operations.
+// Replay-only switch bypassing SelectItem hooks.
 bool SelectWeaponRaw(void* ws, void* weapon);
 
-// Current WeaponServices* for a live bot, validated through full entity handles.
-void* WsForSlot(int slot);
 } // namespace weapon_locker_hooks
 } // namespace cs2bc

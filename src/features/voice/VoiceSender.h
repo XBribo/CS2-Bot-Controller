@@ -7,16 +7,16 @@ class INetworkMessages;
 
 namespace cs2bc {
 namespace voice_sender {
-// Store engine interfaces used to allocate and send voice messages
+// Stores voice sender interfaces.
 void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages);
 
-// Return true when voice net messages can be sent
+// Checks voice availability.
 bool IsAvailable();
 
-// Return 0 when ready, otherwise a negative setup error code
+// Returns 0 when ready; negative values report setup errors.
 int GetStatus();
 
-// Send one encoded voice frame to a recipient player slot
+// Sends an encoded voice frame to the recipient slot.
 int SendVoiceFrame(int recipientSlot,
                    int senderClient,
                    uint64_t senderXuid,

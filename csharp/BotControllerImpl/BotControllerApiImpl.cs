@@ -1,27 +1,35 @@
-// Provider-side implementation of IBotControllerApi.
+// Shared provider-side implementation of IBotControllerApi.
 
 namespace BotControllerApi
 {
-    public sealed class BotControllerApiImpl : IBotControllerApi
+    public sealed class BotControllerApiImpl : IBotControllerApi, IDisposable
     {
+        private volatile bool _active = true;
+
+        public int ApiVersion => 1;
+
+        public void Dispose() => _active = false;
+
         // ---- locks ----
-        public bool Lock(int slot, LockKind kind) => BotController.Lock(slot, kind);
-        public bool Lock(int slot, LockTarget target) => BotController.Lock(slot, target);
-        public bool Unlock(int slot, LockKind kind) => BotController.Unlock(slot, kind);
-        public bool UnlockAll(LockKind kind) => BotController.UnlockAll(kind);
-        public bool IsLocked(int slot, LockKind kind) => BotController.IsLocked(slot, kind);
-        public LockTarget GetWeaponLock(int slot) => BotController.GetWeaponLock(slot);
+        public bool Lock(int slot, LockKind kind) => _active && BotController.Lock(slot, kind);
+        public bool Lock(int slot, LockTarget target) => _active && BotController.Lock(slot, target);
+        public bool Unlock(int slot, LockKind kind) => _active && BotController.Unlock(slot, kind);
+        public bool UnlockAll(LockKind kind) => _active && BotController.UnlockAll(kind);
+        public bool IsLocked(int slot, LockKind kind) => _active && BotController.IsLocked(slot, kind);
+        public LockTarget GetWeaponLock(int slot) => _active ? BotController.GetWeaponLock(slot) : LockTarget.None;
 
         // ---- recording ----
-        public bool StartRecord(int slot) => BotController.StartRecord(slot);
-        public bool StopRecord(int slot) => BotController.StopRecord(slot);
-        public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
+        public bool StartRecord(int slot) => _active && BotController.StartRecord(slot);
+        public bool StopRecord(int slot) => _active && BotController.StopRecord(slot);
+        public int RecordedTickCount(int slot) => _active ? BotController.RecordedTickCount(slot) : 0;
         public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers
+            => _active ? BotController.GetRecordedMotion(slot) : ([], []);
+        // Copies aligned tick, subtick, and command buffers.
         public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
             GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
+            => _active ? BotController.GetRecordedMotionExtended(slot) : ([], [], []);
+        // Copies optional input history.
+        public byte[] GetRecordedInputHistory(int slot) => _active ? BotController.GetRecordedInputHistory(slot) : [];
 
         // ---- replay ----
         public bool LoadReplay(
@@ -29,74 +37,90 @@ namespace BotControllerApi
             ReplayTick[] ticks,
             SubtickMove[] subs,
             ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
+            => _active && BotController.LoadReplay(slot, ticks, subs, commands);
+
+        public bool LoadReplay(
+            int slot,
+            ReplayTick[] ticks,
+            SubtickMove[] subs,
+            ReplayCommandFrame[] commands,
+            byte[]? inputHistory = null)
+            => _active && BotController.LoadReplay(slot, ticks, subs, commands, inputHistory);
         public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
-            => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
-        // Registers the authoritative native pawn pointer for replay.
-        public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
-        public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
-        public bool StopReplay(int slot) => BotController.StopReplay(slot);
-        public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);
-        public int ReplayTotal(int slot) => BotController.ReplayTotal(slot);
-        public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
+            => _active && BotController.TransferRecordingToReplay(srcSlot, dstSlot);
+        // Registers the current native Pawn.
+        public bool SetReplayPawn(int slot, nint pawn) => _active && BotController.SetReplayPawn(slot, pawn);
+        public bool StartReplay(int slot, bool loop = false) => _active && BotController.StartReplay(slot, loop);
+        public bool StopReplay(int slot) => _active && BotController.StopReplay(slot);
+        public int ReplayCursor(int slot) => _active ? BotController.ReplayCursor(slot) : -1;
+        public int ReplayTotal(int slot) => _active ? BotController.ReplayTotal(slot) : 0;
+        public bool IsReplaying(int slot) => _active && BotController.IsReplaying(slot);
         public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
+        {
+            tick = default;
+            return _active && BotController.TryGetReplayTick(slot, out tick);
+        }
 
         // ---- weapons ----
         public bool SwitchBotWeapon(int slot, int defIndex)
-            => BotController.SwitchBotWeapon(slot, defIndex);
-        public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
-        // Creates an independently cancellable native usercmd injection
+            => _active && BotController.SwitchBotWeapon(slot, defIndex);
+        public int BotActiveWeaponDef(int slot) => _active ? BotController.BotActiveWeaponDef(slot) : -1;
+        // Starts button injection; returns a token.
         public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
-            => BotController.InjectUsercmd(slot, buttonMask, durationMs);
-        // Cancels one native usercmd injection by its token
+            => _active ? BotController.InjectUsercmd(slot, buttonMask, durationMs) : -1;
+        // Cancels a button-injection token.
         public bool CancelUsercmdInjection(int slot, long injectionId)
-            => BotController.CancelUsercmdInjection(slot, injectionId);
-        // Creates an independently cancellable persistent analog movement override
+            => _active && BotController.CancelUsercmdInjection(slot, injectionId);
+        // Starts persistent movement; returns a token.
         public long StartUsercmdMovement(int slot, float forwardMove, float leftMove)
-            => BotController.StartUsercmdMovement(slot, forwardMove, leftMove);
-        // Updates one persistent analog movement override
+            => _active ? BotController.StartUsercmdMovement(slot, forwardMove, leftMove) : -1;
+        // Updates a movement token.
         public bool UpdateUsercmdMovement(
             int slot,
             long movementId,
             float forwardMove,
             float leftMove)
-            => BotController.UpdateUsercmdMovement(
+            => _active && BotController.UpdateUsercmdMovement(
                 slot, movementId, forwardMove, leftMove);
-        // Cancels one persistent analog movement override
+        // Cancels a movement token.
         public bool CancelUsercmdMovement(int slot, long movementId)
-            => BotController.CancelUsercmdMovement(slot, movementId);
-        // Suppresses selected usercmd buttons for a fixed duration
+            => _active && BotController.CancelUsercmdMovement(slot, movementId);
+        // Suppresses buttons for a fixed duration.
         public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
-            => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
-        // Creates an independently cancellable persistent native usercmd suppression
+            => _active && BotController.SuppressUsercmd(slot, buttonMask, durationMs);
+        // Starts persistent suppression; returns a token.
         public long StartUsercmdSuppression(int slot, ulong buttonMask)
-            => BotController.StartUsercmdSuppression(slot, buttonMask);
-        // Cancels one persistent native usercmd suppression by its token
+            => _active ? BotController.StartUsercmdSuppression(slot, buttonMask) : -1;
+        // Cancels a suppression token.
         public bool CancelUsercmdSuppression(int slot, long suppressionId)
-            => BotController.CancelUsercmdSuppression(slot, suppressionId);
+            => _active && BotController.CancelUsercmdSuppression(slot, suppressionId);
 
         // ---- profile ----
         public bool GetBotProfile(int slot, out BotProfileData profile)
-            => BotController.GetBotProfile(slot, out profile);
+        {
+            profile = default;
+            return _active && BotController.GetBotProfile(slot, out profile);
+        }
 
         public bool GetBotProfileName(int slot, out string name)
-            => BotController.GetBotProfileName(slot, out name);
+        {
+            name = string.Empty;
+            return _active && BotController.GetBotProfileName(slot, out name);
+        }
 
         public bool SetBotProfile(int slot, in BotProfilePatch patch)
-            => BotController.SetBotProfile(slot, in patch);
+            => _active && BotController.SetBotProfile(slot, in patch);
 
         // ---- buy plans ----
-        public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);
-        public bool SetBuySkip(int slot) => BotController.SetBuySkip(slot);
-        public bool ClearBuyPlan(int slot) => BotController.ClearBuyPlan(slot);
-        public bool ClearAllBuyPlans() => BotController.ClearAllBuyPlans();
-        public int BuyPlanItemCount(int slot) => BotController.BuyPlanItemCount(slot);
+        public bool SetBuyPlan(int slot, string aliases) => _active && BotController.SetBuyPlan(slot, aliases);
+        public bool SetBuySkip(int slot) => _active && BotController.SetBuySkip(slot);
+        public bool ClearBuyPlan(int slot) => _active && BotController.ClearBuyPlan(slot);
+        public bool ClearAllBuyPlans() => _active && BotController.ClearAllBuyPlans();
+        public int BuyPlanItemCount(int slot) => _active ? BotController.BuyPlanItemCount(slot) : -1;
 
         // ---- voice ----
-        public bool CanSendVoice() => BotController.CanSendVoice();
-        public int GetVoiceStatus() => BotController.GetVoiceStatus();
+        public bool CanSendVoice() => _active && BotController.CanSendVoice();
+        public int GetVoiceStatus() => _active ? BotController.GetVoiceStatus() : -1;
         public int SendVoiceFrame(
             int recipientSlot,
             int senderClient,
@@ -113,7 +137,7 @@ namespace BotControllerApi
             int packetOffsetCount,
             int tick,
             int audibleMask)
-            => BotController.SendVoiceFrame(
+            => _active ? BotController.SendVoiceFrame(
                 recipientSlot,
                 senderClient,
                 senderXuid,
@@ -128,6 +152,6 @@ namespace BotControllerApi
                 packetOffsets,
                 packetOffsetCount,
                 tick,
-                audibleMask);
+                audibleMask) : -1;
     }
 }

@@ -5,8 +5,7 @@ class IVEngineServer2;
 
 namespace cs2bc {
 namespace commands {
-// Set by plugin.cpp Load(). Used to ClientPrintf back to the player
-// who issued a console command. nullptr -> fall back to server log.
+// Caller reply interface; null routes output to the server log.
 extern IVEngineServer2* g_engine;
 
 void PrintToCaller(const CCommandContext& context, const char* fmt, ...);

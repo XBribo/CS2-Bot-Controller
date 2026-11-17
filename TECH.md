@@ -1,130 +1,51 @@
 # BotController Developer Guide
 
-Build BotController or consume its shared C# API. For installation and console/chat commands, see [README.md](README.md).
+CounterStrikeSharp and SwiftlyS2 plugins share the `botcontroller:api` interface. See the [README](README.md) for installation and server commands.
 
-- [Build](#build)
-- [C# Integration](#c-integration)
-- [API Reference](#api-reference)
-- [Behavior and Limits](#behavior-and-limits)
+## Plugin integration
 
-## Build
-
-Run commands from the repository root. Requirements:
-
-- **Windows:** Visual Studio 2026 C++ build tools and CMake.
-- **Linux:** `g++`, CMake, and Make.
-- **C#:** .NET 10 SDK.
-- **Build script:** PowerShell 7 or newer; Linux builds use WSL (`Ubuntu-24.04` by default).
-- **Dependencies:** Git and recursively initialized submodules.
-
-```bash
-git submodule update --init --recursive
-```
-
-Dependencies are provided by the `cs2_sdk` submodule.
-
-### Build Script
-
-On a Windows host:
-
-```powershell
-./build.ps1                         # Windows, Linux (WSL), and both C# providers
-./build.ps1 -Windows                # Windows and both C# providers
-./build.ps1 -Linux                  # Linux (WSL) and both C# providers
-./build.ps1 -Windows -SkipCsharp    # Windows only
-```
-
-Add `-Clean` for a clean rebuild. Metamod and C# packages are separate:
-
-| Output | Contents |
-| --- | --- |
-| `dist/windows/` | Windows Metamod plugin |
-| `dist/linux/` | Linux Metamod plugin |
-| `dist/CounterStrikeSharp/` | CounterStrikeSharp provider and API contract |
-| `dist/SwiftlyS2/` | SwiftlyS2 provider and API contract |
-
-### Manual Build
-
-Windows:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64
-cmake --build build --config Release
-```
-
-Linux:
-
-```bash
-cmake -S . -B out/linux -DCMAKE_BUILD_TYPE=Release
-cmake --build out/linux -j$(nproc)
-```
-
-Build the provider for the framework you use; each also builds the API contract:
-
-```bash
-dotnet build csharp/BotControllerImpl/BotControllerImpl.csproj -c Release
-dotnet build csharp/BotControllerImplSW2/BotControllerImplSW2.csproj -c Release
-```
-
-CMake output is under `<build-directory>/package/addons/`. Use the script to assemble the C# packages.
-
-## C# Integration
-
-Deploy the native and managed components from the same build. Both providers expose `IBotControllerApi` under `botcontroller:api`.
-
-Reference the matching `BotControllerApi.dll` in your consumer project. Adjust `HintPath` to its local location; `Private=false` avoids deploying a second contract with the consumer.
+Reference the release's `BotControllerApi.dll`, not the provider. Use the contract, native plugin and provider from the same release. Do not bundle a second copy of the DLL.
 
 ```xml
-<ItemGroup>
-  <Reference Include="BotControllerApi">
-    <HintPath>libs/BotControllerApi.dll</HintPath>
-    <Private>false</Private>
-  </Reference>
-</ItemGroup>
+<Reference Include="BotControllerApi">
+  <HintPath>libs/BotControllerApi.dll</HintPath>
+  <Private>false</Private>
+</Reference>
 ```
 
 ### CounterStrikeSharp
 
-The contract is deployed to `addons/counterstrikesharp/shared/BotControllerApi/BotControllerApi.dll`. Declare the capability in your consumer; referencing the provider implementation is not required.
+Contract: `addons/counterstrikesharp/shared/BotControllerApi/BotControllerApi.dll`.
+
+In your `BasePlugin`:
 
 ```csharp
+using System.Collections.Generic;
 using BotControllerApi;
-using CounterStrikeSharp.API;
-using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
 
-public class BotControllerConsumer : BasePlugin
+private static readonly PluginCapability<IBotControllerApi> Bots = new("botcontroller:api");
+private IBotControllerApi? _bots;
+
+public override void OnAllPluginsLoaded(bool hotReload)
 {
-    public override string ModuleName => "BotController Consumer";
-    public override string ModuleVersion => "1.0.0";
-    public override string ModuleAuthor => "Example";
-    public override string ModuleDescription => "Resolves the BotController API";
-
-    private static readonly PluginCapability<IBotControllerApi> BotController = new("botcontroller:api");
-
-    // Resolve the shared API after its provider has registered the capability.
-    public override void OnAllPluginsLoaded(bool hotReload)
-    {
-        var api = BotController.Get();
-        if (api == null) return;
-
-        Server.PrintToConsole("BotController API available.");
-    }
+    try { _bots = Bots.Get(); }
+    catch (KeyNotFoundException) { _bots = null; }
 }
 ```
 
 ### SwiftlyS2
 
-The exported contract is in `addons/swiftlys2/plugins/BotControllerImplSW2/resources/exports/BotControllerApi.dll`. In an existing SwiftlyS2 plugin class, resolve it during `UseSharedInterface`:
+Contract: `addons/swiftlys2/plugins/BotControllerImplSW2/resources/exports/BotControllerApi.dll`.
+
+In your SwiftlyS2 plugin:
 
 ```csharp
 using BotControllerApi;
 using SwiftlyS2.Shared;
 
-// Members of your existing SwiftlyS2 plugin class.
 private IBotControllerApi? _bots;
 
-// Resolve the provider's exported contract through the framework interface manager.
 public override void UseSharedInterface(IInterfaceManager interfaceManager)
 {
     _bots = interfaceManager.TryGetSharedInterface<IBotControllerApi>(
@@ -132,59 +53,49 @@ public override void UseSharedInterface(IInterfaceManager interfaceManager)
 }
 ```
 
-Both providers check the native bridge before registering the interface.
+Check `_bots` before use and release it on provider unload.
 
-## API Reference
+## API reference
 
-Exact signatures are in [IBotControllerApi.cs](csharp/BotControllerApi/IBotControllerApi.cs); replay structures and lock enums are in [Types.cs](csharp/BotControllerApi/Types.cs). Slots are engine player slots, not user IDs or entity indices.
+[`IBotControllerApi`](csharp/BotControllerApi/IBotControllerApi.cs) defines the methods; [Types.cs](csharp/BotControllerApi/Types.cs) defines the shared types. Slots are player slots (0–63), not user IDs.
 
 | Area | Members |
 | --- | --- |
 | Locks | `Lock`, `Unlock`, `UnlockAll`, `IsLocked`, `GetWeaponLock` |
-| Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended` |
-| Replay data | `LoadReplay`, `TransferRecordingToReplay`, `SetReplayPawn` |
+| Recording | `StartRecord`, `StopRecord`, `RecordedTickCount`, `GetRecordedMotion`, `GetRecordedMotionExtended`, `GetRecordedInputHistory` |
+| Replay data | `SetReplayPawn`, `LoadReplay`, `TransferRecordingToReplay` |
 | Replay control | `StartReplay`, `StopReplay`, `ReplayCursor`, `ReplayTotal`, `IsReplaying`, `TryGetReplayTick` |
 | Weapons | `SwitchBotWeapon`, `BotActiveWeaponDef` |
-| Button injection | `InjectUsercmd`, `CancelUsercmdInjection` |
-| Analog movement | `StartUsercmdMovement`, `UpdateUsercmdMovement`, `CancelUsercmdMovement` |
-| Button suppression | `SuppressUsercmd`, `StartUsercmdSuppression`, `CancelUsercmdSuppression` |
+| Buttons | `InjectUsercmd`, `CancelUsercmdInjection` |
+| Movement | `StartUsercmdMovement`, `UpdateUsercmdMovement`, `CancelUsercmdMovement` |
+| Suppression | `SuppressUsercmd`, `StartUsercmdSuppression`, `CancelUsercmdSuppression` |
 | Bot profile | `GetBotProfile`, `GetBotProfileName`, `SetBotProfile` |
 | Buy plans | `SetBuyPlan`, `SetBuySkip`, `ClearBuyPlan`, `ClearAllBuyPlans`, `BuyPlanItemCount` |
 | Voice | `CanSendVoice`, `GetVoiceStatus`, `SendVoiceFrame` |
 
-## Behavior and Limits
+- **Locks:** `Aim` freezes aim; `All` pauses bot AI, not physics. For a weapon lock, pass a `LockTarget` (`Slot1`–`Slot5`) and query it with `GetWeaponLock`.
+- **Input:** Button masks use engine `IN_*` values. `InjectUsercmd` returns a positive token or `-1` on failure. A zero duration presses for one command. Persistent movement and suppression use cancellation tokens; movement is clamped to `[-1, 1]`. Replay clears injected controls and rejects new ones.
+- **Buy plans:** `BuyPlanItemCount` returns `-1` for no plan, `0` to skip buying, or the number of items.
+- **Voice:** Send encoded Opus frames only when `GetVoiceStatus()` returns `0`.
 
-### Locks
+### Record and replay
 
-- `Lock(slot, LockKind.Aim)` blocks `CCSBot::Upkeep`; other AI updates can continue.
-- `Lock(slot, LockKind.All)` blocks both `CCSBot::Update` and `CCSBot::Upkeep`. This stops normal AI control, not the physics simulation.
-- `Lock(slot, LockTarget.SlotN)` pins a weapon slot. Query it with `GetWeaponLock`; use `IsLocked` for `All` and `Aim`.
+Register the source's current pawn with `SetReplayPawn` before `StartRecord`. To play the recording on another bot:
 
-| Target | Engine slot | Weapon |
-| --- | --- | --- |
-| `Slot1` | `0` | Primary |
-| `Slot2` | `1` | Pistol |
-| `Slot3` | `2` | Knife / Zeus |
-| `Slot4` | `3` | Grenades |
-| `Slot5` | `4` | C4 |
+```csharp
+bool StartBotReplay(IBotControllerApi api, int source, int target, nint targetPawn)
+{
+    return api.StopRecord(source)
+        && api.SetReplayPawn(target, targetPawn)
+        && api.TransferRecordingToReplay(source, target)
+        && api.StartReplay(target);
+}
+```
 
-### Record and Replay
+For file storage, copy ticks, subticks and commands with `GetRecordedMotionExtended`. Pass those buffers to `LoadReplay` before `StartReplay`. Optional input history comes from `GetRecordedInputHistory`; keep it with its original recording and matching provider build. The bundled provider uses [Brotli JSON](csharp/BotControllerImpl/MotionRecording.cs).
 
-1. Register the source's live pawn pointer with `SetReplayPawn`, then call `StartRecord`.
-2. Call `StopRecord` before retrieving or transferring the recording.
-3. Use `TransferRecordingToReplay` for an in-memory transfer, or `GetRecordedMotionExtended` and `LoadReplay` to include aligned command frames.
-4. Register the destination bot's current pawn with `SetReplayPawn`, then call `StartReplay`.
-5. Use `StopReplay` to stop playback. Register the current pawn again before restarting.
+Call engine methods on the game thread. Stopped-buffer copies and `LoadReplay` can run on a worker. Finish copying before restarting a recording. A pawn change or disconnect ends the session; register the new pawn before restarting. Match recording and replay tickrates (64 for the bundled providers). Stopping replay does not clear independent locks.
 
-Check every operation's result. Pawn pointers must belong to the live player, not a previous spawn. Record and replay at the same tickrate; the bundled managed recording workflow assumes 64 ticks per second.
+## Build from source
 
-Active replay suppresses normal bot AI without requiring a separate `All` lock. Stopping replay does not clear independent locks. Preserve the contract's struct layouts and use matching Metamod and C# builds.
-
-### Usercmd and Other Controls
-
-- Button masks use engine `IN_*` values, such as CounterStrikeSharp's `PlayerButtons.Attack`.
-- `InjectUsercmd(slot, mask, durationMs)` returns a positive cancellation token or `-1`. Zero duration presses for one command and releases on the next; a positive duration starts from the first injected command.
-- Persistent movement and suppression also return positive tokens or `-1`; cancel them with the corresponding API. Movement values are clamped to `[-1, 1]`.
-- Input controls require the usercmd hook and reject requests during replay. Starting replay clears existing injected input controls.
-- `BuyPlanItemCount` returns `-1` for no plan, `0` for skip/empty, or a positive alias count.
-- Voice requires encoded Opus frames, not raw PCM. Check `CanSendVoice` or `GetVoiceStatus` before sending; the latter returns `0` when ready.
+Initialize submodules with `git submodule update --init --recursive`. On Windows, use `./build.ps1 -Windows` or `./build.ps1 -Linux` (WSL). Both build the C# providers with .NET 10; add `-SkipCsharp` for a native-only build. Packages are in `dist/windows/`, `dist/linux/`, `dist/CounterStrikeSharp/` and `dist/SwiftlyS2/`.

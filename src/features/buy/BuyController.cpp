@@ -30,9 +30,6 @@ cs2_sdk::hooks::NativeHook<void, void*, void*> g_hookOnUpdate;
 bool g_installed = false;
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 
-// Per-slot last seen m_isInitialDelay, for rising-edge detection
-uint8_t g_lastInitDelay[64] = { 0 };
-
 // Run "buy <alias>" server-side for a bot slot
 void IssueBuy(int slot, const char* alias)
 {
@@ -44,22 +41,24 @@ void IssueBuy(int slot, const char* alias)
     dispatch::g_gameClients->ClientCommand(CPlayerSlot(slot), cmd);
 }
 
-// Execute a slot's whole plan in one tick, then mark vanilla done
+// Executes the buy plan and finishes native buying.
 void ApplyPlan(void* self, int slot)
 {
     BuyPlan plan;
     if (!buy_controller_state::Copy(slot, plan)) return;
 
+    // Consumes the buy entry before commands.
+    const uint8_t initialDelay = 0;
+    const uint8_t done = 1;
+    WriteField(self, tg::g_buyInitialDelay, initialDelay);
+    WriteField(self, tg::g_buyDoneBuying, done);
+
     if (!plan.skip)
         for (const auto& alias : plan.items)
             IssueBuy(slot, alias.c_str());
-
-    // Tell vanilla buying is finished so it stops here and exits state
-    const uint8_t done = 1;
-    WriteField(self, tg::g_buyDoneBuying, done);
 }
 
-// Applies the custom buy plan before vanilla advances its state.
+// Applies the plan before native buying.
 KHook::Return<void> HookedOnUpdate(void* self, void* me) noexcept
 {
     int slot = CCSBotToSlot(me);
@@ -74,9 +73,7 @@ KHook::Return<void> HookedOnUpdate(void* self, void* me) noexcept
     {
         return { KHook::Action::Ignore };
     }
-    // Rising edge of m_isInitialDelay = freshly entered BuyState this round
-    if (init && !g_lastInitDelay[slot]) ApplyPlan(self, slot);
-    g_lastInitDelay[slot] = init;
+    if (init) ApplyPlan(self, slot);
 
     return { KHook::Action::Ignore };
 }
@@ -111,8 +108,6 @@ void Remove()
     g_hookOnUpdate.Remove();
     g_installed = false;
     g_status = "not_attempted";
-    for (unsigned char& i : g_lastInitDelay)
-        i = 0;
 }
 
 const char* Status() { return g_status.c_str(); }

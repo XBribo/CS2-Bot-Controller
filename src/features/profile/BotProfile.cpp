@@ -5,6 +5,8 @@
 #include "plugin.h"
 
 #include <engine2/isource2server.h>
+#include <entityhandle.h>
+#include <game/entitynetworkable.h>
 #include <tier0/threadtools.h>
 
 #include <algorithm>
@@ -19,14 +21,39 @@ namespace bot_profile {
 namespace {
 void* ResolveProfile(int slot, bool requireOwned = false)
 {
-    if (!g_SMAPI || !ThreadInMainThread()) return nullptr;
+    if (slot < 0 || slot >= 64 || !g_SMAPI || !ThreadInMainThread()) return nullptr;
     auto* server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
+    if (!server) return nullptr;
     const int controllerPawn = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
-    const auto live = ResolvePawnForSlot(server, slot, controllerPawn);
+
+    Entity2Networkable_t controller{};
+    if (!server->GetEntity2Networkable(CEntityIndex(slot + 1), &controller) || !controller.m_pEntity ||
+        !controller.m_pEntityInstance || !controller.m_pszCPPClassname ||
+        std::strcmp(controller.m_pszCPPClassname, "CCSPlayerController") != 0)
+        return nullptr;
+
+    uint32_t handle = 0;
+    if (!GuardedRead(controller.m_pEntityInstance, controllerPawn, handle) || handle == 0 ||
+        handle == 0xFFFFFFFFU || handle == 0xFFFFFFFEU) return nullptr;
+    const int index = CEntityHandle(handle).GetEntryIndex();
+    if (index <= 0) return nullptr;
+
+    Entity2Networkable_t pawn{};
+    if (!server->GetEntity2Networkable(CEntityIndex(index), &pawn) || !pawn.m_pEntity || !pawn.m_pEntityInstance ||
+        !pawn.m_pszCPPClassname || pawn.m_pEntity->GetRefEHandle().ToInt() != handle ||
+        std::strcmp(pawn.m_pszCPPClassname, "CCSPlayerPawn") != 0)
+        return nullptr;
+
+    const auto handles = ReadPawnControllerHandles(pawn.m_pEntityInstance);
+    const uint32_t controllerHandle = controller.m_pEntity->GetRefEHandle().ToInt();
+    if (handles.controllerHandle != controllerHandle ||
+        (handles.originalControllerIndex > 0 && handles.originalControllerHandle != controllerHandle))
+        return nullptr;
+
     void* bot = nullptr;
     void* botPawn = nullptr;
     const int pawnBot = cs2_sdk::schema::GetFieldOffset("CCSPlayerPawn", "m_pBot");
-    if (!GuardedRead(live.pawn, pawnBot, bot) || !GuardedRead(bot, tg::g_botPawn, botPawn) || botPawn != live.pawn)
+    if (!GuardedRead(pawn.m_pEntityInstance, pawnBot, bot) || !GuardedRead(bot, tg::g_botPawn, botPawn) || botPawn != pawn.m_pEntityInstance)
         return nullptr;
 
     void* prof = nullptr;

@@ -16,19 +16,19 @@ struct BuyPlan
 namespace buy_controller_state {
 constexpr int kMaxSlots = 64;
 
-// True if this slot has any plan set (skip or item list)
+// Checks for an item or skip plan.
 bool HasPlan(int slot);
 
 // Replace this slot's plan
 void Set(int slot, const std::vector<std::string>& items, bool skip);
 
-// Snapshot this slot's plan into out; false if none
+// Copies the plan; false if absent.
 bool Copy(int slot, BuyPlan& out);
 
 void Clear(int slot);
 void ClearAll();
 
-// Number of buy aliases for this slot (-1 if no plan, skip plan = 0)
+// Alias count: -1 no plan, 0 skip.
 int ItemCount(int slot);
 
 // Count of slots with a plan

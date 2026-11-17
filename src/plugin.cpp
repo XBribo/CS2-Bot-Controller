@@ -1,7 +1,10 @@
 #include "core/log.h"
 #include "plugin.h"
+#include "plugin_build_info.h"
 
 #include <cstdio>
+#include <memory>
+#include <mutex>
 
 #include <icvar.h>
 #include <convar.h>
@@ -17,12 +20,16 @@
 #include "BuyController.h"
 #include "BuyControllerState.h"
 #include "InputInjector.h"
+#include "PawnBinding.h"
 #include "MotionRecorder.h"
 #include "WeaponLockerState.h"
 #include "BotControllerState.h"
 #include "core/cs2_sdk/src/core/memory_module.h"
 #include "core/cs2_sdk/src/core/schema.h"
 #include "offsets.h"
+#include "dispatch.h"
+#include <engine2/isource2server.h>
+#include <playerslot.h>
 
 #define VERSION_STRING  "v" SEMVER " @ " GITHUB_SHA
 #define BUILD_TIMESTAMP __DATE__ " " __TIME__
@@ -30,6 +37,35 @@
 PLUGIN_EXPOSE(cs2bc::BotControllerPlugin, cs2bc::g_plugin);
 
 namespace cs2bc {
+
+namespace {
+using DisconnectHookBase =
+    KHook::Virtual<ISource2GameClients, void, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*>;
+
+class DisconnectHook : public DisconnectHookBase
+{
+  public:
+    using DisconnectHookBase::DisconnectHookBase;
+
+    bool AddChecked(ISource2GameClients* clients)
+    {
+        if (!clients || !KHook::__exported__khook || this->_vtbl_index < 0) return false;
+        void** address = *reinterpret_cast<void***>(clients) + this->_vtbl_index;
+        Add(clients);
+        std::lock_guard guard(this->_hooks_stored);
+        return this->_addr_hook_ids.contains(address);
+    }
+};
+
+std::unique_ptr<DisconnectHook> g_disconnectHook;
+
+KHook::Return<void>
+OnClientDisconnect(ISource2GameClients*, CPlayerSlot slot, ENetworkDisconnectionReason, const char*, uint64, const char*)
+{
+    dispatch::ResetSlot(slot.Get());
+    return { KHook::Action::Ignore };
+}
+} // namespace
 
 BotControllerPlugin g_plugin;
 
@@ -41,7 +77,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
     const bool loaded = [&]() -> bool {
         if (!KHook::__exported__khook)
         {
-            std::snprintf(error, maxlen, "Metamod with KHook support is required");
+            std::snprintf(error, maxlen, "KHook support required");
             return false;
         }
 
@@ -50,13 +86,13 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         char schemaError[256] = { 0 };
         if (!cs2_sdk::schema::Init(g_schemaSystem, schemaError, sizeof(schemaError)))
         {
-            std::snprintf(error, maxlen, "Schema initialization failed: %s", schemaError);
+            std::snprintf(error, maxlen, "Schema init failed: %s", schemaError);
             return false;
         }
         if (!cs2bc::offsets::LoadFromSchema(schemaError, sizeof(schemaError)))
         {
             cs2_sdk::schema::Reset();
-            std::snprintf(error, maxlen, "Schema target resolution failed: %s", schemaError);
+            std::snprintf(error, maxlen, "Schema offsets failed: %s", schemaError);
             return false;
         }
         ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL);
@@ -66,22 +102,35 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         cs2_sdk::modules::ModuleInfo serverModule;
         if (!gamedata::Load(gd, serverModule, error, maxlen)) return false;
 
+        if (!input_injector::pawn_binding::Init())
+        {
+            std::snprintf(error, maxlen, "pawn binding unavailable");
+            return false;
+        }
         if (!cs2bc::weapon_locker_hooks::Install(gd, serverModule, error, maxlen)) return false;
 
         if (!cs2bc::bot_controller_hooks::Install(gd, serverModule, error, maxlen)) return false;
 
-        // BuyController is optional; missing sig only disables buy control
+        // Missing buy signatures disable buy control.
         char buyErr[256] = { 0 };
         if (!cs2bc::buy_controller_hooks::Install(gd, serverModule, buyErr, sizeof(buyErr)))
         {
-            BC_LOG_WARN("BuyController::Install failed (%s); bot buy control disabled\n", buyErr);
+            BC_LOG_WARN("buy disabled: %s", buyErr);
         }
 
         // movement hooks for record/replay
         char injErr[256] = { 0 };
         if (!cs2bc::input_injector::Install(gd, serverModule, injErr, sizeof(injErr)))
         {
-            BC_LOG_WARN("InputInjector::Install failed (%s); record/replay movement will be a no-op\n", injErr);
+            BC_LOG_WARN("record/replay disabled: %s", injErr);
+        }
+
+        // Native-only installations also need cleanup before a slot is reused.
+        g_disconnectHook = std::make_unique<DisconnectHook>(&ISource2GameClients::ClientDisconnect, &OnClientDisconnect, nullptr);
+        if (!g_disconnectHook->AddChecked(dispatch::g_gameClients))
+        {
+            std::snprintf(error, maxlen, "ClientDisconnect hook failed");
+            return false;
         }
 
         return true;
@@ -92,6 +141,8 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         Unload(nullptr, 0);
         return false;
     }
+    m_loaded = true;
+    g_SMAPI->AddListener(this, this);
     BC_LOG_INFO("Loaded %s", GetVersion());
     BC_LOG_DEBUG("Built %s", GetDate());
     return true;
@@ -103,6 +154,8 @@ bool BotControllerPlugin::Unpause(char*, size_t) { return true; }
 
 void BotControllerPlugin::AllPluginsLoaded() {}
 
+void BotControllerPlugin::OnLevelShutdown() { dispatch::ResetAll(); }
+
 const char* BotControllerPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
 const char* BotControllerPlugin::GetName() { return "BotController"; }
 const char* BotControllerPlugin::GetDescription() { return "Record & Replay and Control CS2 bots."; }
@@ -112,15 +165,22 @@ const char* BotControllerPlugin::GetVersion() { return VERSION_STRING; }
 const char* BotControllerPlugin::GetDate() { return BUILD_TIMESTAMP; }
 const char* BotControllerPlugin::GetLogTag() { return "BC"; }
 
-bool BotControllerPlugin::Unload(char* /*error*/, size_t /*maxlen*/)
+bool BotControllerPlugin::Unload(char* error, size_t maxlen)
 {
-    // Drain movement callbacks before releasing their recording and replay state.
+    if (m_loaded)
+    {
+        std::snprintf(error, maxlen, "Restart required");
+        return false;
+    }
+    // Drain movement callbacks before releasing sessions.
+    g_disconnectHook.reset();
     cs2bc::input_injector::Remove();
     cs2bc::motion_recorder::ClearAll();
     cs2bc::buy_controller_hooks::Remove();
     cs2bc::buy_controller_state::ClearAll();
     cs2bc::bot_controller_hooks::Remove();
     cs2bc::weapon_locker_hooks::Remove();
+    cs2bc::input_injector::pawn_binding::ClearAll();
     cs2bc::weapon_locker_state::ClearAll();
     cs2bc::bot_controller_state::ClearAllAll();
     cs2bc::bot_controller_state::ClearAllAim();

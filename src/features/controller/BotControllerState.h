@@ -4,7 +4,11 @@
 
 namespace cs2bc {
 namespace bot_controller_state {
+// Slots are validated by dispatch or entity resolution.
 constexpr int kMaxSlots = 64;
+
+// Checks for active locks before resolving entities.
+bool HasAnyLock();
 
 // All lock: Update + Upkeep.
 bool GetAll(int slot);

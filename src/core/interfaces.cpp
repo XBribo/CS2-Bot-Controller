@@ -18,13 +18,13 @@ namespace cs2bc::interfaces {
 namespace {
 void* g_serverInterface = nullptr;
 }
-// Acquires engine services without registering commands or installing hooks.
+// Acquires engine interfaces.
 bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
 {
     g_pCVar = static_cast<ICvar*>(ismm->GetEngineFactory()(CVAR_INTERFACE_VERSION, nullptr));
     if (!g_pCVar)
     {
-        std::snprintf(error, maxlen, "Failed to get ICvar (%s) via engine factory", CVAR_INTERFACE_VERSION);
+        std::snprintf(error, maxlen, "ICvar unavailable (%s)", CVAR_INTERFACE_VERSION);
         return false;
     }
 
@@ -32,27 +32,27 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     cs2bc::dispatch::g_engine = static_cast<IVEngineServer2*>(ismm->GetEngineFactory()(INTERFACEVERSION_VENGINESERVER, nullptr));
     if (!cs2bc::dispatch::g_engine)
     {
-        std::snprintf(error, maxlen, "Failed to get IVEngineServer2 (%s)", INTERFACEVERSION_VENGINESERVER);
+        std::snprintf(error, maxlen, "IVEngineServer2 unavailable (%s)", INTERFACEVERSION_VENGINESERVER);
         return false;
     }
 
-    // ISource2GameClients is used by dispatch and command paths.
+    // Server command interface.
     g_serverInterface = ismm->GetServerFactory()(INTERFACEVERSION_SERVERGAMECLIENTS, nullptr);
     if (!g_serverInterface)
     {
-        std::snprintf(error, maxlen, "Failed to get ISource2GameClients (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
+        std::snprintf(error, maxlen, "ISource2GameClients unavailable (%s)", INTERFACEVERSION_SERVERGAMECLIENTS);
         return false;
     }
 
     GET_V_IFACE_ANY(GetEngineFactory, g_schemaSystem, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
 
-    // Engine interface used by console command output (ClientPrintf).
+    // Console output interface.
     cs2bc::commands::g_engine = cs2bc::dispatch::g_engine;
 
-    // Server-side command executor for issuing bot "buy" commands.
+    // Bot buy command executor.
     cs2bc::dispatch::g_gameClients = static_cast<ISource2GameClients*>(g_serverInterface);
 
-    // NetworkMessages lets the C ABI send recorded voice frames to clients.
+    // Voice message interface.
     auto* networkMessages = static_cast<INetworkMessages*>(ismm->GetEngineFactory()(NETWORKMESSAGES_INTERFACE_VERSION, nullptr));
     if (!networkMessages)
     {
@@ -61,12 +61,12 @@ bool Init(SourceMM::ISmmAPI* ismm, char* error, size_t maxlen)
     cs2bc::voice_sender::SetInterfaces(cs2bc::dispatch::g_engine, networkMessages);
     if (!networkMessages)
     {
-        BC_LOG_WARN("network messages interface unavailable; voice send disabled\n");
+        BC_LOG_WARN("voice disabled: network messages unavailable");
     }
 
     return true;
 }
-// Releases interface consumers after native callbacks have been removed.
+// Releases interfaces after hooks are removed.
 void Reset()
 {
     cs2bc::dispatch::g_engine = nullptr;

@@ -17,11 +17,11 @@ namespace {
 
 IVEngineServer2* g_engine = nullptr;
 INetworkMessages* g_networkMessages = nullptr;
-INetworkMessageInternal* g_voiceMessage = nullptr;
+NetMessageInfo_t* g_voiceMessage = nullptr;
 
 } // namespace
 
-// Store engine interfaces and reset the cached voice message type
+// Stores interfaces and resets the cached message type.
 void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages)
 {
     g_engine = engine;
@@ -31,8 +31,8 @@ void SetInterfaces(IVEngineServer2* engine, INetworkMessages* networkMessages)
 
 namespace {
 
-// Resolve the CSVCMsg_VoiceData network message type lazily
-INetworkMessageInternal* FindVoiceMessage()
+// Resolves the voice message type on demand.
+NetMessageInfo_t* FindVoiceMessage()
 {
     if (g_voiceMessage) return g_voiceMessage;
     if (!g_networkMessages) return nullptr;
@@ -45,7 +45,7 @@ INetworkMessageInternal* FindVoiceMessage()
 
 } // namespace
 
-// Return the current voice sender setup status
+// Reports voice setup status.
 int GetStatus()
 {
     if (!g_engine) return -1;
@@ -54,10 +54,10 @@ int GetStatus()
     return 0;
 }
 
-// Return whether all voice sender dependencies are available
+// Checks voice availability.
 bool IsAvailable() { return GetStatus() == 0; }
 
-// Allocate and send one CSVCMsg_VoiceData frame to a recipient
+// Allocates and sends a voice frame.
 int SendVoiceFrame(int recipientSlot,
                    int senderClient,
                    uint64_t senderXuid,
@@ -109,7 +109,7 @@ int SendVoiceFrame(int recipientSlot,
     if (tick >= 0) msg->set_tick(static_cast<uint32_t>(tick));
 
     const bool ok = channel->SendNetMessage(base, BUF_VOICE);
-    g_networkMessages->DeallocateNetMessageAbstract(messageType, base);
+    delete base; // Dispatches to the engine's deleting destructor.
     return ok ? 0 : -6;
 }
 } // namespace voice_sender

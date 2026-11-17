@@ -1,11 +1,11 @@
-// Access a bot's BotProfile by slot on the game thread.
+// Bot profile access by slot.
 
 #pragma once
 
 #include <cstdint>
 
 namespace cs2bc {
-// Mirror of the fields read from BotProfile. Fixed layout for C-ABI / C#.
+// Fixed BotProfile layout for C ABI and C#.
 #pragma pack(push, 4)
 struct BotProfileData
 {
@@ -22,7 +22,6 @@ struct BotProfileData
     int32_t weaponPrefCount; // valid entries in weaponPref
     uint16_t weaponPref[16]; // item def index, [0..weaponPrefCount)
 };
-
 enum BotProfileFields : uint32_t
 {
     Skill = 1U << 0,
@@ -53,6 +52,7 @@ static_assert(sizeof(BotProfilePatch) == 40);
 #pragma pack(pop)
 
 namespace bot_profile {
+// Reads the current Bot profile; false if unavailable.
 bool ReadProfile(int slot, BotProfileData& out);
 int ReadProfileName(int slot, char* buffer, int capacity);
 bool SetProfile(int slot, const BotProfilePatch& patch);

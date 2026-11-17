@@ -8,18 +8,14 @@
 #include "WeaponLockerState.h"
 #include "ccsbot_slot.h"
 #include "MotionRecorder.h"
+#include "PawnBinding.h"
 #include "offsets.h"
 #include "core/cs2_sdk/src/utils/hooks.h"
-#include "plugin.h"
-#include "core/cs2_sdk/src/core/schema.h"
-#include <engine2/isource2server.h>
 #include <entityhandle.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <string>
-#include <mutex>
-#include <unordered_map>
 
 namespace tg = cs2bc::offsets;
 
@@ -43,134 +39,69 @@ cs2_sdk::hooks::NativeHook<char, void*, void*, int> g_hookSelectItem;
 
 std::string g_status = "not_attempted"; // NOLINT(bugprone-throwing-static-initialization)
 bool g_installed = false;
-ISource2Server* g_server = nullptr;
-int g_controllerPawn = -1;
-int g_pawnBot = -1;
-int g_lifeState = -1;
-
-struct LiveWeaponServices
-{
-    void* pawn = nullptr;
-    void* ws = nullptr;
-    uint32_t pawnHandle = 0;
-};
-
-LiveWeaponServices ResolveLiveWs(int slot)
-{
-    const auto live = ResolvePawnForSlot(g_server, slot, g_controllerPawn);
-    uint8_t lifeState = 0xFF;
-    void* bot = nullptr;
-    void* ws = nullptr;
-    if (!GuardedRead(live.pawn, g_lifeState, lifeState) || lifeState != 0 ||
-        !GuardedRead(live.pawn, g_pawnBot, bot) || !bot ||
-        !GuardedRead(live.pawn, tg::g_pawnWeaponServices, ws) || !ws)
-        return {};
-    return { .pawn = live.pawn, .ws = ws, .pawnHandle = live.handle };
-}
-
-// Cache only enough identity to find a slot; native calls revalidate it.
-struct WsBinding
-{
-    int slot;
-    uint32_t pawnHandle;
-};
-std::unordered_map<void*, WsBinding> g_wsToBinding; // NOLINT(bugprone-throwing-static-initialization)
-// Inverse: slot -> WeaponServices*
-void* g_slotToWs[64] = { nullptr };
-std::mutex g_wsToSlotMu;
-
-// Reuses the pawn already validated by the enclosing equipment hook.
-void RememberWsForPawn(void* pawn, int slot)
-{
-    const auto live = ResolveLiveWs(slot);
-    if (live.pawn != pawn || !live.ws) return;
-    std::scoped_lock lk(g_wsToSlotMu);
-    auto old = g_wsToBinding.find(g_slotToWs[slot]);
-    if (old != g_wsToBinding.end() && old->second.slot == slot) g_wsToBinding.erase(old);
-    g_wsToBinding[live.ws] = { .slot = slot, .pawnHandle = live.pawnHandle };
-    g_slotToWs[slot] = live.ws;
-}
-
-WsBinding LookupBindingForWs(void* ws)
-{
-    if (!ws) return { .slot = -1, .pawnHandle = 0 };
-    std::scoped_lock lk(g_wsToSlotMu);
-    auto it = g_wsToBinding.find(ws);
-    return it == g_wsToBinding.end() ? WsBinding{ .slot = -1, .pawnHandle = 0 } : it->second;
-}
 
 // LockTarget -> engine weapon-slot index
-int LockTargetToEngineSlot(LockTarget t)
-{
-    int v = static_cast<int>(t);
-    if (v < 1 || v > 5) return -1;
-    return v - 1;
-}
+int LockTargetToEngineSlot(LockTarget t) { return static_cast<int>(t) - 1; }
 
 bool IsGrenadeDef(int def) { return def >= 43 && def <= 48; }
 
 // ---- detours ----
 
-// Blocks automatic weapon selection while a lock or replay owns it.
+// Blocks AI weapon selection during locks or replay.
 KHook::Return<void> HookedEquipBestWeapon(void* bot, char mustEquip) noexcept
 {
-    auto sr = ResolveSlot(bot);
-    if (sr.slot >= 0) RememberWsForPawn(sr.pawn, sr.slot);
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
+    const auto sr = ResolveSlot(bot);
     if (sr.slot >= 0 && motion_recorder::IsReplaying(sr.slot)) return { KHook::Action::Supersede };
     LockTarget lt = (sr.slot >= 0) ? weapon_locker_state::Get(sr.slot) : LockTarget::None;
     if (lt != LockTarget::None) return { KHook::Action::Supersede };
     return { KHook::Action::Ignore };
 }
 
-// Applies the same ownership rule to pistol selection.
+// Blocks AI pistol selection during locks or replay.
 KHook::Return<void> HookedEquipPistol(void* bot, char mustEquip) noexcept
 {
-    auto sr = ResolveSlot(bot);
-    if (sr.slot >= 0) RememberWsForPawn(sr.pawn, sr.slot);
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
+    const auto sr = ResolveSlot(bot);
     if (sr.slot >= 0 && motion_recorder::IsReplaying(sr.slot)) return { KHook::Action::Supersede };
     LockTarget lt = (sr.slot >= 0) ? weapon_locker_state::Get(sr.slot) : LockTarget::None;
     if (lt != LockTarget::None) return { KHook::Action::Supersede };
     return { KHook::Action::Ignore };
 }
 
-// Records weapon changes and rejects switches away from the locked slot.
+// Records switches and enforces the locked slot.
 KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 {
-    // Recording : a human switching weapons calls SelectItem
-    if (weapon && motion_recorder::HasAnyRecording())
+    if (!weapon_locker_state::HasAnyLock() && !motion_recorder::HasAnyRecording()) return { KHook::Action::Ignore };
+    const int slot = input_injector::pawn_binding::ServicesToSlot(ws);
+    if (slot < 0 || slot >= motion_recorder::kMaxSlots) return { KHook::Action::Ignore };
+    if (weapon && motion_recorder::IsRecording(slot) && input_injector::pawn_binding::RegisteredWeaponServices(slot) == ws)
     {
-        int def = ReadDefIndex(weapon);
-        if (def >= 0)
-            for (int s = 0; s < motion_recorder::kMaxSlots; ++s)
-            {
-                if (motion_recorder::IsRecording(s) && motion_recorder::LiveWs(s) == ws) motion_recorder::SetCurrentDef(s, def);
-            }
+        const int def = ReadDefIndex(weapon);
+        if (def >= 0) motion_recorder::SetCurrentDef(slot, def);
     }
 
-    WsBinding bind = LookupBindingForWs(ws);
-    if (bind.slot < 0) return { KHook::Action::Ignore };
+    if (motion_recorder::IsReplaying(slot)) return { KHook::Action::Ignore };
 
-    const auto live = ResolveLiveWs(bind.slot);
-    if (live.ws != ws || live.pawnHandle != bind.pawnHandle) return { KHook::Action::Ignore };
-
-    if (motion_recorder::IsReplaying(bind.slot)) return { KHook::Action::Ignore };
-
-    LockTarget lt = weapon_locker_state::Get(bind.slot);
+    LockTarget lt = weapon_locker_state::Get(slot);
     if (lt == LockTarget::None) return { KHook::Action::Ignore };
 
+    if (input_injector::pawn_binding::CurrentWeaponServices(slot) != ws) return { KHook::Action::Ignore };
+
     int engineSlot = LockTargetToEngineSlot(lt);
-    if (engineSlot < 0 || !g_getSlot) return { KHook::Action::Ignore };
 
     if (engineSlot == 3 && weapon && IsGrenadeDef(ReadDefIndex(weapon))) return { KHook::Action::Ignore };
 
     void* targetWeapon = g_getSlot(ws, engineSlot, 0xFFFFFFFFU);
-    // No weapon in the locked slot -> can't enforce, let it through.
+    // Allow switches when the locked slot is empty.
     if (!targetWeapon) return { KHook::Action::Ignore };
+    if (motion_recorder::IsReplaying(slot) || input_injector::pawn_binding::CurrentWeaponServices(slot) != ws)
+        return { KHook::Action::Ignore };
 
-    // Switch is to the lock target -> allow.
+    // Allow the locked weapon.
     if (weapon == targetWeapon) return { KHook::Action::Ignore };
 
-    // Switch is to something else -> block.
+    // Block other weapons.
     return { KHook::Action::Supersede, 0 };
 }
 
@@ -180,16 +111,6 @@ KHook::Return<char> HookedSelectItem(void* ws, void* weapon, int flag) noexcept
 
 bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serverModule, char* errorOut, size_t errorOutLen)
 {
-    g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
-    g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_hPawn");
-    g_pawnBot = cs2_sdk::schema::GetFieldOffset("CCSPlayerPawn", "m_pBot");
-    g_lifeState = cs2_sdk::schema::GetFieldOffset("CBaseEntity", "m_lifeState");
-    if (!g_server || g_controllerPawn < 0 || g_pawnBot < 0 || g_lifeState < 0)
-    {
-        g_status = "failed: live weapon services resolution";
-        if (errorOut && errorOutLen) std::snprintf(errorOut, errorOutLen, "%s", g_status.c_str());
-        return false;
-    }
     g_addrEquipBestWeapon = cs2_sdk::gameconfig::ResolveSig(gd, serverModule, "CCSBot::EquipBestWeapon", errorOut, errorOutLen);
     if (!g_addrEquipBestWeapon)
     {
@@ -252,19 +173,12 @@ bool Install(const nlohmann::json& gd, const cs2_sdk::modules::ModuleInfo& serve
 
 void Remove()
 {
-    g_server = nullptr;
     if (!g_installed) return;
     g_hookSelectItem.Remove();
     g_hookEquipPistol.Remove();
     g_hookEquipBestWeapon.Remove();
     g_installed = false;
     g_status = "not_attempted";
-    {
-        std::scoped_lock lk(g_wsToSlotMu);
-        g_wsToBinding.clear();
-        for (auto& slotToWs : g_slotToWs)
-            slotToWs = nullptr;
-    }
 }
 
 const char* Status() { return g_status.c_str(); }
@@ -286,7 +200,7 @@ int ReadDefIndex(void* weapon)
 
 namespace {
 
-// Decodes the entity's current identity handle through s2sdk.
+// Reads the entity identity handle.
 int EntIndexOf(void* entity)
 {
     if (!entity) return -1;
@@ -301,10 +215,10 @@ int EntIndexOf(void* entity)
 
 } // namespace
 
-// entity index of a weapon, for cmd.weaponselect on replay.
+// Weapon entity index for replay selection.
 int WeaponEntIndex(void* weapon) { return EntIndexOf(weapon); }
 
-// Records the requested item, which may differ from the active item during a throw.
+// Resolves an owned weapon index to its definition.
 int WeaponDefForEntityIndex(void* ws, int entityIndex)
 {
     if (!ws || !g_getSlot || entityIndex <= 0 || entityIndex >= 0x7FFF) return -1;
@@ -322,7 +236,7 @@ int WeaponDefForEntityIndex(void* ws, int entityIndex)
     return -1;
 }
 
-// Stops the inventory search as soon as the active item is found.
+// Reads the active inventory item.
 int ActiveWeaponDef(void* ws)
 {
     uint32_t handle = 0;
@@ -333,7 +247,7 @@ int ActiveWeaponDef(void* ws)
 void* FindWeaponByDef(void* ws, int def)
 {
     if (!ws || def < 0 || !g_getSlot) return nullptr;
-    // kKnifeDef means "the bot's own slot-2 knife", whatever skin it is.
+    // kKnifeDef matches any slot-2 knife.
     if (def == kKnifeDef) return g_getSlot(ws, 2, 0xFFFFFFFFU);
     // Non-grenade gear slots hold one weapon each
     for (int slot = 0; slot <= 4; ++slot)
@@ -342,7 +256,7 @@ void* FindWeaponByDef(void* ws, int def)
         void* w = g_getSlot(ws, slot, 0xFFFFFFFFU);
         if (w && ReadDefIndex(w) == def) return w;
     }
-    // GEAR_SLOT_GRENADES (3) holds every grenade type at once
+    // Grenade slot 3 holds multiple items.
     for (unsigned int pos = 0; pos < 8; ++pos)
     {
         void* w = g_getSlot(ws, 3, pos);
@@ -354,7 +268,7 @@ void* FindWeaponByDef(void* ws, int def)
 bool SelectWeapon(void* ws, void* weapon)
 {
     if (!ws || !weapon || !g_installed || !g_addrSelectItem) return false;
-    // Ordinary requests must respect all registered weapon-selection hooks.
+    // Use selection hooks for ordinary switches.
     return reinterpret_cast<SelectItemT>(g_addrSelectItem)(ws, weapon, 0) != 0;
 }
 
@@ -365,24 +279,23 @@ bool SelectWeaponRaw(void* ws, void* weapon)
     return true;
 }
 
-void* WsForSlot(int slot) { return ResolveLiveWs(slot).ws; }
-
+// Applies the weapon lock to a Bot or player.
 int SwitchToLockTarget(int slot)
 {
     if (!g_installed || !g_hookSelectItem.Active() || !g_getSlot) return 3;
-    if (slot < 0 || slot >= 64) return 3;
     if (motion_recorder::IsReplaying(slot)) return 4;
 
     LockTarget lt = weapon_locker_state::Get(slot);
     if (lt == LockTarget::None) return 3;
     int engineSlot = LockTargetToEngineSlot(lt);
-    if (engineSlot < 0) return 3;
 
-    void* ws = WsForSlot(slot);
+    void* ws = input_injector::pawn_binding::CurrentWeaponServices(slot);
     if (!ws) return 1;
 
     void* target = g_getSlot(ws, engineSlot, 0xFFFFFFFFU);
     if (!target) return 2;
+    if (motion_recorder::IsReplaying(slot)) return 4;
+    if (input_injector::pawn_binding::CurrentWeaponServices(slot) != ws) return 1;
 
     SelectWeapon(ws, target);
     return 0;

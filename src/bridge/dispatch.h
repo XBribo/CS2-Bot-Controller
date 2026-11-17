@@ -18,7 +18,7 @@ enum class LockKind : int // NOLINT(performance-enum-size)
 
 namespace dispatch {
 extern IVEngineServer2* g_engine;
-// Server-side console command executor; runs "buy" for a bot slot.
+// Bot buy command executor.
 extern ISource2GameClients* g_gameClients;
 
 // arg = LockTarget int for Weapon kind
@@ -30,5 +30,9 @@ int UnlockAll(LockKind kind);
 
 // 1 if All/Aim locked; Weapon returns LockTarget int.
 int IsLocked(int slot, LockKind kind);
+
+// End a player/map lifetime; ordinary replay stops retain independent locks.
+void ResetSlot(int slot);
+void ResetAll();
 } // namespace dispatch
 } // namespace cs2bc

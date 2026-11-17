@@ -4,10 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace BotControllerApi
 {
-    // Lock category.
-    //   All    - freezes both CCSBot::Update and CCSBot::Upkeep
-    //   Aim    - freezes CCSBot::Upkeep only
-    //   Weapon - locks the bot's weapon to a specific engine slot
+    // All: Update + Upkeep. Aim: Upkeep. Weapon: engine weapon slot.
     public enum LockKind
     {
         All = 0,
@@ -35,9 +32,9 @@ namespace BotControllerApi
         public uint EntityFlags;
         public byte MoveType;
         public byte Pad0, Pad1, Pad2;
-        public ulong Buttons;        // states[0] (pressed)
-        public ulong Buttons1;       // states[1]
-        public ulong Buttons2;       // states[2]
+        public ulong Buttons;        // Final held state.
+        public ulong Buttons1;       // Transition count bit 0.
+        public ulong Buttons2;       // Transition count bit 1.
         public float DuckAmount;     // m_flDuckAmount (0=stand, 1=full crouch)
         public float DuckSpeed;      // m_flDuckSpeed
         public float LadderNormalX;  // m_vecLadderNormal
@@ -78,7 +75,7 @@ namespace BotControllerApi
     public struct SubtickMove
     {
         public float When;
-        public uint Button;
+        public ulong Button;
         public float Pressed;
         public float AnalogForward;
         public float AnalogLeft;
@@ -106,23 +103,6 @@ namespace BotControllerApi
         public byte Pad0;
         public byte Pad1;
         public byte Pad2;
-    }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    public struct ReplayMovementExtra
-    {
-        public uint Fields;
-        public float JumpPressedTime;
-        public float LastDuckTime;
-        public int LastActualJumpPressTick;
-        public float LastActualJumpPressFrac;
-        public int LastUsableJumpPressTick;
-        public float LastUsableJumpPressFrac;
-        public int LastLandedTick;
-        public float LastLandedFrac;
-        public float LastLandedVelocityX;
-        public float LastLandedVelocityY;
-        public float LastLandedVelocityZ;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -6,5 +6,15 @@ updates:
       default-days: 0
     schedule:
       interval: "cron"
-      cronjob: "0 9 * * *"
+      cronjob: "30 * * * *"
+      timezone: "Asia/Singapore"
+  - package-ecosystem: "nuget"
+    directory: "/csharp/BotControllerImpl"
+    allow:
+      - dependency-name: "CounterStrikeSharp.API"
+    cooldown:
+      default-days: 0
+    schedule:
+      interval: "cron"
+      cronjob: "30 * * * *"
       timezone: "Asia/Singapore"

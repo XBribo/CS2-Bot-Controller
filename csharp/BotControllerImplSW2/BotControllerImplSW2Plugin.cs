@@ -1,16 +1,11 @@
-// SwiftlyS2 plugin: record a player's per-tick input and replay it on a bot.
-// Commands:
-//   !record [fileName] / !stoprecord  capture your own input, save to disk
-//   !replay <botSlot> [fileName]      play a recording back on a bot
-//   !stopreplay <botSlot>        stop a bot's replay
-//
-// Also exposes IBotControllerApi via IInterfaceManager for cross-plugin use.
+// SwiftlyS2 recording provider and shared API.
 
 using System.IO;
-using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Plugins;
 
@@ -29,213 +24,106 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
 {
     public ILogger<BotControllerImplSW2Plugin> Logger => Core.LoggerFactory.CreateLogger<BotControllerImplSW2Plugin>();
 
-    // Record and replay must share a tickrate; adjust if your server differs.
-    private const int Tickrate = 64;
     private const string InterfaceKey = "botcontroller:api";
-
-    private readonly ReplayDriver _driver = new();
-    private readonly Dictionary<int, string> _recordingFiles = new();
-    private readonly HashSet<int> _savingSlots = new();
-    private readonly Dictionary<int, object> _loadingSlots = new();
-    private readonly HashSet<int> _cancelledLoads = new();
-    private readonly ConcurrentQueue<Action> _completedJobs = new();
-    private bool? _bridgeAvailable;
-
-    // ---- API implementation (cross-plugin via IInterfaceManager) ----
-
-    private sealed class BotControllerApiImpl : IBotControllerApi
-    {
-        // Applies a generic lock to a bot slot.
-        public bool Lock(int slot, LockKind kind) => BotController.Lock(slot, kind);
-        // Applies a weapon-slot lock to a bot slot.
-        public bool Lock(int slot, LockTarget target) => BotController.Lock(slot, target);
-        // Releases a specific lock from a bot slot.
-        public bool Unlock(int slot, LockKind kind) => BotController.Unlock(slot, kind);
-        // Releases the same lock kind from every tracked bot slot.
-        public bool UnlockAll(LockKind kind) => BotController.UnlockAll(kind);
-        // Reports whether a specific lock is active for a slot.
-        public bool IsLocked(int slot, LockKind kind) => BotController.IsLocked(slot, kind);
-        // Returns the active weapon-lock target for a slot.
-        public LockTarget GetWeaponLock(int slot) => BotController.GetWeaponLock(slot);
-
-        // Starts recording movement for a slot.
-        public bool StartRecord(int slot) => BotController.StartRecord(slot);
-        // Stops recording movement for a slot.
-        public bool StopRecord(int slot) => BotController.StopRecord(slot);
-        // Returns the number of recorded ticks for a slot.
-        public int RecordedTickCount(int slot) => BotController.RecordedTickCount(slot);
-        // Returns the recorded tick and subtick buffers for a slot.
-        public (ReplayTick[] ticks, SubtickMove[] subs) GetRecordedMotion(int slot)
-            => BotController.GetRecordedMotion(slot);
-        // Returns aligned tick, subtick, and command-frame buffers for a slot
-        public (ReplayTick[] ticks, SubtickMove[] subs, ReplayCommandFrame[] commands)
-            GetRecordedMotionExtended(int slot)
-            => BotController.GetRecordedMotionExtended(slot);
-
-        // Loads a replay buffer into a bot slot.
-        public bool LoadReplay(
-            int slot,
-            ReplayTick[] ticks,
-            SubtickMove[] subs,
-            ReplayCommandFrame[] commands)
-            => BotController.LoadReplay(
-                slot, ticks, subs, commands, Array.Empty<ReplayMovementExtra>());
-        // Moves a recorded buffer directly into another slot's replay buffer.
-        public bool TransferRecordingToReplay(int srcSlot, int dstSlot)
-            => BotController.TransferRecordingToReplay(srcSlot, dstSlot);
-        // Registers the live pawn pointer for replay.
-        public bool SetReplayPawn(int slot, nint pawn) => BotController.SetReplayPawn(slot, pawn);
-        // Starts replay for a bot slot.
-        public bool StartReplay(int slot, bool loop = false) => BotController.StartReplay(slot, loop);
-        // Stops replay for a bot slot.
-        public bool StopReplay(int slot) => BotController.StopReplay(slot);
-        // Returns the current replay cursor for a slot.
-        public int ReplayCursor(int slot) => BotController.ReplayCursor(slot);
-        // Returns the total replay length for a slot.
-        public int ReplayTotal(int slot) => BotController.ReplayTotal(slot);
-        // Reports whether a slot is actively replaying.
-        public bool IsReplaying(int slot) => BotController.IsReplaying(slot);
-        // Returns the current replay tick when one is available.
-        public bool TryGetReplayTick(int slot, out ReplayTick tick)
-            => BotController.TryGetReplayTick(slot, out tick);
-
-        // Switches the active weapon for a bot slot.
-        public bool SwitchBotWeapon(int slot, int defIndex)
-            => BotController.SwitchBotWeapon(slot, defIndex);
-        // Returns the active weapon definition index for a bot slot.
-        public int BotActiveWeaponDef(int slot) => BotController.BotActiveWeaponDef(slot);
-        // Creates an independently cancellable usercmd injection
-        public long InjectUsercmd(int slot, ulong buttonMask, int durationMs = 0)
-            => BotController.InjectUsercmd(slot, buttonMask, durationMs);
-        // Cancels one usercmd injection by its token
-        public bool CancelUsercmdInjection(int slot, long injectionId)
-            => BotController.CancelUsercmdInjection(slot, injectionId);
-        // Creates an independently cancellable persistent analog movement override
-        public long StartUsercmdMovement(int slot, float forwardMove, float leftMove)
-            => BotController.StartUsercmdMovement(slot, forwardMove, leftMove);
-        // Updates one persistent analog movement override
-        public bool UpdateUsercmdMovement(
-            int slot,
-            long movementId,
-            float forwardMove,
-            float leftMove)
-            => BotController.UpdateUsercmdMovement(
-                slot, movementId, forwardMove, leftMove);
-        // Cancels one persistent analog movement override
-        public bool CancelUsercmdMovement(int slot, long movementId)
-            => BotController.CancelUsercmdMovement(slot, movementId);
-        // Suppresses selected usercmd buttons for a fixed duration
-        public bool SuppressUsercmd(int slot, ulong buttonMask, int durationMs)
-            => BotController.SuppressUsercmd(slot, buttonMask, durationMs);
-        // Creates an independently cancellable persistent usercmd suppression
-        public long StartUsercmdSuppression(int slot, ulong buttonMask)
-            => BotController.StartUsercmdSuppression(slot, buttonMask);
-        // Cancels one persistent usercmd suppression by its token
-        public bool CancelUsercmdSuppression(int slot, long suppressionId)
-            => BotController.CancelUsercmdSuppression(slot, suppressionId);
-
-        public bool GetBotProfile(int slot, out BotProfileData profile)
-            => BotController.GetBotProfile(slot, out profile);
-
-        public bool GetBotProfileName(int slot, out string name)
-            => BotController.GetBotProfileName(slot, out name);
-
-        public bool SetBotProfile(int slot, in BotProfilePatch patch)
-            => BotController.SetBotProfile(slot, in patch);
-
-        // Sets the round buy plan for a bot slot.
-        public bool SetBuyPlan(int slot, string aliases) => BotController.SetBuyPlan(slot, aliases);
-        // Forces a bot slot to skip buying.
-        public bool SetBuySkip(int slot) => BotController.SetBuySkip(slot);
-        // Clears the round buy plan for a bot slot.
-        public bool ClearBuyPlan(int slot) => BotController.ClearBuyPlan(slot);
-        // Clears every active round buy plan.
-        public bool ClearAllBuyPlans() => BotController.ClearAllBuyPlans();
-        // Returns the number of configured buy-plan items.
-        public int BuyPlanItemCount(int slot) => BotController.BuyPlanItemCount(slot);
-
-        // Reports whether voice frame sending is available.
-        public bool CanSendVoice() => BotController.CanSendVoice();
-        // Returns the voice sender setup status.
-        public int GetVoiceStatus() => BotController.GetVoiceStatus();
-        // Sends one encoded Opus voice frame through the bridge.
-        public int SendVoiceFrame(
-            int recipientSlot,
-            int senderClient,
-            ulong senderXuid,
-            byte[] audio,
-            int audioBytes,
-            int sampleRate,
-            float voiceLevel,
-            int sequenceBytes,
-            int sectionNumber,
-            int uncompressedSampleOffset,
-            uint numPackets,
-            uint[] packetOffsets,
-            int packetOffsetCount,
-            int tick,
-            int audibleMask)
-            => BotController.SendVoiceFrame(
-                recipientSlot,
-                senderClient,
-                senderXuid,
-                audio,
-                audioBytes,
-                sampleRate,
-                voiceLevel,
-                sequenceBytes,
-                sectionNumber,
-                uncompressedSampleOffset,
-                numPackets,
-                packetOffsets,
-                packetOffsetCount,
-                tick,
-                audibleMask);
-    }
+    private RecordingSessions? _sessions;
+    private RecordingSessions Sessions => _sessions ??= new(
+        RecordingsDir, RegisterPawnForSlot, NotifyPlayer,
+        message => Logger.LogError("{Message}", message));
+    private bool _bridgeChecked;
+    private bool _bridgeAvailable;
+    private BotControllerApiImpl? _api;
+    private CommandPermissionsConfig _commandPermissions = new(true);
 
     // ---- Lifecycle ----
 
-    // Registers the shared API only when the BotController bridge is usable.
+    // Registers the API when the bridge is ready.
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
     {
         if (!EnsureBridgeAvailable()) return;
 
-        // Consumers call: interfaceManager.TryGetSharedInterface<IBotControllerApi>("botcontroller:api", out var api)
+        // Publish the botcontroller:api shared interface.
         interfaceManager.AddSharedInterface<IBotControllerApi, BotControllerApiImpl>(
-            InterfaceKey, new BotControllerApiImpl());
+            InterfaceKey, _api ??= new BotControllerApiImpl());
     }
 
-    // Loads the plugin and hooks replay ticking when the bridge is ready.
+    // Registers file-job callbacks.
     public override void Load(bool _)
     {
         Logger.LogInformation("{Version}, built {BuildTime}", PluginBuildInfo.DisplayVersion, PluginBuildInfo.BuildTime);
+        LoadCommandPermissions();
         if (!EnsureBridgeAvailable()) return;
 
         Directory.CreateDirectory(RecordingsDir);
 
-        // Hook the server tick for replay driver
         Core.Event.OnTick += OnTick;
+        Core.Event.OnMapLoad += OnMapLoad;
+        Core.Event.OnMapUnload += OnMapUnload;
+        Core.Event.OnClientDisconnected += OnDisconnect;
     }
 
-    // Unhooks replay ticking during plugin unload.
+    // Removes file-job callbacks on unload.
     public override void Unload()
     {
-        if (_bridgeAvailable == true)
+        _api?.Dispose();
+        _api = null;
+        if (_bridgeAvailable)
         {
             Core.Event.OnTick -= OnTick;
+            Core.Event.OnMapLoad -= OnMapLoad;
+            Core.Event.OnMapUnload -= OnMapUnload;
+            Core.Event.OnClientDisconnected -= OnDisconnect;
+            Sessions.Drain();
+            _bridgeAvailable = false;
         }
+        _bridgeChecked = false;
+    }
+
+    // Resets Pawn registrations on map start.
+    private void OnMapLoad(IOnMapLoadEvent _) => ResetSessions();
+
+    // Invalidates jobs before entity reuse.
+    private void OnMapUnload(IOnMapUnloadEvent _) => ResetSessions();
+
+    // Invalidates sessions before slot reuse.
+    private void OnDisconnect(IOnClientDisconnectedEvent @event)
+    {
+        if (!_bridgeAvailable) return;
+        int slot = @event.PlayerId;
+        Sessions.Disconnect(slot);
+    }
+
+    // Pins pending saves to stopped buffers.
+    private void ResetSessions() => Sessions.Reset();
+
+    private void LoadCommandPermissions()
+    {
+        _commandPermissions = new(true);
+        try
+        {
+            _commandPermissions = CommandPermissionsConfig.Load(
+                Path.Combine(Core.GameDirectory, "addons", "BotController", "config.json"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Logger.LogWarning("Permission config failed; using restricted defaults");
+        }
+    }
+
+    private bool CanExecuteReplayCommand(ICommandContext context, IPlayer player)
+    {
+        if (!_commandPermissions.RequirePermissions ||
+            Core.Permission.PlayerHasPermission(player.SteamID, _commandPermissions.Permission)) return true;
+
+        context.Reply(Tag($"Permission required: {_commandPermissions.Permission}"));
+        return false;
     }
 
     // ---- Helpers ----
 
-    // Applies completed file jobs on the game thread before replay bookkeeping.
-    private void OnTick()
-    {
-        while (_completedJobs.TryDequeue(out Action? completion)) completion();
-        _driver.Tick();
-    }
+    // Completes file jobs on the game thread.
+    private void OnTick() => Sessions.Tick();
 
-    // Reports an asynchronous result only to the player who issued the command.
+    // Reports job results to the requesting player.
     private void NotifyPlayer(int slot, ulong steamId, string message)
     {
         var player = Core.PlayerManager.GetPlayer(slot);
@@ -246,214 +134,91 @@ public partial class BotControllerImplSW2Plugin(ISwiftlyCore core) : BasePlugin(
     // Returns the plugin-local recordings directory.
     private string RecordingsDir => Path.Combine(Core.PluginPath, "recordings");
 
-    // Resolves an optional recording name to a safe plugin-local compressed JSON path
-    private bool TryGetRecordingFile(string? fileName, ulong steamId, out string file)
-    {
-        string name = string.IsNullOrWhiteSpace(fileName)
-            ? steamId.ToString()
-            : fileName;
-
-        if (name != Path.GetFileName(name) ||
-            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            file = string.Empty;
-            return false;
-        }
-
-        if (name.EndsWith(".json.br", StringComparison.OrdinalIgnoreCase))
-            name = name[..^8];
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            file = string.Empty;
-            return false;
-        }
-
-        file = Path.Combine(RecordingsDir, $"{name}.json.br");
-        return true;
-    }
-
-    // Formats a colored chat tag for BotController replies.
+    // Formats the reply tag.
     private static string Tag(string msg) =>
         $"{Helper.ChatColors.Green}[BotController]{Helper.ChatColors.Default} {msg}".Colored();
 
-    // Registers the live pawn before the first recording or replay frame.
-    private bool RegisterPawnForSlot(int slot)
+    // Registers the live Pawn; reports the failed stage.
+    private string? RegisterPawnForSlot(int slot)
     {
+        if (slot is < 0 or >= 64) return "Slot must be 0..63.";
         var player = Core.PlayerManager.GetPlayer(slot);
-        var pawn = player?.PlayerPawn;
-        return pawn is { IsValid: true } &&
-               BotController.SetReplayPawn(
-                   slot,
-                   ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address);
+        if (player is not { IsValid: true }) return $"Slot {slot}: controller unavailable.";
+        var pawn = player.PlayerPawn;
+        if (pawn is not { IsValid: true }) return $"Slot {slot}: pawn unavailable.";
+        return BotController.SetReplayPawn(slot, ((SwiftlyS2.Shared.Natives.INativeHandle)pawn).Address)
+            ? null
+            : $"Slot {slot}: native pawn registration failed.";
     }
 
+    // Initializes the bridge once.
     private bool EnsureBridgeAvailable()
     {
-        if (_bridgeAvailable is bool available) return available;
+        if (_bridgeChecked) return _bridgeAvailable;
 
-        available = BotController.IsNativeBridgeAvailable();
-        _bridgeAvailable = available;
-        if (!available)
-            Logger.LogWarning("[BotController] Native BotController is unavailable.");
-        return available;
+        _bridgeChecked = true;
+        try
+        {
+            ResetSessions();
+            _bridgeAvailable = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Bridge unavailable: {Reason}", ex.Message);
+        }
+        return _bridgeAvailable;
     }
 
     // ---- Chat Commands ----
 
-    // Starts recording the invoking player's movement.
+    // Starts recording the requesting player.
     [Command("record")]
     public void OnRecord(ICommandContext context)
     {
         var player = context.Sender;
-        if (player == null || !player.IsValid) return;
-        if (_savingSlots.Contains(player.Slot))
-        {
-            context.Reply(Tag("Previous recording is still saving."));
-            return;
-        }
-
-        string? fileName = context.Args.Length >= 1 ? context.Args[0] : null;
-        if (context.Args.Length > 1 ||
-            !TryGetRecordingFile(fileName, player.SteamID, out string file))
+        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (context.Args.Length > 1)
         {
             context.Reply(Tag("Usage: !record [fileName]"));
             return;
         }
-        if (!RegisterPawnForSlot(player.Slot) || !BotController.StartRecord(player.Slot))
-        {
-            context.Reply(Tag("Failed to start recording."));
-            return;
-        }
-        _recordingFiles[player.Slot] = file;
-        context.Reply(Tag("Recording. Use !stoprecord to finish."));
+        string? fileName = context.Args.Length >= 1 ? context.Args[0] : null;
+        context.Reply(Tag(Sessions.StartRecord(player.Slot, player.SteamID, fileName)));
     }
 
-    // Stops recording and persists the invoking player's captured motion.
+    // Stops and saves the recording.
     [Command("stoprecord")]
     public void OnStopRecord(ICommandContext context)
     {
         var player = context.Sender;
-        if (player == null || !player.IsValid) return;
-        if (_savingSlots.Contains(player.Slot))
-        {
-            context.Reply(Tag("Recording is still saving."));
-            return;
-        }
-
-        BotController.StopRecord(player.Slot);
-
-        if (!_recordingFiles.Remove(player.Slot, out string? file) &&
-            !TryGetRecordingFile(null, player.SteamID, out file))
-            return;
-
-        int slot = player.Slot;
-        ulong steamId = player.SteamID;
-        _savingSlots.Add(slot);
-        context.Reply(Tag("Saving recording..."));
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                int saved = MotionStore.SaveToFile(slot, file, Tickrate);
-                _completedJobs.Enqueue(() =>
-                {
-                    _savingSlots.Remove(slot);
-                    NotifyPlayer(slot, steamId, saved > 0 ? $"Saved {saved} ticks." : "Nothing recorded.");
-                });
-            }
-            catch (Exception ex)
-            {
-                _completedJobs.Enqueue(() =>
-                {
-                    _savingSlots.Remove(slot);
-                    Logger.LogError(ex, "Recording save failed.");
-                    NotifyPlayer(slot, steamId, "Recording save failed.");
-                });
-            }
-        });
+        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        context.Reply(Tag(Sessions.StopRecord(player.Slot, player.SteamID)));
     }
 
-    // Loads the invoking player's recording and starts replay on a target bot slot.
+    // Loads a recording for the target slot.
     [Command("replay")]
     public void OnReplay(ICommandContext context)
     {
         var player = context.Sender;
-        if (player == null || !player.IsValid) return;
-
+        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(context, player)) return;
+        if (context.Args.Length is < 1 or > 2 || !int.TryParse(context.Args[0], out int slot))
+        {
+            context.Reply(Tag("Usage: !replay <slot> [fileName]"));
+            return;
+        }
         string? fileName = context.Args.Length >= 2 ? context.Args[1] : null;
-        if (context.Args.Length is < 1 or > 2 ||
-            !int.TryParse(context.Args[0], out int botSlot) ||
-            !TryGetRecordingFile(fileName, player.SteamID, out string file))
-        {
-            context.Reply(Tag("Usage: !replay <botSlot> [fileName]"));
-            return;
-        }
-        if (!File.Exists(file))
-        {
-            context.Reply(Tag("No recording found. Use !record first."));
-            return;
-        }
-
-        if (_loadingSlots.ContainsKey(botSlot))
-        {
-            context.Reply(Tag("Replay is still loading on that slot."));
-            return;
-        }
-        int requesterSlot = player.Slot;
-        ulong requesterSteamId = player.SteamID;
-        object token = new();
-        _loadingSlots.Add(botSlot, token);
-        context.Reply(Tag("Loading replay..."));
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                MotionRecording rec = MotionStore.LoadFromFile(file);
-                bool loaded = rec.Ticks.Length > 0 && BotController.LoadReplay(
-                    botSlot, rec.Ticks, rec.Subticks, rec.Commands, Array.Empty<ReplayMovementExtra>());
-                _completedJobs.Enqueue(() =>
-                {
-                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
-                    _loadingSlots.Remove(botSlot);
-                    if (_cancelledLoads.Remove(botSlot)) return;
-                    if (rec.Tickrate != Tickrate)
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"WARN tickrate mismatch: recorded {rec.Tickrate}, server {Tickrate}.");
-                    if (loaded && RegisterPawnForSlot(botSlot) && BotController.StartReplay(botSlot))
-                    {
-                        _driver.Track(botSlot);
-                        NotifyPlayer(requesterSlot, requesterSteamId, $"Replaying on bot slot {botSlot}.");
-                    }
-                    else NotifyPlayer(requesterSlot, requesterSteamId, "Failed to start replay.");
-                });
-            }
-            catch (Exception ex)
-            {
-                _completedJobs.Enqueue(() =>
-                {
-                    if (!_loadingSlots.TryGetValue(botSlot, out object? current) || !ReferenceEquals(current, token)) return;
-                    _loadingSlots.Remove(botSlot);
-                    if (_cancelledLoads.Remove(botSlot)) return;
-                    Logger.LogError(ex, "Replay load failed.");
-                    NotifyPlayer(requesterSlot, requesterSteamId, "Replay load failed.");
-                });
-            }
-        });
+        context.Reply(Tag(Sessions.StartReplay(slot, fileName, player.Slot, player.SteamID)));
     }
 
-    // Stops replay on a target bot slot and releases the bot lock.
+    // Stops replay on the target slot.
     [Command("stopreplay")]
     public void OnStopReplay(ICommandContext context)
     {
         var player = context.Sender;
-        if (player == null || !player.IsValid) return;
-
-        if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int botSlot)) return;
-
-        if (_loadingSlots.ContainsKey(botSlot)) _cancelledLoads.Add(botSlot);
-
-        BotController.StopReplay(botSlot);
-        _driver.Release(botSlot);
-        context.Reply(Tag($"Stopped replay on bot slot {botSlot}."));
+        if (!_bridgeAvailable || player == null || !player.IsValid) return;
+        if (!CanExecuteReplayCommand(context, player)) return;
+        if (context.Args.Length < 1 || !int.TryParse(context.Args[0], out int slot)) return;
+        context.Reply(Tag(Sessions.StopReplay(slot)));
     }
 }
