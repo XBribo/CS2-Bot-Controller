@@ -1,6 +1,7 @@
 // Native bridge for managed providers.
 // Engine calls: main thread. Stopped-buffer copies and loads: worker-safe.
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -169,7 +170,7 @@ namespace BotControllerApi
         private static extern int BotController_GetProfileName(int slot, [Out] byte[] buffer, int capacity);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BotController_SetBotProfile(int slot, in BotProfilePatch patch);
+        private static extern int BotController_SetBotProfileSized(int slot, in BotProfilePatch patch, int patchSize);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetBuyPlan(int slot,
@@ -479,7 +480,7 @@ namespace BotControllerApi
         {
             try
             {
-                return BotController_SetBotProfile(slot, in patch) == 0;
+                return BotController_SetBotProfileSized(slot, in patch, Unsafe.SizeOf<BotProfilePatch>()) == 0;
             }
             catch (EntryPointNotFoundException)
             {

@@ -33,6 +33,13 @@ enum BotProfileFields : uint32_t
     LookAccelAtk = 1U << 6,
     LookStiffAtk = 1U << 7,
     LookDampAtk = 1U << 8,
+    Aggression = 1U << 9,
+    Teamwork = 1U << 10,
+    AimFocusInitial = 1U << 11,
+    AimFocusDecay = 1U << 12,
+    AimFocusOffsetScale = 1U << 13,
+    AimFocusInterval = 1U << 14,
+    VoicePitch = 1U << 15,
 };
 
 struct BotProfilePatch
@@ -47,8 +54,15 @@ struct BotProfilePatch
     float lookAccelAtk;
     float lookStiffAtk;
     float lookDampAtk;
+    float aggression;
+    float teamwork;
+    float aimFocusInitial;
+    float aimFocusDecay;
+    float aimFocusOffsetScale;
+    float aimFocusInterval;
+    int32_t voicePitch;
 };
-static_assert(sizeof(BotProfilePatch) == 40);
+static_assert(sizeof(BotProfilePatch) == 68);
 #pragma pack(pop)
 
 namespace bot_profile {

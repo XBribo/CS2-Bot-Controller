@@ -124,9 +124,9 @@ extern "C" BC_EXPORT int BotController_GetProfileName(int slot, char* buffer, in
     return cs2bc::bot_profile::ReadProfileName(slot, buffer, capacity);
 }
 
-extern "C" BC_EXPORT int BotController_SetBotProfile(int slot, const cs2bc::BotProfilePatch* patch)
+extern "C" BC_EXPORT int BotController_SetBotProfileSized(int slot, const cs2bc::BotProfilePatch* patch, int size)
 {
-    return patch && cs2bc::bot_profile::SetProfile(slot, *patch) ? 0 : -1;
+    return patch && size == static_cast<int>(sizeof(*patch)) && cs2bc::bot_profile::SetProfile(slot, *patch) ? 0 : -1;
 }
 
 // ---- Bot buy plans ----

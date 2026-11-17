@@ -158,6 +158,34 @@
     },
     "comment": "m_teamwork"
   },
+  "BotProfile::AimFocusInitial": {
+    "offsets": {
+      "windows": 20,
+      "linux": 20
+    },
+    "comment": "m_aimFocusInitial"
+  },
+  "BotProfile::AimFocusDecay": {
+    "offsets": {
+      "windows": 24,
+      "linux": 24
+    },
+    "comment": "m_aimFocusDecay"
+  },
+  "BotProfile::AimFocusOffsetScale": {
+    "offsets": {
+      "windows": 28,
+      "linux": 28
+    },
+    "comment": "m_aimFocusOffsetScale"
+  },
+  "BotProfile::AimFocusInterval": {
+    "offsets": {
+      "windows": 32,
+      "linux": 32
+    },
+    "comment": "m_aimFocusInterval"
+  },
   "BotProfile::WeaponPref": {
     "offsets": {
       "windows": 36,
@@ -185,6 +213,13 @@
       "linux": 80
     },
     "comment": "m_difficultyFlags"
+  },
+  "BotProfile::VoicePitch": {
+    "offsets": {
+      "windows": 84,
+      "linux": 84
+    },
+    "comment": "m_voicePitch"
   },
   "BotProfile::ReactionTime": {
     "offsets": {

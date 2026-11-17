@@ -46,6 +46,16 @@ bool LoadFromGamedata(const nlohmann::json& gamedata, char* error, size_t maxlen
             return false;
         }
     }
+
+    const cs2_sdk::gameconfig::OffsetBinding extraProfileOffsets[] = {
+        { &g_profAimFocusInitial, "BotProfile::AimFocusInitial" },
+        { &g_profAimFocusDecay, "BotProfile::AimFocusDecay" },
+        { &g_profAimFocusOffsetScale, "BotProfile::AimFocusOffsetScale" },
+        { &g_profAimFocusInterval, "BotProfile::AimFocusInterval" },
+        { &g_profVoicePitch, "BotProfile::VoicePitch" },
+    };
+    for (const auto& offset : extraProfileOffsets)
+        *offset.target = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, offset.name, -1);
     return true;
 }
 

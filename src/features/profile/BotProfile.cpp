@@ -65,6 +65,33 @@ void* ResolveProfile(int slot, bool requireOwned = false)
     }
     return prof;
 }
+
+bool IsValidPatchValue(BotProfileFields flag, const void* data)
+{
+    if (flag == VoicePitch)
+    {
+        const auto pitch = *static_cast<const int32_t*>(data);
+        return pitch >= 0 && pitch <= 255;
+    }
+
+    const float value = *static_cast<const float*>(data);
+    if (!(value >= 0.0F)) return false;
+    switch (flag)
+    {
+        case Skill:
+        case Aggression:
+        case Teamwork:
+        case AimFocusDecay:
+            return value <= 1.0F;
+        case AimFocusOffsetScale:
+            return value < 1.0F;
+        case LookAccelNormal:
+        case LookAccelAtk:
+            return true;
+        default:
+            return std::isfinite(value);
+    }
+}
 } // namespace
 
 bool ReadProfile(int slot, BotProfileData& out)
@@ -114,8 +141,8 @@ bool SetProfile(int slot, const BotProfilePatch& patch)
     {
         BotProfileFields flag;
         int offset;
-        const float* value;
-        float previous = 0.0F;
+        const void* value;
+        uint32_t previous = 0;
     };
     Field fields[] = {
         { Skill, tg::g_profSkill, &patch.skill },
@@ -127,18 +154,22 @@ bool SetProfile(int slot, const BotProfilePatch& patch)
         { LookAccelAtk, tg::g_profLookAccelAtk, &patch.lookAccelAtk },
         { LookStiffAtk, tg::g_profLookStiffAtk, &patch.lookStiffAtk },
         { LookDampAtk, tg::g_profLookDampAtk, &patch.lookDampAtk },
+        { Aggression, tg::g_profAggression, &patch.aggression },
+        { Teamwork, tg::g_profTeamwork, &patch.teamwork },
+        { AimFocusInitial, tg::g_profAimFocusInitial, &patch.aimFocusInitial },
+        { AimFocusDecay, tg::g_profAimFocusDecay, &patch.aimFocusDecay },
+        { AimFocusOffsetScale, tg::g_profAimFocusOffsetScale, &patch.aimFocusOffsetScale },
+        { AimFocusInterval, tg::g_profAimFocusInterval, &patch.aimFocusInterval },
+        { VoicePitch, tg::g_profVoicePitch, &patch.voicePitch },
     };
     uint32_t remaining = patch.fields;
     for (Field& field : fields)
     {
         if ((remaining & field.flag) == 0) continue;
         remaining &= ~field.flag;
-        const bool accel = field.flag == LookAccelNormal || field.flag == LookAccelAtk;
-        const float value = *field.value;
         constexpr int kLastScalarOffset = 0x80;
         if (field.offset < static_cast<int>(sizeof(void*)) || field.offset > kLastScalarOffset ||
-            field.offset % static_cast<int>(alignof(float)) != 0 || !(value >= 0.0F) ||
-            (!accel && !std::isfinite(value)) || (field.flag == Skill && value > 1.0F) ||
+            field.offset % static_cast<int>(alignof(uint32_t)) != 0 || !IsValidPatchValue(field.flag, field.value) ||
             !GuardedRead(prof, field.offset, field.previous))
             return false;
     }
@@ -147,7 +178,7 @@ bool SetProfile(int slot, const BotProfilePatch& patch)
     for (size_t i = 0; i < std::size(fields); ++i)
     {
         const Field& field = fields[i];
-        if ((patch.fields & field.flag) == 0 || TryWriteMemoryGuarded(prof, field.offset, field.value, sizeof(float)))
+        if ((patch.fields & field.flag) == 0 || TryWriteMemoryGuarded(prof, field.offset, field.value, sizeof(field.previous)))
             continue;
 
         // Failed writes can be partial.
@@ -155,7 +186,7 @@ bool SetProfile(int slot, const BotProfilePatch& patch)
         {
             const Field& rollback = fields[j - 1];
             if ((patch.fields & rollback.flag) != 0)
-                TryWriteMemoryGuarded(prof, rollback.offset, &rollback.previous, sizeof(float));
+                TryWriteMemoryGuarded(prof, rollback.offset, &rollback.previous, sizeof(rollback.previous));
         }
         return false;
     }

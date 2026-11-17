@@ -136,6 +136,13 @@ namespace BotControllerApi
         LookAccelAtk = 1U << 6,
         LookStiffAtk = 1U << 7,
         LookDampAtk = 1U << 8,
+        Aggression = 1U << 9,
+        Teamwork = 1U << 10,
+        AimFocusInitial = 1U << 11,
+        AimFocusDecay = 1U << 12,
+        AimFocusOffsetScale = 1U << 13,
+        AimFocusInterval = 1U << 14,
+        VoicePitch = 1U << 15,
     }
 
     // Positive infinity is a valid acceleration cap.
@@ -152,5 +159,12 @@ namespace BotControllerApi
         public float LookAccelAtk;
         public float LookStiffAtk;
         public float LookDampAtk;
+        public float Aggression;          // 0..1
+        public float Teamwork;            // 0..1
+        public float AimFocusInitial;     // degrees
+        public float AimFocusDecay;       // 0..1
+        public float AimFocusOffsetScale; // [0, 1)
+        public float AimFocusInterval;    // seconds
+        public int VoicePitch;            // 0..255, normal = 100
     }
 }
