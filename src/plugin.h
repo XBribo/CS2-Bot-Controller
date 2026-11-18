@@ -20,6 +20,7 @@ class BotControllerPlugin : public ISmmPlugin, public IMetamodListener
     void AllPluginsLoaded() override;
 
     void OnLevelShutdown() override;
+    void* OnMetamodQuery(const char* iface, int* ret) override;
 
     // Plugin author.
     const char* GetAuthor() override;

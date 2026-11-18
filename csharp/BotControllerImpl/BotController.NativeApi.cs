@@ -10,6 +10,11 @@ namespace BotControllerApi
     // Native export bindings.
     public static class BotController
     {
+        static BotController() => NativeLibrary.SetDllImportResolver(typeof(BotController).Assembly,
+            (name, _, _) => name == "BotController"
+                ? NativeBridge.Handle ?? throw new DllNotFoundException("BotController not bound.")
+                : 0);
+
         // Sentinel weapon def meaning "any knife"
         public const int KnifeDef = 9001;
 

@@ -29,11 +29,38 @@ public partial class BotControllerPlugin : BasePlugin
     private BotControllerApiImpl? _api;
     private CommandPermissionsConfig _commandPermissions = new(true);
 
-    // Loads the provider and publishes the API.
     public override void Load(bool hotReload)
     {
-        NativeBridge.Initialize(Path.Combine(Server.GameDirectory, "csgo"));
-        Server.PrintToConsole($"[BotController] {PluginBuildInfo.DisplayVersion}, built {PluginBuildInfo.BuildTime}");
+        if (TryStart()) return;
+        if (hotReload) throw new InvalidOperationException(NativeBridge.Unavailable);
+
+        string? failure = null;
+        Listeners.OnMetamodAllPluginsLoaded retry = () =>
+        {
+            try
+            {
+                if (!TryStart()) failure = NativeBridge.Unavailable;
+            }
+            catch (Exception ex)
+            {
+                failure = ex.Message;
+            }
+        };
+
+        RegisterListener(retry);
+        Server.NextWorldUpdate(() =>
+        {
+            if (!Listeners.ContainsKey(retry)) return; // Already unloaded.
+            RemoveListener(retry);
+            if (_api == null && failure == null) retry(); // Late load missed the event.
+            if (failure != null) TerminateSelf(failure);
+        });
+    }
+
+    private bool TryStart()
+    {
+        if (!NativeBridge.TryBind()) return false;
+        Server.PrintToConsole($"[BotController] {ModuleVersion}");
         LoadCommandPermissions();
         ResetSessions();
 
@@ -42,18 +69,11 @@ public partial class BotControllerPlugin : BasePlugin
         RegisterListener<Listeners.OnMapStart>(_ => ResetSessions());
         RegisterListener<Listeners.OnMapEnd>(ResetSessions);
         RegisterListener<Listeners.OnClientDisconnect>(OnDisconnect);
-        _api = new BotControllerApiImpl();
-        try
-        {
-            BotControllerProvider.Attach(_api,
-                supplier => Capabilities.RegisterPluginCapability(BotControllerCapability.Cap, supplier));
-        }
-        catch
-        {
-            _api.Dispose();
-            _api = null;
-            throw;
-        }
+        var api = new BotControllerApiImpl();
+        BotControllerProvider.Attach(api,
+            supplier => Capabilities.RegisterPluginCapability(BotControllerCapability.Cap, supplier));
+        _api = api;
+        return true;
     }
 
     // Drains native buffer readers before unload.

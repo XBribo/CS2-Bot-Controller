@@ -3,6 +3,7 @@
 #include "plugin_build_info.h"
 
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 
@@ -13,6 +14,7 @@
 #include <nlohmann/json.hpp> // NOLINT(misc-include-cleaner)
 
 #include "ISmmPluginExt.h"
+#include <IPluginManager.h>
 #include "core/interfaces.h"
 #include "core/gamedata.h"
 #include "WeaponLocker.h"
@@ -155,6 +157,18 @@ bool BotControllerPlugin::Unpause(char*, size_t) { return true; }
 void BotControllerPlugin::AllPluginsLoaded() {}
 
 void BotControllerPlugin::OnLevelShutdown() { dispatch::ResetAll(); }
+
+void* BotControllerPlugin::OnMetamodQuery(const char* iface, int* ret)
+{
+    void* module = nullptr;
+    if (std::strcmp(iface, "BotController_ModuleHandle001") == 0)
+    {
+        auto* manager = static_cast<ISmmPluginManager*>(g_SMAPI->MetaFactory(MMIFACE_PLMANAGER, nullptr, nullptr));
+        if (manager) manager->QueryHandle(g_PLID, &module);
+    }
+    if (ret) *ret = module ? META_IFACE_OK : META_IFACE_FAILED;
+    return module;
+}
 
 const char* BotControllerPlugin::GetAuthor() { return "XBribo(๑•.•๑)"; }
 const char* BotControllerPlugin::GetName() { return "BotController"; }
