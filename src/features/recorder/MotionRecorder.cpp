@@ -1131,8 +1131,11 @@ bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& even
     return true;
 }
 
-// Checks the native drop hook.
-bool DropHookReady() { return g_dropHookReady.load(std::memory_order_acquire); }
+const char* DropHookStatus()
+{
+    if (!g_dropHookTried.load(std::memory_order_acquire)) return "pending";
+    return g_dropHookReady.load(std::memory_order_acquire) ? "ok" : "failed";
+}
 
 // Restores replay velocity.
 namespace {

@@ -232,8 +232,7 @@ bool TakeCurrentReplayDrop(int slot, ReplayDropEvent& event);
 // Drops the recorded item from the registered Pawn.
 bool DropReplayEventWeapon(int slot, void* services, const ReplayDropEvent& event);
 
-// Checks drop-hook availability.
-bool DropHookReady();
+const char* DropHookStatus();
 // Installs drop release-pose hooks.
 bool InstallDropReleasePose(void* outerDrop, void* buildTransform);
 

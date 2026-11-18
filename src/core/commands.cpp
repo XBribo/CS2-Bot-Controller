@@ -255,7 +255,7 @@ CON_COMMAND_F(bc_status, // NOLINT(bugprone-throwing-static-initialization,misc-
               FCVAR_NONE)
 {
     commands::PrintToCaller(context, "[BC] hooks: weapon=%s bot=%s input=%s drop=%s buy=%s\n", weapon_locker_hooks::Status(),
-                            bot_controller_hooks::Status(), input_injector::Status(), motion_recorder::DropHookReady() ? "ok" : "failed",
+                            bot_controller_hooks::Status(), input_injector::Status(), motion_recorder::DropHookStatus(),
                             buy_controller_hooks::Status());
 
     bool printedReplayHeader = false;
