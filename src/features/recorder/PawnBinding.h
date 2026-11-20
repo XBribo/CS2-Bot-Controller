@@ -1,11 +1,13 @@
 // Shared Pawn, service, and weapon resolution.
 #pragma once
 
+#include <cstddef>
+
 class PlayerCommand;
 
 namespace cs2bc::input_injector::pawn_binding {
 // Initializes shared pawn and weapon resolution.
-bool Init();
+bool Init(char* error, std::size_t maxlen);
 // Resolves registered movement services.
 void* ServicesForSlot(int slot);
 // Reads current live weapon services.

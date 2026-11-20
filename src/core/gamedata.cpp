@@ -1,7 +1,7 @@
 #include "core/gamedata.h"
-#include "core/cs2_sdk/src/core/gameconfig.h"
+#include <cs2_sdk/gameconfig.h>
 #include "offsets.h"
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 #include <cstdio>
 #include <string>
 namespace cs2bc::gamedata {
@@ -14,11 +14,7 @@ bool Load(nlohmann::json& gamedata, cs2_sdk::modules::ModuleInfo& serverModule, 
         return false;
     }
 
-    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata))
-    {
-        std::snprintf(error, maxlen, "gamedata load failed: %s", gamedataPath.c_str());
-        return false;
-    }
+    if (!cs2_sdk::gameconfig::LoadGamedata(gamedataPath.c_str(), gamedata, error, maxlen)) return false;
 
     cs2_sdk::modules::Initialize();
     if (!cs2_sdk::modules::server || !cs2_sdk::modules::server->Code())

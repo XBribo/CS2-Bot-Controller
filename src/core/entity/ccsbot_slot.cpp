@@ -1,5 +1,5 @@
 #include "ccsbot_slot.h"
-#include "core/cs2_sdk/src/utils/memory.h"
+#include <cs2_sdk/memory.h>
 #include "offsets.h"
 #include <entityhandle.h>
 

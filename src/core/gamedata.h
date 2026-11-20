@@ -1,5 +1,5 @@
 #pragma once
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 #include <nlohmann/json.hpp>
 
 namespace cs2bc::gamedata {

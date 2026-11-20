@@ -2,7 +2,7 @@
 #include "InputInjector.h"
 #include "MotionRecorder.h"
 #include "ccsbot_slot.h"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/schema.h>
 #include "core/log.h"
 #include "offsets.h"
 #include "plugin.h"
@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -159,13 +160,20 @@ void* ResolveReplayPawn(int slot, void* services)
 
 namespace pawn_binding {
 // Caches controller and Pawn offsets.
-bool Init()
+bool Init(char* error, std::size_t maxlen)
 {
     g_server = static_cast<ISource2Server*>(g_SMAPI->GetServerFactory()(INTERFACEVERSION_SERVERGAMEDLL, nullptr));
-    g_controllerPawn = cs2_sdk::schema::GetFieldOffset("CCSPlayerController", "m_hPlayerPawn");
-    g_lifeState = cs2_sdk::schema::GetFieldOffset("CBaseEntity", "m_lifeState");
-    g_controllerTickBase = cs2_sdk::schema::GetFieldOffset("CBasePlayerController", "m_nTickBase");
-    return g_server && g_controllerPawn >= 0 && g_lifeState >= 0 && g_controllerTickBase >= 0;
+    if (!g_server)
+    {
+        if (error && maxlen) std::snprintf(error, maxlen, "Server interface unavailable: %s", INTERFACEVERSION_SERVERGAMEDLL);
+        return false;
+    }
+    const cs2_sdk::schema::FieldBinding fields[] = {
+        { &g_controllerPawn, "CCSPlayerController", "m_hPlayerPawn" },
+        { &g_lifeState, "CBaseEntity", "m_lifeState" },
+        { &g_controllerTickBase, "CBasePlayerController", "m_nTickBase" },
+    };
+    return cs2_sdk::schema::ResolveFields(fields, error, maxlen);
 }
 
 // Returns only the registered, live services.

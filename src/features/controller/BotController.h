@@ -5,7 +5,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 
 namespace cs2bc {
 namespace bot_controller_hooks {

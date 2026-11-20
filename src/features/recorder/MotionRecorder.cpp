@@ -8,7 +8,7 @@
 #include "PawnBinding.h"
 #include "WeaponLocker.h"
 #include "ccsbot_slot.h"
-#include "core/cs2_sdk/src/utils/hooks.h"
+#include <cs2_sdk/hooks.h>
 #include "core/log.h"
 #include "offsets.h"
 
