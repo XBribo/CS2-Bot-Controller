@@ -1,16 +1,16 @@
-#include "core/cs2_sdk/src/core/gameconfig.h"
+#include <cs2_sdk/gameconfig.h>
 // Detours for CCSBot::EquipBestWeapon, EquipPistol, and
 // CCSPlayer_WeaponServices::SelectItem
 
 #include "WeaponLocker.h"
 #include "nlohmann/json.hpp"
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 #include "WeaponLockerState.h"
 #include "ccsbot_slot.h"
 #include "MotionRecorder.h"
 #include "PawnBinding.h"
 #include "offsets.h"
-#include "core/cs2_sdk/src/utils/hooks.h"
+#include <cs2_sdk/hooks.h>
 #include <entityhandle.h>
 
 #include <cstdint>

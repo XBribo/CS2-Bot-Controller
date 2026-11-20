@@ -1,10 +1,9 @@
-#include "core/cs2_sdk/src/core/gameconfig.h"
+#include <cs2_sdk/gameconfig.h>
 #include "offsets.h"
 #include "nlohmann/json.hpp"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/schema.h>
 
 #include <cstdint>
-#include <cstdio>
 
 namespace cs2bc::offsets {
 bool LoadFromGamedata(const nlohmann::json& gamedata, char* error, size_t maxlen)
@@ -36,16 +35,7 @@ bool LoadFromGamedata(const nlohmann::json& gamedata, char* error, size_t maxlen
         { &g_vtIdxControllerCommandSetup, "vtidx::ControllerCommandSetup" },
         { &g_vtIdxDropWeapon, "vtidx::DropWeapon" },
     };
-    for (const auto& offset : offsets)
-    {
-        *offset.target = cs2_sdk::gameconfig::FindPlatformOffset(gamedata, offset.name, -1);
-        if (*offset.target < 0)
-        {
-            std::snprintf(error, maxlen, "Invalid gamedata offset '%s.offsets.%s': expected a nonnegative int", offset.name,
-                          cs2_sdk::gameconfig::PlatformName());
-            return false;
-        }
-    }
+    if (!cs2_sdk::gameconfig::LoadRequiredOffsets(gamedata, offsets, error, maxlen)) return false;
 
     const cs2_sdk::gameconfig::OffsetBinding extraProfileOffsets[] = {
         { &g_profAimFocusInitial, "BotProfile::AimFocusInitial" },

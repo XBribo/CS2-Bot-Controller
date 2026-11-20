@@ -1,6 +1,6 @@
 #include "BotProfile.h"
 #include "ccsbot_slot.h"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/schema.h>
 #include "offsets.h"
 #include "plugin.h"
 

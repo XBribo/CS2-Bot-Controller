@@ -1,4 +1,4 @@
-#include "core/cs2_sdk/src/core/gameconfig.h"
+#include <cs2_sdk/gameconfig.h>
 #include "core/log.h"
 // CS2 movement hooks
 // OnSimulateUserCommands (controller batch context)
@@ -13,11 +13,11 @@
 #include "CommandHistory.h"
 #include "PawnBinding.h"
 #include "ccsbot_slot.h"
-#include "core/cs2_sdk/src/core/memory_module.h"
+#include <cs2_sdk/memory_module.h>
 #include "MotionRecorder.h"
 #include "usercmd.pb.h"
 #include "offsets.h"
-#include "core/cs2_sdk/src/utils/hooks.h"
+#include <cs2_sdk/hooks.h>
 #include "WeaponLocker.h"
 
 #include <algorithm> // NOLINT(misc-include-cleaner)

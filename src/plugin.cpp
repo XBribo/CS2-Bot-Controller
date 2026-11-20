@@ -26,8 +26,8 @@
 #include "MotionRecorder.h"
 #include "WeaponLockerState.h"
 #include "BotControllerState.h"
-#include "core/cs2_sdk/src/core/memory_module.h"
-#include "core/cs2_sdk/src/core/schema.h"
+#include <cs2_sdk/memory_module.h>
+#include <cs2_sdk/schema.h>
 #include "offsets.h"
 #include "dispatch.h"
 #include <engine2/isource2server.h>
@@ -104,11 +104,7 @@ bool BotControllerPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t m
         cs2_sdk::modules::ModuleInfo serverModule;
         if (!gamedata::Load(gd, serverModule, error, maxlen)) return false;
 
-        if (!input_injector::pawn_binding::Init())
-        {
-            std::snprintf(error, maxlen, "pawn binding unavailable");
-            return false;
-        }
+        if (!input_injector::pawn_binding::Init(error, maxlen)) return false;
         if (!cs2bc::weapon_locker_hooks::Install(gd, serverModule, error, maxlen)) return false;
 
         if (!cs2bc::bot_controller_hooks::Install(gd, serverModule, error, maxlen)) return false;
