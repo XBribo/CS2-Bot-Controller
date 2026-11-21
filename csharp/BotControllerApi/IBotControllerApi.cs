@@ -131,6 +131,9 @@ namespace BotControllerApi
         // Force a bot's per-round buy.
         bool SetBuyPlan(int slot, string aliases);
 
+        // Buy once for this pawn; clear at round end.
+        bool SetRoundBuyPlan(int slot, uint pawnHandle, string aliases) => false;
+
         // Force a bot to buy nothing each round.
         bool SetBuySkip(int slot);
 

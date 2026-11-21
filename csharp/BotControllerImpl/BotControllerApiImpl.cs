@@ -113,6 +113,8 @@ namespace BotControllerApi
 
         // ---- buy plans ----
         public bool SetBuyPlan(int slot, string aliases) => _active && BotController.SetBuyPlan(slot, aliases);
+        public bool SetRoundBuyPlan(int slot, uint pawnHandle, string aliases)
+            => _active && BotController.SetRoundBuyPlan(slot, pawnHandle, aliases);
         public bool SetBuySkip(int slot) => _active && BotController.SetBuySkip(slot);
         public bool ClearBuyPlan(int slot) => _active && BotController.ClearBuyPlan(slot);
         public bool ClearAllBuyPlans() => _active && BotController.ClearAllBuyPlans();

@@ -110,6 +110,7 @@ SlotResolution ResolveSlot(void* bot)
 
     uint32_t handle = 0;
     if (!GuardedRead(identity, tg::g_entIdentityEHandle, handle)) return out;
+    out.pawnHandle = handle;
     out.pawnEntIndex = EntIndexFromHandle(handle);
     if (out.pawnEntIndex <= 0) return out;
 

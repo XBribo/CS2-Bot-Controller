@@ -16,11 +16,11 @@ struct PawnControllerHandles
     int ownerSlot;
 };
 
-// Pawn and entity index used for slot resolution.
 struct SlotResolution
 {
     void* pawn;
     int pawnEntIndex;
+    uint32_t pawnHandle{};
     int slot; // -1 on failure
 };
 

@@ -4,6 +4,7 @@
 
 #include "BotController.h"
 #include "BotControllerState.h"
+#include "BuyController.h"
 #include "ccsbot_slot.h"
 #include "nlohmann/json.hpp"
 #include <cs2_sdk/memory_module.h>
@@ -57,6 +58,7 @@ bool ApplyReplayEyeAnglesInternal(void* pawn, float pitch, float yaw)
 // Skips AI during All locks or replay.
 KHook::Return<void> HookedUpdate(void* bot) noexcept
 {
+    buy_controller_hooks::UpdatePending(bot);
     if (!bot_controller_state::HasAnyLock() && !motion_recorder::HasAnyReplay()) return { KHook::Action::Ignore };
     int slot = CCSBotToSlot(bot);
     if (slot >= 0 && (bot_controller_state::GetAll(slot) || motion_recorder::IsReplaying(slot)))

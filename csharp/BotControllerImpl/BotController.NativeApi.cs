@@ -182,6 +182,10 @@ namespace BotControllerApi
             [MarshalAs(UnmanagedType.LPStr)] string aliases);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int BotController_SetRoundBuyPlan(int slot, uint pawnHandle,
+            [MarshalAs(UnmanagedType.LPStr)] string aliases);
+
+        [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BotController_SetBuySkip(int slot);
 
         [DllImport("BotController", CallingConvention = CallingConvention.Cdecl)]
@@ -498,6 +502,9 @@ namespace BotControllerApi
         // Force a bot's per-round buy.
         public static bool SetBuyPlan(int slot, string aliases)
             => BotController_SetBuyPlan(slot, aliases ?? "") == 0;
+
+        public static bool SetRoundBuyPlan(int slot, uint pawnHandle, string aliases)
+            => BotController_SetRoundBuyPlan(slot, pawnHandle, aliases) == 0;
 
         // Force a bot to buy nothing each round.
         public static bool SetBuySkip(int slot)

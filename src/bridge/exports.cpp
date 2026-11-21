@@ -5,6 +5,7 @@
 #include "InputInjector.h"
 #include "PawnBinding.h"
 #include "BuyControllerState.h"
+#include "BuyController.h"
 #include "BotProfile.h"
 #include "VoiceSender.h"
 #include "plugin.h"
@@ -168,6 +169,12 @@ extern "C" BC_EXPORT int BotController_SetBuyPlan(int slot, const char* aliases)
     if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
     cs2bc::buy_controller_state::Set(slot, SplitAliases(aliases), false);
     return 0;
+}
+
+extern "C" BC_EXPORT int BotController_SetRoundBuyPlan(int slot, uint32_t pawn, const char* aliases)
+{
+    if (slot < 0 || slot >= cs2bc::buy_controller_state::kMaxSlots) return -2;
+    return cs2bc::buy_controller_hooks::ReserveOnce(slot, pawn, SplitAliases(aliases)) ? 0 : -1;
 }
 
 // Sets a skip-buy plan; 0 on success.
