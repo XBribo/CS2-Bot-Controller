@@ -470,7 +470,6 @@ void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const
         motion_recorder::StopRecord(slot);
         return;
     }
-    // Stash subticks until this PlayerRunCommand returns.
     SubtickMove moves[motion_recorder::kMaxSubtickPerTick];
     for (int i = 0; i < n; ++i)
     {
@@ -483,7 +482,6 @@ void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const
         moves[i].pitchDelta = s.pitch_delta();
         moves[i].yawDelta = s.yaw_delta();
     }
-    motion_recorder::OnCaptureSubticks(slot, moves, n);
 
     ReplayCommandFrameData command{};
     command.buttons = pc.buttonstates.m_pButtonStates[0];
@@ -532,7 +530,7 @@ void CaptureUserCommand(int slot, void* services, const PlayerCommand& pc, const
         command.leftHandDesired = pc.left_hand_desired() ? 1 : 0;
         command.fields |= motion_recorder::kCommandFieldLeftHand;
     }
-    motion_recorder::OnCaptureCommand(slot, command, std::move(history));
+    motion_recorder::OnCaptureCommand(slot, command, { moves, static_cast<size_t>(n) }, std::move(history));
 }
 
 // Applies replay input before simulation.

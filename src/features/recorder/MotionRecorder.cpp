@@ -154,7 +154,16 @@ bool Finite(std::initializer_list<float> values)
     });
 }
 
-// Validates replay snapshots.
+const SubtickMove* AssignSubticks(std::vector<SubtickMove>& dest, std::span<const SubtickMove> moves)
+{
+    for (const auto& s : moves)
+        if (!(s.when >= -1.0F && s.when < 1.0F) || !Finite({ s.analogForward, s.analogLeft, s.pitchDelta, s.yawDelta, s.pressed }) ||
+            (s.button != 0 && s.pressed != 0.0F && s.pressed != 1.0F))
+            return &s;
+    dest.assign(moves.begin(), moves.end());
+    return nullptr;
+}
+
 bool ValidSnapshot(const MovementSnapshot& s)
 {
     return Finite({ s.originX, s.originY, s.originZ, s.velX, s.velY, s.velZ, s.pitch, s.yaw, s.roll, s.duckAmount, s.duckSpeed,
@@ -575,22 +584,18 @@ bool OnRecordCommandPre(int slot, void* services)
     return true;
 }
 
-void OnCaptureSubticks(int slot, const SubtickMove* moves, int count)
+void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::span<const SubtickMove> moves, std::string history)
 {
     RecordState& r = g_rec[slot];
-    std::scoped_lock lk(r.mu);
+    std::unique_lock lk(r.mu);
     if (!r.recording.load(std::memory_order_acquire)) return;
-    r.pendingSubs.clear();
-    for (int i = 0; i < count; ++i)
-        r.pendingSubs.push_back(moves[i]);
-}
-
-// Holds input until command completion.
-void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history)
-{
-    RecordState& r = g_rec[slot];
-    std::scoped_lock lk(r.mu);
-    if (!r.recording.load(std::memory_order_acquire)) return;
+    if (const auto* bad = AssignSubticks(r.pendingSubs, moves))
+    {
+        lk.unlock();
+        BC_LOG_WARN("slot %d: invalid subtick #%td (when=%.9g); recording stopped", slot, bad - moves.data(), bad->when);
+        StopRecord(slot);
+        return;
+    }
     r.pendingCommand = command;
     r.pendingHistory = std::move(history);
     r.havePendingCommand = true;
@@ -804,18 +809,15 @@ bool LoadReplay(int slot,
         if (totalSubticks != subCountValue) return false;
         stagedOffsets[static_cast<size_t>(tickCount)] = static_cast<uint32_t>(totalSubticks);
 
-        for (int i = 0; i < subCount; ++i)
+        if (const auto* bad = AssignSubticks(stagedSubs, { subs, static_cast<size_t>(subCount) }))
         {
-            const SubtickMove& s = subs[i];
-            if (!Finite({ s.when, s.analogForward, s.analogLeft, s.pitchDelta, s.yawDelta }) || s.when < 0.0F || s.when >= 1.0F ||
-                (s.button != 0 && s.pressed != 0.0F && s.pressed != 1.0F))
-                return false;
+            BC_LOG_WARN("slot %d: replay: invalid subtick #%td (when=%.9g)", slot, bad - subs, bad->when);
+            return false;
         }
         for (int i = 0; i < commandCount; ++i)
             if (!ValidCommand(commands[i])) return false;
 
         if (tickCount > 0) stagedTicks.assign(ticks, ticks + tickCount);
-        if (subCount > 0) stagedSubs.assign(subs, subs + subCount);
         if (commandCount > 0) stagedCommands.assign(commands, commands + commandCount);
         if (inputHistorySize > 0) stagedHistory.resize(static_cast<size_t>(tickCount));
         size_t historyOffset = 0;

@@ -5,6 +5,7 @@
 #include "cs_usercmd.pb.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace cs2bc {
@@ -84,13 +85,13 @@ struct ReplayDropEvent
 
 struct SubtickMove
 {
-    float when; // [0,1) time within the tick
-    uint64_t button; // 0 = analog, else engine button bit
-    float pressed; // digital: 1=down 0=up (stored as float)
-    float analogForward; // analog_forward_delta
-    float analogLeft; // analog_left_delta
-    float pitchDelta; // pitch_delta
-    float yawDelta; // yaw_delta
+    float when; // [-1,1); keep negative offsets in this command.
+    uint64_t button; // 0 = analog
+    float pressed;
+    float analogForward;
+    float analogLeft;
+    float pitchDelta;
+    float yawDelta;
 };
 
 struct ReplayCommandFrameData
@@ -172,10 +173,7 @@ int RecordedInputHistorySize(int slot);
 bool OnRecordCommandPre(int slot, void* services);
 // Commits one completed command.
 void OnRecordCommandPost(int slot, void* services);
-// Stashes the current command's subtick moves.
-void OnCaptureSubticks(int slot, const SubtickMove* moves, int count);
-// Stores command input and optional history.
-void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::string history);
+void OnCaptureCommand(int slot, const ReplayCommandFrameData& command, std::span<const SubtickMove> moves, std::string history);
 // Tracks the recording's weapon services.
 void SetLiveWs(int slot, void* ws);
 // Tracks SelectItem's weapon definition.
